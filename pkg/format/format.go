@@ -1,4 +1,5 @@
-// Package format implements the dgdfmt layout engine.
+// Package format is the formatter: the engine behind `dgdtools format`,
+// the `unformatted` lint rule and an editor's formatting requests.
 //
 // The engine is a trivia-only rewriter: it emits every significant token's
 // bytes verbatim and synthesizes only the whitespace between them. Safety is
@@ -21,6 +22,11 @@
 // bytes give the same result in an editor buffer, in a partial checkout
 // and in the whole lib.
 //
+// There is one style and three settings (indentation with tabs or
+// spaces, its width, line endings); see docs/design/dgdfmt.md for why.
+// A comment `dgdfmt: off` turns the formatter off until `dgdfmt: on`, and
+// Lines formats only part of a file.
+//
 // Style: KNF as practiced in DGD-era LPC. Function definitions get their
 // specifiers and return type on one line, the name at column 0, and the
 // opening brace on its own line at column 0; control-flow braces are
@@ -37,12 +43,21 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/mmcdole/dgdtools/pkg/config"
 	"github.com/mmcdole/dgdtools/pkg/lexer"
 	"github.com/mmcdole/dgdtools/pkg/pp"
 	"github.com/mmcdole/dgdtools/pkg/tokcmp"
 	"github.com/mmcdole/dgdtools/pkg/token"
+)
+
+// IndentStyle selects what a level of indentation is written with.
+type IndentStyle int
+
+const (
+	Spaces IndentStyle = iota // IndentWidth spaces per level
+	Tabs                      // one tab per level
 )
 
 // LineEndings selects the newline policy.
@@ -54,27 +69,21 @@ const (
 	CRLF                        // normalize to \r\n
 )
 
-// HeaderStyle selects function-definition header layout.
-type HeaderStyle int
+// DefaultIndentWidth is the number of spaces per level when none is set.
+const DefaultIndentWidth = 4
 
-const (
-	// HeadersSplit is KNF: specifiers and return type on one line, the
-	// function name at column 0, the brace on its own line.
-	HeadersSplit HeaderStyle = iota
-	// HeadersJoined keeps the whole header on one line; the brace still
-	// gets its own line.
-	HeadersJoined
-)
+// maxBlankLines is the most consecutive blank lines the formatter keeps.
+const maxBlankLines = 2
 
-// Options carries the formatter's (deliberately few) toggles and what the
-// project says about its macros. The dialect is not an option here:
-// Format always relexes its output under the same dialect the input File
-// was lexed with.
+// Options are the formatter's settings and what the project says about
+// its macros. There are three settings, the ones an editor has to agree
+// with; everything else is the one style (docs/design/dgdfmt.md). The
+// dialect is not an option here: a result is always relexed under the
+// dialect the input File was lexed with.
 type Options struct {
-	Indent        int // spaces per level; 0 means the default 4
-	LineEndings   LineEndings
-	MaxBlankLines int // max consecutive blank lines; 0 means the default 2
-	FuncHeaders   HeaderStyle
+	IndentStyle IndentStyle
+	IndentWidth int // spaces per level with Spaces; 0 means DefaultIndentWidth
+	LineEndings LineEndings
 
 	// Defined are the names defined before the first line of every file
 	// (config.Predefined), and Macros the macro classes the project
@@ -84,67 +93,41 @@ type Options struct {
 	Macros  map[string]pp.Class
 }
 
-// OptionsFromConfig returns the options a project's configuration asks
-// for: its format settings and its macro conventions.
-func OptionsFromConfig(c *config.Config) (Options, error) {
+// OptionsFor returns the options for a file of the project configured by
+// c whose format settings are s (config.Settings.Format, or c.Format for
+// the project's own).
+func OptionsFor(c *config.Config, s config.Format) Options {
 	o := Options{
-		Indent:        c.Format.Indent,
-		MaxBlankLines: c.Format.MaxBlankLines,
-		Defined:       c.Predefined(),
-		Macros:        c.MacroClasses(),
+		IndentWidth: s.IndentWidth,
+		Defined:     c.Predefined(),
+		Macros:      c.MacroClasses(),
 	}
-	var err error
-	if o.LineEndings, err = ParseLineEndings(c.Format.LineEndings); err != nil {
-		return o, fmt.Errorf("format.line_endings: %w", err)
+	if s.IndentStyle == config.IndentTab {
+		o.IndentStyle = Tabs
 	}
-	if o.FuncHeaders, err = ParseHeaderStyle(c.Format.FunctionHeaders); err != nil {
-		return o, fmt.Errorf("format.function_headers: %w", err)
+	switch s.LineEndings {
+	case config.LineEndingsLF:
+		o.LineEndings = LF
+	case config.LineEndingsCRLF:
+		o.LineEndings = CRLF
 	}
-	return o, nil
+	return o
 }
 
-// ParseLineEndings maps a configuration spelling to a LineEndings; the
-// empty string is the default, Preserve.
-func ParseLineEndings(s string) (LineEndings, error) {
-	switch s {
-	case "", "preserve":
-		return Preserve, nil
-	case "lf":
-		return LF, nil
-	case "crlf":
-		return CRLF, nil
+// unit returns one level of indentation.
+func (o Options) unit() string {
+	if o.IndentStyle == Tabs {
+		return "\t"
 	}
-	return Preserve, fmt.Errorf("unknown line endings %q (want preserve, lf or crlf)", s)
+	n := o.IndentWidth
+	if n <= 0 {
+		n = DefaultIndentWidth
+	}
+	return strings.Repeat(" ", n)
 }
 
-// ParseHeaderStyle maps a configuration spelling to a HeaderStyle; the
-// empty string is the default, HeadersSplit.
-func ParseHeaderStyle(s string) (HeaderStyle, error) {
-	switch s {
-	case "", "split":
-		return HeadersSplit, nil
-	case "joined":
-		return HeadersJoined, nil
-	}
-	return HeadersSplit, fmt.Errorf("unknown function header style %q (want split or joined)", s)
-}
-
-func (o Options) indent() int {
-	if o.Indent <= 0 {
-		return 4
-	}
-	return o.Indent
-}
-
-func (o Options) maxBlank() int {
-	if o.MaxBlankLines <= 0 {
-		return 2
-	}
-	return o.MaxBlankLines
-}
-
-// ErrIllegal is returned for files that did not fully tokenize; dgdfmt
-// refuses to format anything it could not prove lossless.
+// ErrIllegal is returned for files that did not fully tokenize; nothing
+// is formatted that could not be proven lossless.
 var ErrIllegal = errors.New("file contains unlexable content; refusing to format")
 
 // ErrGateFailure means the engine produced output whose significant token
@@ -158,9 +141,32 @@ var ErrNotIdempotent = errors.New("formatter is not idempotent on this input")
 // instead of taking down a run over many files or an editor session.
 var ErrInternal = errors.New("internal error (please report)")
 
+// LineRange is a range of source lines, 1-based and inclusive.
+type LineRange struct{ First, Last int }
+
 // Format returns the formatted source, or an error if the gate trips.
 // The input File is not modified.
-func Format(f *token.File, o Options) (out []byte, err error) {
+func Format(f *token.File, o Options) ([]byte, error) {
+	return gated(f, o, nil)
+}
+
+// Lines formats only the given lines of the file and returns the whole
+// text, every other line byte for byte as it was.
+//
+// What is formatted is the whitespace that belongs to a selected line:
+// its indentation, the line break before it and the spacing inside it,
+// and the comments and blank lines directly above it when they are
+// selected too. A selected line is indented from the lines around it: an
+// unselected line that begins a statement says how deep its nesting
+// level is indented in this file, and a selected line follows that. In a
+// file that is already formatted the result is what Format gives.
+func Lines(f *token.File, o Options, lines []LineRange) ([]byte, error) {
+	return gated(f, o, selectLines(f, lines))
+}
+
+// gated runs the engine and returns its output only when it is provably
+// a formatting of f: the same significant tokens, and a fixed point.
+func gated(f *token.File, o Options, sel *selection) (out []byte, err error) {
 	if f.HasIllegal() {
 		return nil, fmt.Errorf("%s: %w", f.Path, ErrIllegal)
 	}
@@ -170,7 +176,7 @@ func Format(f *token.File, o Options) (out []byte, err error) {
 		}
 	}()
 
-	out = engine(f, o)
+	out = engine(f, o, sel)
 
 	relexed := lexer.Lex(f.Path, out, f.Dialect)
 	if err := relexed.CheckRoundTrip(); err != nil {
@@ -179,19 +185,24 @@ func Format(f *token.File, o Options) (out []byte, err error) {
 	if eq, div := tokcmp.Compare(f, relexed); !eq {
 		return nil, fmt.Errorf("%s: %w: input %s vs output %s", f.Path, ErrGateFailure, div.APos, div.BPos)
 	}
-	if again := engine(relexed, o); !bytes.Equal(again, out) {
+	// A selection is by gap, and the gaps of the output are those of the
+	// input: the same selection applies to it.
+	if again := engine(relexed, o, sel); !bytes.Equal(again, out) {
 		return nil, fmt.Errorf("%s: %w", f.Path, ErrNotIdempotent)
 	}
 	return out, nil
 }
 
-// engine performs the actual layout. It must be deterministic.
-func engine(f *token.File, o Options) []byte {
+// engine performs the actual layout. It must be deterministic. A nil
+// selection formats everything.
+func engine(f *token.File, o Options, sel *selection) []byte {
 	p := &printer{
 		f:    f,
 		o:    o,
+		unit: o.unit(),
 		nl:   dominantNewline(f),
 		plan: buildPlan(f, o),
+		sel:  sel,
 		prev: -1,
 	}
 	p.run()

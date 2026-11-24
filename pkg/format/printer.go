@@ -39,11 +39,24 @@ type printer struct {
 	f    *token.File
 	o    Options
 	buf  bytes.Buffer
+	unit string // one level of indentation
 	nl   []byte
 	plan *plan
 
 	state
 	conds []branching
+
+	// sel says which gaps are formatted; nil is all of them. ord is the
+	// gap being written: the number of significant tokens before it.
+	sel *selection
+	ord int
+	// off is set between a `dgdfmt: off` comment and the next
+	// `dgdfmt: on`.
+	off bool
+	// taught is, per nesting level, the indentation an unselected line
+	// that begins a statement at that level has (nil: none seen). A
+	// selected line is indented from it; see indent.
+	taught [][]byte
 
 	prev       int        // index of the last significant token (-1 = none)
 	prevKind   token.Kind // its kind
@@ -59,13 +72,180 @@ func (p *printer) run() {
 		case t.Kind.IsTrivia():
 			gap = append(gap, t)
 		case t.Kind == token.EOF:
-			p.finish(gap)
+			p.gap(gap, i)
 			return
 		default:
-			p.renderGap(gap, i)
+			p.gap(gap, i)
 			gap = gap[:0]
 			p.emit(i)
+			p.ord++
 		}
+	}
+}
+
+// gap writes the trivia between the previous significant token and the
+// one at index next (the EOF token after the last). A gap that is not
+// selected, and the part of any gap that lies in a `dgdfmt: off` region,
+// is copied as it is; the rest is laid out.
+func (p *printer) gap(gap []token.Token, next int) {
+	if !p.sel.has(p.ord) {
+		for _, g := range gap {
+			p.toggle(g)
+		}
+		p.copyGap(gap, next)
+		return
+	}
+	// The off region begins after its marker and ends after the marker
+	// that closes it: each comment is laid out, or kept, with the side
+	// it stands on.
+	start, resumed := 0, false
+	for k, g := range gap {
+		switch was := p.off; {
+		case p.toggle(g) == was:
+		case was: // dgdfmt: on
+			p.raw(gap[start : k+1])
+			start, resumed = k+1, true
+		default: // dgdfmt: off
+			p.layout(gap[start:k+1], next, resumed, false)
+			start = k + 1
+		}
+	}
+	if p.off {
+		p.raw(gap[start:])
+		return
+	}
+	p.layout(gap[start:], next, resumed, true)
+}
+
+// toggle turns the formatter off or on if g is a skip marker, and
+// reports the state after it.
+func (p *printer) toggle(g token.Token) bool {
+	switch skipMarker(p.f, g) {
+	case markerOff:
+		p.off = true
+	case markerOn:
+		p.off = false
+	}
+	return p.off
+}
+
+type marker uint8
+
+const (
+	markerNone marker = iota
+	markerOff
+	markerOn
+)
+
+// skipMarker recognizes a comment whose whole text is `dgdfmt: off` or
+// `dgdfmt: on`.
+func skipMarker(f *token.File, t token.Token) marker {
+	text := f.Text(t)
+	switch t.Kind {
+	case token.LineComment:
+		text = bytes.TrimPrefix(text, []byte("//"))
+	case token.BlockComment:
+		text = bytes.TrimSuffix(bytes.TrimPrefix(text, []byte("/*")), []byte("*/"))
+	default:
+		return markerNone
+	}
+	arg, ok := bytes.CutPrefix(bytes.TrimSpace(text), []byte("dgdfmt:"))
+	if !ok {
+		return markerNone
+	}
+	switch string(bytes.TrimSpace(arg)) {
+	case "off":
+		return markerOff
+	case "on":
+		return markerOn
+	}
+	return markerNone
+}
+
+// raw copies trivia as it is.
+func (p *printer) raw(gap []token.Token) {
+	for _, g := range gap {
+		p.buf.Write(p.f.Text(g))
+	}
+}
+
+// copyGap writes a gap that is not selected: as it is, except that the
+// blanks at the end of a selected line go. The line that follows the gap
+// keeps its indentation, and says what the indentation of its level is.
+func (p *printer) copyGap(gap []token.Token, next int) {
+	trim := p.sel.trims(p.ord)
+	lineStart := -1 // index in gap of what follows its last newline
+	for k, g := range gap {
+		if g.Kind == token.Newline {
+			lineStart, trim = k+1, false
+		}
+		if trim && g.Kind == token.Space && k+1 < len(gap) && gap[k+1].Kind == token.Newline {
+			continue
+		}
+		p.buf.Write(p.f.Text(g))
+	}
+	if lineStart < 0 || p.f.Tokens[next].Kind == token.EOF {
+		return
+	}
+	var lead []byte
+	for _, g := range gap[lineStart:] {
+		if g.Kind != token.Space {
+			return // a comment before the token: not the line's indentation
+		}
+		lead = append(lead, p.f.Text(g)...)
+	}
+	p.teach(next, lead)
+}
+
+// teach records that the line beginning with the token at index i is
+// indented by lead, when that says something about its level: the token
+// begins a statement the parser understood.
+func (p *printer) teach(i int, lead []byte) {
+	p.forget(i)
+	x := p.plan.info[i]
+	switch {
+	case x.flags&(known|head) != known|head, x.flags&(caseLabel|block) != 0:
+		return // not a statement's first line
+	case p.f.Tokens[i].Kind == token.KwElse, x.level == 0:
+		return // part of the statement above; and the top level is the margin
+	}
+	for len(p.taught) <= int(x.level) {
+		p.taught = append(p.taught, nil)
+	}
+	p.taught[x.level] = append([]byte{}, lead...)
+}
+
+// forget drops what deeper levels taught when a line begins with the
+// token at index i and that token begins a statement: their blocks have
+// ended. Case labels stand at their switch's level in the middle of its
+// block, and end nothing.
+func (p *printer) forget(i int) {
+	x := p.plan.info[i]
+	if x.flags&head == 0 || x.flags&caseLabel != 0 {
+		return
+	}
+	if n := int(x.level) + 1; len(p.taught) > n {
+		p.taught = p.taught[:n]
+	}
+}
+
+// indent writes the indentation of a line at the given level whose first
+// token is the one at index i. When only part of the file is formatted
+// that is the indentation the nearest level around it has in this file,
+// plus the configured unit for each level beyond that.
+func (p *printer) indent(i, level int) {
+	if p.sel != nil {
+		p.forget(i)
+		for base := min(level, len(p.taught)-1); base > 0; base-- {
+			if p.taught[base] != nil {
+				p.buf.Write(p.taught[base])
+				level -= base
+				break
+			}
+		}
+	}
+	for ; level > 0; level-- {
+		p.buf.WriteString(p.unit)
 	}
 }
 
@@ -89,11 +269,18 @@ func gapNewlines(gap []token.Token) int {
 	return n
 }
 
-// renderGap writes the trivia between the previous significant token and
-// the token at index next, applying header plans, cuddling, blank-line
-// capping, spacing normalization, and comment preservation.
-func (p *printer) renderGap(gap []token.Token, next int) {
-	hasComments := gapComments(gap)
+// layout writes the trivia of a gap, or of the part of one that a skip
+// marker leaves to the formatter, in the one style: header plans,
+// cuddling, blank-line capping, spacing normalization, comments kept.
+// resumed says the part follows a comment already written (the marker
+// that turned the formatter back on); tail says it reaches the token at
+// index next, so that the token's indentation or separator is written.
+func (p *printer) layout(gap []token.Token, next int, resumed, tail bool) {
+	if p.f.Tokens[next].Kind == token.EOF && tail {
+		p.finish(gap)
+		return
+	}
+	hasComments := resumed || gapComments(gap)
 
 	// Planned KNF header layout (headers with comments get no plan).
 	if !hasComments && p.prev >= 0 {
@@ -103,7 +290,7 @@ func (p *printer) renderGap(gap []token.Token, next int) {
 		}
 		if p.plan.has(next, breakBefore) || p.plan.has(p.prev, breakAfter) {
 			p.writeNewline(nil)
-			p.pad(p.indentOf(next))
+			p.indent(next, p.indentOf(next))
 			return
 		}
 	}
@@ -118,15 +305,15 @@ func (p *printer) renderGap(gap []token.Token, next int) {
 	pending := 0                // newlines seen but not yet written
 	var pendingNl []token.Token // their tokens, for byte preservation
 	var lastSpace []byte        // space run immediately before a comment
-	wroteComment := false
+	wroteComment := resumed
 
 	flushNewlines := func() {
 		if pending == 0 {
 			return
 		}
-		maxN := p.o.maxBlank() + 1
+		maxN := maxBlankLines + 1
 		if p.buf.Len() == 0 {
-			maxN = p.o.maxBlank() // leading region: no line to end
+			maxN = maxBlankLines // leading region: no line to end
 		}
 		n := min(pending, maxN)
 		for i := 0; i < n; i++ {
@@ -151,7 +338,7 @@ func (p *printer) renderGap(gap []token.Token, next int) {
 		case token.LineComment, token.BlockComment:
 			if pending > 0 {
 				flushNewlines()
-				p.pad(p.commentIndent(next))
+				p.indent(next, p.commentIndent(next))
 			} else if p.buf.Len() > 0 {
 				// Trailing comment: preserve the author's alignment run.
 				if len(lastSpace) > 0 {
@@ -167,9 +354,11 @@ func (p *printer) renderGap(gap []token.Token, next int) {
 	}
 
 	switch {
+	case !tail:
+		// What follows the marker is kept as it is.
 	case pending > 0:
 		flushNewlines()
-		p.pad(p.indentOf(next))
+		p.indent(next, p.indentOf(next))
 	case p.buf.Len() == 0:
 		// Start of file: next begins at column 0.
 	case wroteComment:
@@ -275,12 +464,6 @@ func (p *printer) writeNewline(orig []byte) {
 		} else {
 			p.buf.Write(orig)
 		}
-	}
-}
-
-func (p *printer) pad(level int) {
-	for n := level * p.o.indent(); n > 0; n-- {
-		p.buf.WriteByte(' ')
 	}
 }
 
@@ -708,8 +891,8 @@ func (p *printer) mergeRisk(next token.Token) bool {
 }
 
 // emitComment writes a comment; multi-line block comments are shifted
-// whole: every interior line moves by the same column delta as the "/*"
-// line, preserving internal alignment.
+// whole: every interior line moves as the "/*" line does, preserving
+// internal alignment.
 func (p *printer) emitComment(t token.Token) {
 	text := p.f.Text(t)
 	if t.Kind == token.BlockComment && bytes.ContainsAny(text, "\r\n") {
@@ -720,14 +903,22 @@ func (p *printer) emitComment(t token.Token) {
 }
 
 func (p *printer) emitShiftedComment(t token.Token, text []byte) {
-	oldCol := int(t.Off - p.f.Lines[p.f.Pos(t.Off).Line-1])
-	newCol := lineLen(p.buf.Bytes())
-	delta := newCol - oldCol
+	// What stood before the comment on its line, and what stands there
+	// now.
+	was := p.f.Src[p.f.Lines[p.f.Pos(t.Off).Line-1]:t.Off]
+	now := bytes.Clone(p.buf.Bytes()[p.buf.Len()-lineLen(p.buf.Bytes()):])
+	own := isBlank(was) && isBlank(now) // the comment begins its line
+	delta := len(now) - len(was)
 
 	lines := splitKeepEndings(text)
 	p.buf.Write(lines[0])
 	for _, line := range lines[1:] {
 		switch {
+		case own && bytes.HasPrefix(line, was):
+			// Indented like its first line, and then some: the first
+			// line's indentation is replaced by the new one.
+			p.buf.Write(now)
+			p.buf.Write(line[len(was):])
 		case delta > 0:
 			for i := 0; i < delta; i++ {
 				p.buf.WriteByte(' ')
@@ -739,6 +930,15 @@ func (p *printer) emitShiftedComment(t token.Token, text []byte) {
 			p.buf.Write(line)
 		}
 	}
+}
+
+func isBlank(b []byte) bool {
+	for _, c := range b {
+		if c != ' ' && c != '\t' {
+			return false
+		}
+	}
+	return true
 }
 
 // lineLen returns the length in bytes of the last (current) line of buf.

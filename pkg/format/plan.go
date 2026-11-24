@@ -336,7 +336,7 @@ func (b *builder) header(d *syntax.FuncDecl) {
 		lead = true
 	}
 	if lead {
-		if body != nil && b.o.FuncHeaders == HeadersSplit {
+		if body != nil {
 			b.mark(d.NameTok, breakBefore) // name at column 0
 		} else {
 			b.mark(d.NameTok, join)

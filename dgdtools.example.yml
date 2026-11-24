@@ -59,10 +59,9 @@ exclude:                     # pruned from directory walks; a file named on
   - "**/var/**"              # generated runtime data (maps, save state)
 
 format:
-  indent: 4
+  indent_style: space        # space | tab
+  indent_width: 4            # spaces per level
   line_endings: preserve     # preserve | lf | crlf
-  max_blank_lines: 2
-  function_headers: split    # split (KNF: name at column 0) | joined
 
 lint:
   # Only needed without a profile or driver_config, or to override them:

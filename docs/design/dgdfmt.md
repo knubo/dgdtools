@@ -107,8 +107,8 @@ Two former options are now the house style:
   vertical decision the author made, not a header style. No strong
   reason for the alternative survived: it was a preference, and a
   preference is what an opinionated formatter exists to end.
-- **Blank lines: at most two in a row, none at the start of a file,
-  exactly one newline at the end.** gofmt, Prettier and clang-format
+- **Blank lines: at most two in a row, none at the end of a file,
+  which ends with exactly one newline.** gofmt, Prettier and clang-format
   keep one; black keeps two between top-level definitions. Two is kept
   because the corpus separates functions and sections of declarations
   with two, deliberately, and one would rewrite that in most files for

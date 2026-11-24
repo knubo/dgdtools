@@ -167,7 +167,6 @@ func TestLegacyConfigStillLoads(t *testing.T) {
 	m := vfs.Mem{"/mud/dgdtools.yml": `dialect: {slash_slash: true, closures: false}
 root: lib
 exclude: ["attic/**"]
-format: {indent: 4}
 lint:
   include_dirs: ["/dgd/include", "/std/include"]
   include_file: "/dgd/include/Std.h"

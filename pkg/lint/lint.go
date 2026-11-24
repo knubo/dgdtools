@@ -272,10 +272,7 @@ func New(prj *config.Project, fsys vfs.FS) (*Linter, error) {
 		l.byKey["all"] = append(l.byKey["all"], r)
 	}
 	cfg := prj.Config
-	var err error
-	if l.format, err = format.OptionsFromConfig(cfg); err != nil {
-		return nil, err
-	}
+	l.format = format.OptionsFor(cfg, cfg.Format)
 	check := func(where string, names ...string) error {
 		for _, n := range names {
 			if n = strings.TrimSpace(n); n != "" && l.lookup(n) == nil {

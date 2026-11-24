@@ -81,17 +81,6 @@ func TestOneLinersPreserved(t *testing.T) {
 	assert.Equal(t, want, fmtSrc(t, in, Options{}))
 }
 
-func TestJoinedHeaders(t *testing.T) {
-	o := Options{FuncHeaders: HeadersJoined}
-	in := "static void\ncreate() {\n::create();\n}\n"
-	want := "static void create()\n{\n    ::create();\n}\n"
-	assert.Equal(t, want, fmtSrc(t, in, o))
-	// Fixed point, and one-liners still survive.
-	assert.Equal(t, want, fmtSrc(t, want, o))
-	one := "string query_key_code() { return key_code; }\n"
-	assert.Equal(t, one, fmtSrc(t, one, o))
-}
-
 func TestControlFlowCuddling(t *testing.T) {
 	in := "void\nf()\n{\n    if (x)\n    {\n        y = 1;\n    }\n    else\n    {\n        y = 2;\n    }\n}\n"
 	want := "void\nf()\n{\n    if (x) {\n        y = 1;\n    } else {\n        y = 2;\n    }\n}\n"
@@ -193,8 +182,8 @@ func TestBlankLineCap(t *testing.T) {
 	in := "int x;\n\n\n\n\nint y;\n"
 	want := "int x;\n\n\nint y;\n" // capped at 2 blank lines
 	assert.Equal(t, want, fmtSrc(t, in, Options{}))
-	want = "int x;\n\nint y;\n"
-	assert.Equal(t, want, fmtSrc(t, in, Options{MaxBlankLines: 1}))
+	// The same at the start of a file; none at its end.
+	assert.Equal(t, "\n\nint x;\n", fmtSrc(t, "\n\n\nint x;\n\n\n", Options{}))
 }
 
 func TestBlockCommentShift(t *testing.T) {
@@ -211,9 +200,28 @@ func TestLineEndingPolicies(t *testing.T) {
 		fmtSrc(t, "int x;\nint y;\n", Options{LineEndings: CRLF}))
 }
 
-func TestIndentWidthToggle(t *testing.T) {
-	in := "void\nf()\n{\nx = 1;\n}\n"
-	assert.Equal(t, "void\nf()\n{\n  x = 1;\n}\n", fmtSrc(t, in, Options{Indent: 2}))
+func TestIndentStyles(t *testing.T) {
+	in := "void\nf()\n{\nif (x)\ny = a +\nb;\n}\n"
+	assert.Equal(t, "void\nf()\n{\n  if (x)\n    y = a +\n      b;\n}\n", fmtSrc(t, in, Options{IndentWidth: 2}))
+	tabs := Options{IndentStyle: Tabs, IndentWidth: 8}
+	want := "void\nf()\n{\n\tif (x)\n\t\ty = a +\n\t\t\tb;\n}\n"
+	assert.Equal(t, want, fmtSrc(t, in, tabs))
+	assert.Equal(t, want, fmtSrc(t, want, tabs))
+	// Either style reads the other.
+	assert.Equal(t, "void\nf()\n{\n    if (x)\n        y = a +\n            b;\n}\n", fmtSrc(t, want, Options{}))
+}
+
+func TestBlockCommentIndentation(t *testing.T) {
+	// The lines of a comment move with its first line, in the
+	// indentation that line gets: tabs become spaces and spaces tabs.
+	tabbed := "void\nf()\n{\n\tif (x) {\n\t\t/*\n\t\t * one\n\t\t *   two\n\t\t */\n\t\tx = 1;\n\t}\n}\n"
+	spaced := "void\nf()\n{\n    if (x) {\n        /*\n         * one\n         *   two\n         */\n        x = 1;\n    }\n}\n"
+	assert.Equal(t, spaced, fmtSrc(t, tabbed, Options{}))
+	assert.Equal(t, tabbed, fmtSrc(t, spaced, Options{IndentStyle: Tabs}))
+	assert.Equal(t, tabbed, fmtSrc(t, tabbed, Options{IndentStyle: Tabs}))
+	// A line that is not indented like the first keeps its distance.
+	in := "void\nf()\n{\n/* one\ntwo */\nx = 1;\n}\n"
+	assert.Equal(t, "void\nf()\n{\n    /* one\n    two */\n    x = 1;\n}\n", fmtSrc(t, in, Options{}))
 }
 
 func TestRefusesIllegal(t *testing.T) {
@@ -373,27 +381,21 @@ func TestErrorRegions(t *testing.T) {
 	assert.Equal(t, body("    x = NEW(int *, 3) + 1;\n"), fmtSrc(t, in, Options{}))
 }
 
-func TestOptionsFromConfig(t *testing.T) {
+func TestOptionsFor(t *testing.T) {
 	c := &config.Config{}
-	c.Format.Indent = 8
-	c.Format.LineEndings = "lf"
-	c.Format.FunctionHeaders = "joined"
 	c.Lint.SpecifierMacros = []string{"visible"}
 	c.Lint.Defines = []string{"DEBUG"}
 	c.Lint.Macros = map[string]string{"STATUS": "type"}
-	o, err := OptionsFromConfig(c)
-	require.NoError(t, err)
-	assert.Equal(t, 8, o.Indent)
+	o := OptionsFor(c, config.Format{IndentStyle: config.IndentTab, IndentWidth: 8, LineEndings: config.LineEndingsLF})
+	assert.Equal(t, Tabs, o.IndentStyle)
+	assert.Equal(t, 8, o.IndentWidth)
 	assert.Equal(t, LF, o.LineEndings)
-	assert.Equal(t, HeadersJoined, o.FuncHeaders)
 	assert.True(t, o.Defined["DEBUG"])
 	assert.True(t, o.Defined["__DGD__"])
 	assert.Equal(t, map[string]pp.Class{"visible": pp.ClassEmpty, "STATUS": pp.ClassType}, o.Macros)
 
-	c.Format.LineEndings = "dos"
-	_, err = OptionsFromConfig(c)
-	assert.ErrorContains(t, err, "format.line_endings")
-	c.Format.LineEndings, c.Format.FunctionHeaders = "", "knf"
-	_, err = OptionsFromConfig(c)
-	assert.ErrorContains(t, err, "format.function_headers")
+	// Unset settings are the defaults.
+	o = OptionsFor(c, config.Format{})
+	assert.Equal(t, Options{Defined: o.Defined, Macros: o.Macros}, o)
+	assert.Equal(t, "    ", o.unit())
 }

@@ -47,6 +47,7 @@ const (
 	messy     = "void f() {\nif (x)\ny();\n}\n"
 	formatted = "void\nf()\n{\n    if (x)\n        y();\n}\n"
 	indent2   = "void\nf()\n{\n  if (x)\n    y();\n}\n"
+	tabbed    = "void\nf()\n{\n\tif (x)\n\t\ty();\n}\n"
 )
 
 func TestModes(t *testing.T) {
@@ -95,7 +96,7 @@ func TestModes(t *testing.T) {
 }
 
 func TestStdin(t *testing.T) {
-	dir := tree(t, map[string]string{"dgdtools.yml": "format: {indent: 2}\n"})
+	dir := tree(t, map[string]string{"dgdtools.yml": "format: {indent_width: 2}\n"})
 	// Standard input is formatted with the working directory's project.
 	t.Chdir(dir)
 	code, out, _ := dgdfmt(t, messy)
@@ -109,14 +110,14 @@ func TestStdin(t *testing.T) {
 
 func TestEachFileHasItsProject(t *testing.T) {
 	dir := tree(t, map[string]string{
-		"two/dgdtools.yml":           "root: lib\nformat: {indent: 2}\nexclude: [\"d/old/**\"]\n",
+		"two/dgdtools.yml":           "root: lib\nformat: {indent_width: 2}\nexclude: [\"d/old/**\"]\n",
 		"two/lib/d/a.c":              messy,
 		"two/lib/d/old/gone.c":       messy,
 		"two/lib/d/sub/deep.c":       messy,
-		"four/dgdtools.yml":          "format: {function_headers: joined}\n",
+		"four/dgdtools.yml":          "format: {indent_style: tab}\n",
 		"four/b.c":                   messy,
 		"none/c.c":                   messy,
-		"two/lib/d/sub/dgdtools.yml": "format: {indent: 8}\n",
+		"two/lib/d/sub/dgdtools.yml": "format: {indent_width: 8}\n",
 	})
 	// From an unrelated working directory: the project is found from the
 	// file, not from where dgdfmt runs.
@@ -124,7 +125,7 @@ func TestEachFileHasItsProject(t *testing.T) {
 	two, four := filepath.Join(dir, "two/lib/d/a.c"), filepath.Join(dir, "four/b.c")
 	code, out, errs := dgdfmt(t, "", two, four, "c.c")
 	assert.Equal(t, 0, code, errs)
-	assert.Equal(t, indent2+"void f()\n{\n    if (x)\n        y();\n}\n"+formatted, out)
+	assert.Equal(t, indent2+tabbed+formatted, out)
 
 	// A directory: the excludes of its project are matched from the lib
 	// root wherever the walk starts, and a file with a nearer config is
@@ -141,14 +142,10 @@ func TestEachFileHasItsProject(t *testing.T) {
 	assert.Equal(t, 0, code)
 	assert.Equal(t, indent2, out)
 
-	// Flags win over every config; --config replaces discovery.
-	code, out, _ = dgdfmt(t, "", "-indent", "1", two, four)
-	assert.Equal(t, 0, code)
-	assert.Contains(t, out, "\n if (x)\n  y();\n")
-	assert.NotContains(t, out, "\n  if (x)")
+	// --config replaces discovery.
 	code, out, _ = dgdfmt(t, "", "-config", filepath.Join(dir, "four/dgdtools.yml"), two)
 	assert.Equal(t, 0, code)
-	assert.Equal(t, "void f()\n{\n    if (x)\n        y();\n}\n", out)
+	assert.Equal(t, tabbed, out)
 	code, out, _ = dgdfmt(t, "", "-no-config", two)
 	assert.Equal(t, 0, code)
 	assert.Equal(t, formatted, out)
@@ -199,7 +196,7 @@ func TestErrors(t *testing.T) {
 		"bad.c":             "int x = \"unterminated;\n",
 		"cfg/dgdtools.yml":  "format: {line_endings: dos}\n",
 		"cfg/a.c":           messy,
-		"typo/dgdtools.yml": "fromat: {indent: 2}\n",
+		"typo/dgdtools.yml": "fromat: {indent_width: 2}\n",
 		"typo/a.c":          messy,
 	})
 	// A file that cannot be formatted is reported and left alone; the
@@ -215,15 +212,12 @@ func TestErrors(t *testing.T) {
 	// Configuration that does not make sense is an error, not a default.
 	code, _, errs = dgdfmt(t, "", filepath.Join(dir, "cfg/a.c"))
 	assert.Equal(t, 2, code)
-	assert.Contains(t, errs, "format.line_endings")
+	assert.Contains(t, errs, "unknown line endings \"dos\"")
 	code, _, errs = dgdfmt(t, "", filepath.Join(dir, "typo/a.c"))
 	assert.Equal(t, 2, code)
 	assert.Contains(t, errs, "fromat")
 
 	// So are flags.
-	code, _, errs = dgdfmt(t, messy, "-func-headers", "sideways")
-	assert.Equal(t, 2, code)
-	assert.Contains(t, errs, "-func-headers")
 	code, _, _ = dgdfmt(t, "", "-nonsense")
 	assert.Equal(t, 2, code)
 

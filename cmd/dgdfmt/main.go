@@ -61,13 +61,11 @@ flags:
 `
 
 type options struct {
-	list, diff, write        bool
-	configPath               string
-	noConfig                 bool
-	indent, maxBlank         int
-	lineEndings, funcHeaders string
-	noSlashSlash, closures   bool
-	showVersion              bool
+	list, diff, write      bool
+	configPath             string
+	noConfig               bool
+	noSlashSlash, closures bool
+	showVersion            bool
 }
 
 func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) int {
@@ -79,10 +77,6 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	fs.BoolVar(&o.write, "w", false, "write the result to the source file")
 	fs.StringVar(&o.configPath, "config", "", "use this `file` for every path instead of searching for dgdtools.yml")
 	fs.BoolVar(&o.noConfig, "no-config", false, "do not look for a config file")
-	fs.IntVar(&o.indent, "indent", 0, "spaces per indentation level (default 4)")
-	fs.StringVar(&o.lineEndings, "line-endings", "", "newline `policy`: preserve, lf or crlf (default preserve)")
-	fs.IntVar(&o.maxBlank, "max-blank-lines", 0, "most consecutive blank lines kept (default 2)")
-	fs.StringVar(&o.funcHeaders, "func-headers", "", "function header `layout`: split (KNF, name at column 0) or joined (default split)")
 	fs.BoolVar(&o.noSlashSlash, "no-slash-slash", false, "no // comments (a driver built without SLASHSLASH)")
 	fs.BoolVar(&o.closures, "closures", false, "'function' is a keyword (a driver built with CLOSURES)")
 	fs.BoolVar(&o.showVersion, "version", false, "print version")
@@ -107,10 +101,6 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		byDir: map[string]*settings{}, byConfig: map[string]*settings{},
 	}
 	fs.Visit(func(f *flag.Flag) { c.given[f.Name] = true })
-	// What the flags say must make sense whether or not a file needs it.
-	if _, err := c.override(format.Options{}); err != nil {
-		return c.fail(err)
-	}
 	// The library takes absolute paths and is told where profiles may be
 	// installed; the working directory and the environment are read here.
 	wd, err := os.Getwd()
@@ -249,13 +239,7 @@ func (c *command) settingsFor(dir string) (*settings, error) {
 		if err != nil {
 			return nil, err
 		}
-		opts, err := format.OptionsFromConfig(prj.Config)
-		if err != nil {
-			return nil, fmt.Errorf("%s: %w", prj.ConfigPath, err)
-		}
-		if opts, err = c.override(opts); err != nil {
-			return nil, err
-		}
+		opts := format.OptionsFor(prj.Config, prj.Config.Format)
 		st = &settings{
 			project: prj, opts: opts,
 			dialect: prj.Config.TokenDialect(),
@@ -271,28 +255,6 @@ func (c *command) settingsFor(dir string) (*settings, error) {
 	}
 	c.byDir[dir] = st
 	return st, nil
-}
-
-// override applies the format flags that were passed.
-func (c *command) override(o format.Options) (format.Options, error) {
-	var err error
-	if c.given["indent"] {
-		o.Indent = c.o.indent
-	}
-	if c.given["max-blank-lines"] {
-		o.MaxBlankLines = c.o.maxBlank
-	}
-	if c.given["line-endings"] {
-		if o.LineEndings, err = format.ParseLineEndings(c.o.lineEndings); err != nil {
-			return o, fmt.Errorf("-line-endings: %w", err)
-		}
-	}
-	if c.given["func-headers"] {
-		if o.FuncHeaders, err = format.ParseHeaderStyle(c.o.funcHeaders); err != nil {
-			return o, fmt.Errorf("-func-headers: %w", err)
-		}
-	}
-	return o, nil
 }
 
 // add queues the file at path, which the user named name.
