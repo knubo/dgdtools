@@ -16,12 +16,12 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
-	"runtime"
 	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
 
+	"github.com/mmcdole/dgdtools/internal/par"
 	"github.com/mmcdole/dgdtools/pkg/config"
 	"github.com/mmcdole/dgdtools/pkg/diag"
 	"github.com/mmcdole/dgdtools/pkg/fileset"
@@ -459,35 +459,15 @@ func (l *Linter) Run(ctx context.Context, req Request) (*Result, error) {
 	var mu sync.Mutex
 	var all []diag.Diagnostic
 	var skipped []string
-	ch := make(chan string, 256)
-	var wg sync.WaitGroup
-	workers := runtime.NumCPU()
-	if len(files) < workers {
-		workers = len(files)
-	}
-	for range workers {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for f := range ch {
-				if ctx.Err() != nil {
-					continue
-				}
-				ds, ok := l.lintFile(ctx, f, &req, local, rs)
-				mu.Lock()
-				if !ok {
-					skipped = append(skipped, f)
-				}
-				all = append(all, ds...)
-				mu.Unlock()
-			}
-		}()
-	}
-	for _, f := range files {
-		ch <- f
-	}
-	close(ch)
-	wg.Wait()
+	par.Each(ctx, files, func(f string) {
+		ds, ok := l.lintFile(ctx, f, &req, local, rs)
+		mu.Lock()
+		if !ok {
+			skipped = append(skipped, f)
+		}
+		all = append(all, ds...)
+		mu.Unlock()
+	})
 
 	sort.Slice(all, func(i, j int) bool {
 		a, b := all[i], all[j]

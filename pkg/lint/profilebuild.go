@@ -6,11 +6,11 @@ import (
 	"io/fs"
 	"path"
 	"path/filepath"
-	"runtime"
 	"sort"
 	"strings"
 	"sync"
 
+	"github.com/mmcdole/dgdtools/internal/par"
 	"github.com/mmcdole/dgdtools/pkg/config"
 	"github.com/mmcdole/dgdtools/pkg/diag"
 	"github.com/mmcdole/dgdtools/pkg/fileset"
@@ -219,58 +219,42 @@ func (l *Linter) sharedByUse(ctx context.Context, minOwners int, checkouts []str
 	_ = ix.Walk(root, func(p string) { files = append(files, p) })
 	var mu sync.Mutex
 	owners := map[string]map[string]bool{}
-	ch := make(chan string, 256)
-	var wg sync.WaitGroup
-	for range runtime.NumCPU() {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for f := range ch {
-				if ctx.Err() != nil {
-					continue
-				}
-				parsed := ix.Parse(f)
-				if parsed == nil || parsed.Unit.LibPath == "" {
-					continue
-				}
-				u := parsed.Unit
-				refs := append([]string{}, u.Deps[1:]...)
-				for _, inh := range u.Inherits {
-					if inh.Resolved {
-						refs = append(refs, fileset.FSPath(root, inh.Path))
-					}
-				}
-				var out []*diag.Diagnostic
-				pass := &Pass{Ctx: ctx, File: parsed.Tok, Tree: parsed.Tree, View: parsed.View, Unit: u,
-					Index: ix, LibPath: u.LibPath, Config: l.Project.Config,
-					shared: &fileShared{stats: &runStats{}}, out: &out}
-				cf := pass.calls()
-				for _, c := range cf.strings {
-					if c.Target == targetPath {
-						refs = append(refs, fileset.FSPath(root, c.TargetPath))
-					}
-				}
-				for _, r := range cf.paths {
-					refs = append(refs, fileset.FSPath(root, r.Path))
-				}
-				me := owner(u.LibPath)
-				mu.Lock()
-				for _, r := range refs {
-					r = filepath.Clean(r)
-					if owners[r] == nil {
-						owners[r] = map[string]bool{}
-					}
-					owners[r][me] = true
-				}
-				mu.Unlock()
+	par.Each(ctx, files, func(f string) {
+		parsed := ix.Parse(f)
+		if parsed == nil || parsed.Unit.LibPath == "" {
+			return
+		}
+		u := parsed.Unit
+		refs := append([]string{}, u.Deps[1:]...)
+		for _, inh := range u.Inherits {
+			if inh.Resolved {
+				refs = append(refs, fileset.FSPath(root, inh.Path))
 			}
-		}()
-	}
-	for _, f := range files {
-		ch <- f
-	}
-	close(ch)
-	wg.Wait()
+		}
+		var out []*diag.Diagnostic
+		pass := &Pass{Ctx: ctx, File: parsed.Tok, Tree: parsed.Tree, View: parsed.View, Unit: u,
+			Index: ix, LibPath: u.LibPath, Config: l.Project.Config,
+			shared: &fileShared{stats: &runStats{}}, out: &out}
+		cf := pass.calls()
+		for _, c := range cf.strings {
+			if c.Target == targetPath {
+				refs = append(refs, fileset.FSPath(root, c.TargetPath))
+			}
+		}
+		for _, r := range cf.paths {
+			refs = append(refs, fileset.FSPath(root, r.Path))
+		}
+		me := owner(u.LibPath)
+		mu.Lock()
+		for _, r := range refs {
+			r = filepath.Clean(r)
+			if owners[r] == nil {
+				owners[r] = map[string]bool{}
+			}
+			owners[r][me] = true
+		}
+		mu.Unlock()
+	})
 	var out []string
 	for f, o := range owners {
 		if len(o) >= minOwners {

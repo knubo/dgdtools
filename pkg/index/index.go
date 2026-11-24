@@ -30,11 +30,11 @@ import (
 	"io/fs"
 	"path"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
 
+	"github.com/mmcdole/dgdtools/internal/par"
 	"github.com/mmcdole/dgdtools/pkg/config"
 	"github.com/mmcdole/dgdtools/pkg/fileset"
 	"github.com/mmcdole/dgdtools/pkg/lexer"
@@ -1081,24 +1081,7 @@ func (ix *Index) LoadAll(ctx context.Context) bool {
 		if scan != "" {
 			_ = ix.Walk(scan, func(p string) { paths = append(paths, p) })
 		}
-		ch := make(chan string, 256)
-		var wg sync.WaitGroup
-		for range runtime.NumCPU() {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				for p := range ch {
-					if ctx.Err() == nil {
-						ix.UnitFS(p)
-					}
-				}
-			}()
-		}
-		for _, p := range paths {
-			ch <- p
-		}
-		close(ch)
-		wg.Wait()
+		par.Each(ctx, paths, func(p string) { ix.UnitFS(p) })
 		ix.mu.Lock()
 		if ctx.Err() != nil {
 			if ix.allOnce == once {
