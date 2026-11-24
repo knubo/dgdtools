@@ -1,11 +1,14 @@
-# The linter and the project model: design
+# Architecture: the library, the linter and the project model
 
-Status: implemented on branch `dgdlint-rewrite`. Section 11 lists what is
-done and what is deferred; section 9 has the measurements against the
-VikingMUD lib and a DGD 1.7.9 compile oracle. Two companion documents
-cover what is shared with the other tools: [config.md](config.md)
-(the configuration file, per-file settings, the `dgdtools` command) and
-[dgdfmt.md](dgdfmt.md) (the formatter).
+How dgdtools is built: the packages, the parser and the preprocessor
+model, how a project is found, what the linter claims and what it leaves
+unknown, the library API, the formatter's engine, and mudlib profiles.
+Section 9 has the measurements against the VikingMUD lib and a DGD 1.7.9
+compile oracle; section 11 lists what is not built. Companion documents:
+[config.md](config.md) (the configuration file, per-file settings, the
+`dgdtools` command), [formatter.md](formatter.md) (the formatter as a
+tool) and [lsp.md](lsp.md) (the plan for the language server and for
+rename).
 
 ## 1. Purpose and non-negotiables
 
@@ -22,15 +25,13 @@ properties follow from that and are treated as constraints, not goals:
    let one broken region poison findings elsewhere.
 3. **Syntax errors are first-class findings.** The motivating incident was
    a production `castle.c` with `})` followed by the next statement and no
-   `;`. DGD refused it at boot, a whole domain's connections vanished, and
-   the linter of the time passed the file clean because it had no parser.
+   `;`. DGD refused it at boot and a whole domain's connections vanished.
+   Only a tool with a parser of its own catches that before the driver
+   does.
 
-The old design (lexer + top-level "structure" scanner + per-rule token
-heuristics) could not satisfy (3), and satisfied (1) only by each rule
-re-deriving expression structure by bracket counting. The rewrite keeps
-the purpose, the lossless lexer, the formatter's token-equality gate, and
-the three-valued "unknown is not missing" index philosophy. Everything
-else is new.
+Three things carry them: a byte-lossless lexer, an error-tolerant parser
+that reads source as written, and a cross-file index whose every answer
+is found, provably missing, or unknown.
 
 ## 2. Architecture
 
@@ -72,8 +73,8 @@ cmd/dgdtools the one binary: a thin front end per subcommand (lint,
              format, rules, explain, config, profile) over the packages
 ```
 
-Each package imports only packages above it in this list. Three of the boundaries are worth stating, because they were
-once elsewhere. `pkg/token` knows nothing of diagnostics: a lexical
+Each package imports only packages above it in this list. Three of the
+boundaries are worth stating. `pkg/token` knows nothing of diagnostics: a lexical
 error is an offset and a message (`token.Error`), and the parser turns
 it into a syntax error. `pkg/calls` is a function of one file's tree,
 its #define environment and the registry (`calls.Extract`), with no rule
@@ -90,7 +91,7 @@ message.
 |---|---|
 | goyacc port of DGD's `parser.y` | Rejected. AGPL source must not be transcribed; LALR error recovery (`error ';'`) is exactly what we need to do better than; and a yacc grammar cannot consult macro tables mid-parse. |
 | tree-sitter | Rejected. Needs cgo (the tools ship as static Go binaries), produces coarse `ERROR` nodes, and its lexer cannot be told "this identifier is a type here". |
-| rowan / Roslyn red-green trees | Not needed. They pay for incremental reparse in an IDE; a whole-lib lint is an 8 s batch job and one file reparses in microseconds. Nodes instead hold token-index ranges into the lossless `token.File`, which gives the same "tree addresses every byte" property by construction. |
+| rowan / Roslyn red-green trees | Not needed. They pay for incremental reparse in an IDE; a whole-lib lint is a batch job of seconds and one file reparses in microseconds. Nodes instead hold token-index ranges into the lossless `token.File`, which gives the same "tree addresses every byte" property by construction. |
 | Hand-written RD over the existing token array | Chosen. Same choice as ruff, Biome, rust-analyzer, Roslyn, Go, and clang: full control over recovery and messages, and the only shape that can treat macros as first-class tokens. |
 
 The grammar is written from DGD 1.7.9 grammar *facts* (which productions
@@ -171,10 +172,9 @@ The same evaluator gives the string constants the index needs their
 value: inherit paths and call targets written with literals, `+`,
 adjacent literals and object-like macros (`Env.EvalString`).
 
-On the Viking lib this decides most conditionals: findings withheld
-inside guessed branches fell from 1,025 to 106 (all rules on, driver
-config), and the syntax-group rules flag 104 more files, every one of
-which the driver also rejects (section 9).
+On the Viking lib this decides nearly every conditional: with all rules
+on, 106 findings in 108,116 files are withheld inside guessed branches
+(section 9).
 
 ### 2.3 Error tolerance
 
@@ -199,8 +199,9 @@ The parser never fails and always returns a tree. Errors are data
   statement position is a certain error (LPC has no nested functions): the
   open function is closed with "function 'g' begins inside the body of
   'f': missing '}'" and top-level parsing resumes there. An unbalanced
-  brace costs one function, not the rest of the file, which was the old
-  scanner's failure that made 36% of its `callable-not-found` errors false.
+  brace costs one function, not the rest of the file: the functions
+  after it keep their places in the symbol table, so nothing downstream
+  calls them missing.
 - Anything the parser could not account for at top level marks the file's
   symbol table *partial*; the index propagates that to every inheritor.
 
@@ -262,21 +263,23 @@ need the lib root (the directory that is `/` to the driver).
    settings.
 4. **Explicit overrides:** `--config FILE`; `--root DIR`; `--no-config`.
 5. **Zero-config is useful, not noisy.** With no config and no `--root`,
-   the linter runs in *file-local mode*: file-local rules run with a partial
-   `#define` environment, cross-file rules do not run, and one note on stderr says
-   so. The real pre-fix castle.c is caught in this mode.
+   the linter runs in *file-local mode*: file-local rules run with a
+   partial `#define` environment, cross-file rules do not run, and one
+   note on stderr says so. The castle.c of section 1 is caught in this
+   mode.
 6. **The driver config is the compile database, and it is a build
    input.** DGD's own config file already states `include_dirs`,
    `include_file`, `auto_object` and `typechecking`.
    `profile_build: {driver_config: etc/mud.dgd}` reads them instead of
    asking anyone to copy them; `dgdtools profile build` bakes them into a
    profile (section 10), and a whole-lib lint uses them directly. The
-   same keys set in `dgdtools.yml` still win. The driver's absolute `directory` is *not*
-   used as the root: it names a path on the production host.
+   same keys set in `dgdtools.yml` still win. The driver's absolute
+   `directory` is *not* used as the root: it names a path on the
+   production host.
 7. **Subdirectory and single-file runs** lint only the named files but
    resolve against the whole lib. The index is lazy (section 6): one file
-   loads only its include and inherit closure (measured: 0.08 s for two
-   files against 9.5 s for the old whole-lib index).
+   loads only its include and inherit closure (measured: 0.06 s for two
+   files of the 108,116-file lib).
 8. **A file outside the root** (or any path when there is no root) gets
    file-local rules only; it has no lib path, so nothing cross-file is
    claimed about it.
@@ -318,10 +321,10 @@ line are designed in [config.md](config.md). What the linter adds:
   `__create`, then `create`) sets the key to what its objects define. It
   is a project key and not an option of the rule because it is a fact
   about the lib that a profile must carry: a wizard's checkout has no
-  root config, and with the name only in the root's rule options the
-  partial-checkout corpus test lost the rule's findings in every
-  checkout. The rule's option `names` is for further functions held to
-  the same rule.
+  root config, so a name that stood only in the root's rule options
+  would not reach it, and the rule would find nothing in any checkout.
+  The rule's option `names` is for further functions held to the same
+  rule.
 - **The call registry declares call shapes.** An entry of
   `conventions.call_registry` is one or more forms
   `{function: N, object: M, args: K}`: the argument that names the
@@ -335,7 +338,7 @@ line are designed in [config.md](config.md). What the linter adds:
   the same table, `call_other: {object: 0, function: 1, args: 2}` and
   `call_out: {function: 0, args: 2}`; no call shape is guessed from what
   a string looks like.
-- **`relative_object_paths` stays a key because DGD leaves it to the
+- **`relative_object_paths` is a key because DGD leaves it to the
   lib.** The driver does not resolve an object path itself: for
   `inherit "x"` it calls the driver object's `inherit_program(from,
   path, priv)`, for `call_other("x", …)` its `call_object(path)`
@@ -493,12 +496,12 @@ path that does not exist) or an internal error on some file. Syntax
 errors in linted files are findings, not tool errors (ruff/ESLint:
 same); a file that cannot be read is a warning.
 
-**Output:** human (`path:line:col: severity: message [rule]`, the format
-editors and `grep` already parse, related locations indented beneath, a
-one-line summary on stderr); JSON (a versioned object with ranges, related
-locations, fix edits, and a summary that includes the "not verified"
-counters); SARIF 2.1.0 for code-scanning upload; GitHub workflow
-annotations.
+**Output:** human (`path:line:col: severity: message [CODE name]`, the
+format editors and `grep` already parse, related locations indented
+beneath, a one-line summary on stderr); JSON (a versioned object with
+ranges, related locations, fix edits, and a summary that includes the
+"not verified" counters); SARIF 2.1.0 for code-scanning upload; GitHub
+workflow annotations.
 
 **Fix posture:** the core never writes files. A rule may attach fixes as
 text edits (byte ranges + replacement) to a diagnostic; they are emitted
@@ -506,11 +509,12 @@ in JSON and are what an editor applies. `adjacent-strings` carries one
 (insert ` +`). A `--fix` writer is deferred until semantic edits have a
 safety gate comparable to the formatter's token equality.
 
-**Performance/caching:** a whole-lib run is parallel over files and takes
-7.9 s for 108,116 files with the default rules (old: 9.5 s). A persistent
-on-disk cache would save little and adds invalidation risk, so there is
-none. The in-process index is lazy and invalidatable, which is what a
-long-lived server needs.
+**Performance/caching:** a whole-lib run is parallel over files and
+takes 7 s for 108,116 files with the default rules, and 11 to 12 s with
+every rule on and half a million findings written as JSON (12 CPUs). A
+persistent on-disk cache would save little and adds invalidation risk,
+so there is none. The in-process index is lazy and invalidatable, which
+is what a long-lived server needs.
 
 ## 5. Missing references and how unknowns degrade
 
@@ -660,8 +664,8 @@ Properties the core guarantees (each has a test in `pkg/lint` or
   where that is) under the base, a `file:` URI outside it. A location in
   a profile's stub is a URI already (`dgdtools-profile://NAME/…`) and is
   written as one in every format, never run through path arithmetic.
-  JSON carries the model's new parts (`tags`, fix `applicability`,
-  `fingerprint`), a `rules` table for the rules that occur (code, group,
+  JSON carries `tags`, fix `applicability` and `fingerprint`, a `rules`
+  table for the rules that occur (code, group,
   summary, documentation address) rather than a URL on each of half a
   million findings, and `errors`. SARIF regions give the byte range
   beside the columns, which count bytes; SARIF `fixes` are not written,
@@ -680,28 +684,29 @@ Properties the core guarantees (each has a test in `pkg/lint` or
   found, because a result with a hole in it must not pass for a clean
   one. `dgdtools profile build` refuses to write a profile then.
 
-Measured on the 108,116-file lib (`TestCorpusEdit`, 681 single-file
-edits after a whole-lib run): `Invalidate` 1.5 ms median (2.9 ms at the
-95th percentile; 156 ms for a file 89,000 others inherit), linting the
+Measured on the 108,116-file lib (`TestCorpusEdit`, 689 single-file
+edits after a whole-lib run): `Invalidate` 1.7 ms median (3.2 ms at the
+95th percentile; 131 ms for a file 89,500 others depend on), linting the
 edited file 0.1 ms median, completing the scan again under 1 ms, one
 file read per edit, and findings identical to the whole-lib run's.
 
-### 6.1 A future `dgdtools lsp`
+### 6.1 `dgdtools lsp`
 
-A thin layer, the reserved `dgdtools lsp` subcommand, holding one
-`vfs.Overlay` and, per project a `config.Workspace` discovers, one
-`lint.Linter`:
+Planned in [lsp.md](lsp.md): a thin layer, the reserved `dgdtools lsp`
+subcommand, holding one `vfs.Overlay` and, per project a
+`config.Workspace` discovers, one `lint.Linter`. What it maps onto:
 
 | LSP feature | Maps onto |
 |---|---|
 | `textDocument/didOpen`, `didChange`, `didClose` | `overlay.Set/Delete` + `Linter.Invalidate(path)` |
-| `textDocument/publishDiagnostics` | `Linter.Lint` for the changed document, debounced, with the previous lint cancelled through its context. `Invalidate` returns the dependents; those that are open are linted again. `Diagnostic.code` = rule code, `codeDescription` = the `explain` text, `relatedInformation` = `Related`, positions via `diag.UTF16Col`. |
+| `textDocument/publishDiagnostics` | `Linter.Lint` for the changed document, debounced, with the previous lint cancelled through its context. `Invalidate` returns the dependents; those that are open are linted again. `Diagnostic.code` = rule code, `codeDescription` = `Rule.URL`, `relatedInformation` = `Related`, `tags` = `Tags`, positions via `diag.UTF16Col`. |
 | `workspace/didChangeWatchedFiles` | `Invalidate` for disk changes; a config change rebuilds the `Linter`. |
 | `textDocument/codeAction` | `Fixes` on the diagnostics in range (quick-fix edits), plus generated "suppress with `dgdtools-ignore lint/RULE`" actions. |
 | `textDocument/definition` | the index: resolve the identifier under the cursor through `Snapshot.Chain` (functions and variables; `::` and `label::` calls), `->` calls with a known receiver through `LookupCallable`, `inherit`/`#include` paths through `ObjectPath`/`ResolveInclude`, macros through the file's `pp.Env`. `ChainFunc`, `ChainVar` and `pp.Macro` carry the defining file and position; a definition in a profile stub is at `dgdtools-profile://NAME/std/room.c`. |
 | `textDocument/hover` | the same lookups: specifiers and argument range of a function, the object that provides it, a macro's body and class. |
 | `textDocument/documentSymbol`, `workspace/symbol` | `syntax.File.Decls`; the units' symbol tables. |
-| `textDocument/formatting` | `pkg/format`, already a pure function. |
+| `textDocument/formatting`, `rangeFormatting` | `format.Format` and `format.Lines`, functions of the buffer and the file's settings; `format.Edits` for the reply. |
+| `textDocument/rename` | `pkg/rename`, to be written: one engine for the editor and for `dgdtools rename` ([lsp.md](lsp.md) section 9). |
 
 What the server adds itself: JSON-RPC transport, position conversion,
 debouncing, and per-document versioning. No analysis logic lives there.
@@ -710,37 +715,41 @@ local variables (section 11).
 
 ## 7. Rules
 
-Old rules keep their names, so suppression comments already in a lib keep
-working. All are ported onto the tree.
+The rule table is `lint.Rules()`, and its documentation,
+[docs/rules.md](../rules.md), is written from it and checked by a test;
+`dgdtools rules` and `dgdtools explain RULE` print the same table. There
+is no second list to keep in step, here or anywhere else. What the table
+is built on:
 
-| Code | Name | Default | Notes |
-|---|---|---|---|
-| E001 | `syntax-error` | error | **new**: parser + lexer errors |
-| E002 | `adjacent-strings` | error | **new** (legacy idiom), carries a fix |
-| E003 | `legacy-closure` | error | **new** (legacy idiom) |
-| E004 | `declaration-initializer` | error | **new** (legacy idiom) |
-| E005 | `declaration-after-statement` | error | **new**; DGD "declaration after statement" |
-| E006 | `include-not-found` | error | degrades when the lib is incomplete; no longer appends `.c` to extensionless include names |
-| E007 | `bad-directive` | error | **new**: text after `#else`/`#endif`/`#include "x"`, unknown directives |
-| E008 | `inherit-after-declaration` | error | **new**: also when the declaration arrives via an earlier `#include` |
-| E009 | `missing-parameter-type` | error | **new**; needs `typechecking >= 1` |
-| E010 | `return-value` | error | **new**: value from void/typeless function, bare return in typed |
-| R001 | `callable-not-found` | error | tree-based; macro receivers; partial symbol tables respected; `"/path"->fn()` judged by that object's own chain |
-| R002 | `static-crossobj` | error | |
-| R003 | `undefined-prototype` | error | direct calls found in the tree |
-| R004 | `target-object-missing` | error | object paths resolve from the lib root |
-| R005 | `callback-arity` | warning | |
-| R006 | `lifecycle-chain` | warning | silent when the body has unparsed or macro statements |
-| S001 | `assignment-in-condition` | warning | expression tree; also `do … while` |
-| S002 | `no-effect-statement` | warning | any top-level comparison statement (`x == f();`) |
-| S003 | `sscanf-format` | warning | |
-| S004 | `unreachable-code` | off | **new** |
-| C001–C005 | `raw-inherit-path`, `missing-visibility`, `unformatted`, `static-autosave-var`, `unresolved-inherit` | off | |
-| C006 | `unused-suppression` | off | **new** |
-
-The E-rules exist because of what the oracle showed (section 9): the
-driver's most common reasons for refusing a file are not all "syntax
-error".
+- **Four groups, and the code's letter says which.** `E`, *syntax*: what
+  the driver refuses to compile, ten rules, all errors. `R`, *runtime*:
+  code that compiles and then fails or silently returns nil, six rules
+  that need the lib. `S`, *suspicious*: constructs that are legal and
+  probably not meant. `C`, *convention*: a lib's own policy, all off
+  until a lib asks for them.
+- **The syntax group is what the oracle showed** (section 9): the
+  driver's most common reasons for refusing a file are not all "syntax
+  error", so the idioms of older drivers (`adjacent-strings`,
+  `legacy-closure`, `declaration-initializer`), the ordering rules
+  (`declaration-after-statement`, `inherit-after-declaration`), the
+  preprocessor (`include-not-found`, `bad-directive`) and the two
+  typechecking errors a typeless function produces
+  (`missing-parameter-type`, `return-value`) each have a rule a lib can
+  baseline or turn off by itself.
+- **Defaults follow what a finding claims.** Every syntax and runtime
+  rule is on, and held to zero false positives. The suspicious rules
+  that are on are warnings. A rule that states policy
+  (`unreachable-code`, the convention group) is off until a lib asks
+  for it.
+- **A rule states its own properties** in the table, and the engine has
+  no rule's name in it: `CrossFile` (needs the lib or a profile),
+  `CompiledOnly` (says nothing inside a conditional branch chosen by
+  guess; every syntax and runtime rule except `bad-directive`), `Late`
+  (runs after the others and sees what the suppression comments did:
+  `invalid-suppression`, `unused-suppression`), `Tags`, typed `Options`,
+  and whether its fix is safe.
+- **Names and codes are stable**: they are what suppression comments,
+  baselines and configurations refer to.
 
 ## 8. The formatter
 
@@ -749,7 +758,7 @@ significant token's bytes unchanged, synthesizes the whitespace between
 them, and returns a result only if the output re-lexes to the same token
 stream (`pkg/tokcmp`) and formatting it again changes nothing. That
 design is right for a formatter that must also work on files that do not
-parse, and it is kept. What it lays tokens out *by* is the syntax tree.
+parse. What it lays tokens out *by* is the syntax tree.
 
 **Plan.** `pkg/format` reads the file as every other tool does
 (`pp.Env.Scan`, `syntax.Parse`) and records two things per token: the
@@ -798,8 +807,9 @@ the `unformatted` rule calls the same function with the same per-file
 options.
 
 **Gaps.** The printer's unit of work is the gap between two significant
-tokens. A skip marker (`dgdtools-ignore-start format` … `dgdtools-ignore-end format`) and a line
-selection (`format.Lines`) are both "copy these gaps as they are": the
+tokens. A skip marker (`dgdtools-ignore-start format` …
+`dgdtools-ignore-end format`) and a line selection (`format.Lines`) are
+both "copy these gaps as they are": the
 tokens of a skipped gap still pass through the printer, so its bracket
 and conditional state stay right for what follows. A selected line
 whose neighbours keep their own indentation is indented from them: an
@@ -809,13 +819,14 @@ level, first the lines above in the same block, then the ones below.
 
 What the tool is (its one style, the three settings, skip markers,
 check and diff, formatting part of a file) is in
-[dgdfmt.md](dgdfmt.md).
+[formatter.md](formatter.md).
 
-Measured on the Viking lib (182,126 `.c`/`.h` files): 180,850 formatted,
-1,276 refused because they do not tokenize, no gate failure, with spaces
-and with tabs; a second pass over the formatted tree changes nothing;
-and for every file, all of its lines as a range give what `Format`
-gives, arbitrary ranges pass the gate, and a range of the formatted file
+Measured on the Viking lib (`TestCorpusFormatGate` and `TestCorpusLines`
+over all 182,126 `.c`/`.h` files): 180,850 formatted, 1,276 refused
+because they do not tokenize, no gate failure, with spaces and with
+tabs; a second pass over the formatted tree changes nothing; and for
+every file, all of its lines as a range give what `Format` gives,
+arbitrary ranges pass the gate, and a range of the formatted file
 changes nothing.
 
 ## 9. Verification and results
@@ -828,9 +839,9 @@ process against a scratch *copy* of the lib sources in the test
 container's `/tmp`, with a minimal driver object that calls
 `compile_object` on each of the 108,116 non-excluded `.c` files and
 records every `compile_error`. Nothing under the mud tree was written and
-the copy was removed afterwards. Result: 72,027 files compile, 36,088 do
-not (one crashes the driver: `/players/kniggit/xfo.c`, an `else` directly
-before `}`).
+the copy was removed afterwards. Result: 72,027 files compile, 36,088
+are rejected, and one crashes the driver (`/players/kniggit/xfo.c`, an
+`else` directly before `}`).
 
 Construct verdicts from 236 single-construct test files (the ones the
 design depends on):
@@ -838,7 +849,7 @@ design depends on):
 | Construct | DGD 1.7.9 |
 |---|---|
 | adjacent string literals; `(: a, b :)`; `int x = 5;` (local or global) | rejected, "syntax error" |
-| missing `;` after `})` (the pre-fix castle.c: line 263) | rejected |
+| missing `;` after `})` (the castle.c of section 1, line 263) | rejected |
 | declaration after a statement, after `;`, after a nested block | rejected, "declaration after statement" |
 | declaration at the start of a nested block | accepted |
 | `case 1: }`, top-level `;`, `foo(a,)`, `int f(int);`, `o->foo;`, `for (int i…)`, `&g()` | rejected |
@@ -853,9 +864,9 @@ design depends on):
 | inherit after a declaration | rejected, "inherit must precede all declarations" |
 | raw Latin-1 byte, `@`, `\` outside a string | rejected, "illegal character" |
 
-Two claims in the review that motivated the rewrite were wrong and are
-corrected here: `/secure/daemons/weard.c:44` is inside `#if 0` and the
-file compiles; `/com/a/rename.c` compiles (a block macro needs no `;`).
+Two files that look broken and are not: `/secure/daemons/weard.c:44` is
+inside `#if 0` and the file compiles; `/com/a/rename.c` compiles (a
+block macro needs no `;`).
 
 Not verified: the oracle compiles each `.c` standalone, so files that
 only make sense when `#include`d elsewhere show as failing; its
@@ -863,43 +874,48 @@ only make sense when `#include`d elsewhere show as failing; its
 
 ### 9.2 Syntax-group precision and recall (whole lib, all rules on)
 
-"Flagged" = files with at least one finding of the rule.
+The whole lib linted with the driver's configuration and every rule on:
+108,116 files, 672,295 findings. "Flagged" = files with at least one
+finding of the rule.
 
-| Rule | Files flagged | Oracle: does not compile | Oracle: compiles (false positive) |
-|---|---|---|---|
-| syntax-error | 3,851 | 3,851 | 0 |
-| adjacent-strings | 10,049 | 10,049 | 0 |
-| legacy-closure | 6,329 | 6,329 | 0 |
-| declaration-initializer | 2,102 | 2,102 | 0 |
-| declaration-after-statement | 37 | 37 | 0 |
-| include-not-found | 5,561 | 5,561 | 0 |
-| bad-directive | 1,858 | 1,858 | 0 |
-| inherit-after-declaration | 1,517 | 1,517 | 0 |
-| missing-parameter-type | 11,415 | 11,415 | 0 |
-| return-value | 13,601 | 13,601 | 0 |
-| **any syntax-group rule** | **30,643** | **30,643** | **0** |
+| Rule | Findings | Files flagged | Oracle: does not compile | Oracle: compiles (false positive) |
+|---|---|---|---|---|
+| syntax-error | 7,621 | 3,860 | 3,860 | 0 |
+| adjacent-strings | 31,380 | 10,142 | 10,142 | 0 |
+| legacy-closure | 13,522 | 6,359 | 6,359 | 0 |
+| declaration-initializer | 5,391 | 2,104 | 2,104 | 0 |
+| declaration-after-statement | 74 | 37 | 37 | 0 |
+| include-not-found | 6,441 | 5,563 | 5,563 | 0 |
+| bad-directive | 1,995 | 1,858 | 1,858 | 0 |
+| inherit-after-declaration | 1,534 | 1,518 | 1,518 | 0 |
+| missing-parameter-type | 40,157 | 11,420 | 11,420 | 0 |
+| return-value | 99,045 | 13,604 | 13,604 | 0 |
+| **any syntax-group rule** | **207,160** | **30,747** | **30,747** | **0** |
 
-The first measurement of this parser had 103 such false-positive files;
-every one was traced to a cause and fixed in the design rather than
-special-cased (macro after `->`, typed-object macros, `#undef`/`#define`,
-bracket-blind resynchronization, undecided `#if` branches, relative
-object paths, …). The file-level check cannot prove each individual
-finding: a file can fail to compile for a different reason than the one
-the linter gives. A spot check of four findings whose kind the oracle's
-messages for that file did not echo found all four real (`):`, a missing
-`:` in a mapping, `reurn 0;`, a parameter named `new`).
+(One of the 30,747 is the file that crashes the driver rather than
+being rejected by it.)
+
+Zero is what the design is held to. A false positive is traced to its
+cause and fixed in the model (a macro after `->`, typed-object macros,
+`#undef`/`#define`, bracket-aware resynchronization, undecided `#if`
+branches, relative object paths), never special-cased. The file-level
+check cannot prove each individual finding: a file can fail to compile
+for a different reason than the one the linter gives. A spot check of
+four findings whose kind the oracle's messages for that file did not
+echo found all four real (`):`, a missing `:` in a mapping, `reurn 0;`,
+a parameter named `new`).
 
 Recall, by the driver's *first* error in the file:
 
 | Driver's first error | Files | Flagged by a syntax-group rule |
 |---|---|---|
-| syntax error | 11,700 | 10,932 (93%) |
+| syntax error | 11,700 | 10,947 (94%) |
 | cannot include | 5,468 | 5,466 |
-| missing type for parameter | 3,631 | 3,622 |
+| missing type for parameter | 3,631 | 3,623 |
 | value returned from void function | 2,174 | 2,173 |
 | bad token in control | 1,823 | 1,820 |
-| inherit must precede all declarations | 849 | 848 |
-| undefined function | 1,629 | 680 (other errors in the same file) |
+| inherit must precede all declarations | 849 | 849 |
+| undefined function | 1,629 | 682 (other errors in the same file) |
 | undeclared variable | 799 | 272 (same) |
 
 The missed syntax errors are mostly statements made opaque by fragment
@@ -911,24 +927,42 @@ Core lib (`std`, `secure`, `dgd`, `com`, `obj`, `room`): zero syntax-group
 findings, matching the oracle, which compiles all of it. This is asserted
 by `TestCorpusLint`.
 
-### 9.3 Old vs new, whole lib (findings; all rules on)
+### 9.3 The other groups, and what stays unknown (same run)
 
-| Rule | Old | New | Why |
-|---|---|---|---|
-| syntax-error, adjacent-strings, legacy-closure, declaration-initializer, declaration-after-statement, bad-directive, inherit-after-declaration, missing-parameter-type, return-value | 0 | 5,781 / 31,176 / 13,468 / 5,274 / 74 / 1,995 / 1,533 / 34,245 / 98,757 | new |
-| callable-not-found | 2,609 | 2,693 | −1,189: files the old scanner mis-read (function "missing" that is defined after a syntax error) are now unknown. +1,320: macro receivers (`D_FOO->fn()`), and `"/path"->fn()` no longer excused by the target's inheritors. |
-| undefined-prototype | 1,724 | 857 | −819: old false positives of the same kind (`my_find_player` "never defined", defined 200 lines below a syntax error). |
-| target-object-missing | 10,889 | 7,025 | −4,907: old resolved `"obj/x"` relative to the referencing file (`/obj/obj/diploma`); DGD resolves from the root. Also `inherit ROOM "/forest"` mis-read as a label. +1,052: macro receivers. |
-| callback-arity | 1,362 | 2,479 | macro receivers and direct object targets |
-| static-crossobj | 44 | 69 | macro receivers |
-| include-not-found | 6,630 | 6,424 | −214: old appended `.c` to extensionless include names (`"…/DEFINES"`); includes in undecided branches. |
-| assignment-in-condition | 301 | 280 | −21: statements that do not parse (`if (str! = "rose")`) are syntax errors now |
-| no-effect-statement | 103 | 172 | −59 old false positives (`for (x=0; x==y; x++)`, `RET str == "ball" …;`); +130 real ones the old rule skipped whenever a statement contained a bracket (`dir == "in a flash" + f(x);`) |
-| lifecycle-chain | 679 | 644 | silent when the body has unparsed or macro statements |
-| sscanf-format, static-autosave-var, raw-inherit-path, unresolved-inherit, missing-visibility | 28 / 68 / 633 / 2,976 / 335,743 | 27 / 68 / 633 / 2,860 / 336,464 | essentially unchanged |
+| Rule | Findings |
+|---|---|
+| callable-not-found | 3,245 |
+| static-crossobj | 73 |
+| undefined-prototype | 913 |
+| target-object-missing | 7,183 |
+| callback-arity | 2,500 |
+| lifecycle-chain | 646 |
+| assignment-in-condition | 280 |
+| no-effect-statement | 174 |
+| sscanf-format | 27 |
+| unreachable-code | 3,542 |
+| raw-inherit-path | 609 |
+| missing-visibility | 336,210 |
+| unformatted | 106,806 |
+| static-autosave-var | 68 |
+| unresolved-inherit | 2,859 |
 
-Late-bound call sites with a known receiver: 6.5% (old) → 22.5% (new;
-126,200 of 562,067).
+The runtime rules have no oracle: the driver compiles what they report.
+They are held to the same standard by what the index refuses to
+conclude, and that is counted on every run (`--stats`):
+
+| Not verified, never reported | |
+|---|---|
+| late-bound call sites with an unknown receiver | 436,326 of 572,639 (76%) |
+| files with an incomplete symbol table | 7,994 |
+| inherit paths the evaluator could not resolve | 2,859 |
+| `#include`s unresolved but not provably missing | 407 |
+| syntax errors withheld as possible macro artifacts | 836 |
+| findings withheld inside undecided `#if` branches | 106 |
+
+Late-bound calls are read from `->`, `call_other`, `call_out` and the
+lib's declared registry forms; a receiver is known when it is a string
+constant, a macro that evaluates to one, or `this_object()`.
 
 ### 9.4 Tests
 
@@ -953,10 +987,15 @@ Late-bound call sites with a known receiver: 6.5% (old) → 22.5% (new;
 - `pkg/profilebuild`: a small whole lib built into a profile, then one
   of its trees linted alone against the profile and compared with the
   whole-lib run.
-- Corpus (`-tags corpus`): `TestCorpusParse` (182,126 `.c`/`.h` files
-  parsed twice: no panics, span and ordering invariants) and
-  `TestCorpusLint` (whole-lib run, no internal errors, core directories
-  free of syntax-group findings). Both pass on the VikingMUD lib.
+- Corpus (`-tags corpus`), all passing on the VikingMUD lib:
+  `TestCorpusRoundTrip` (the lexer gives back every byte of 182,126
+  `.c`/`.h` files), `TestCorpusSelfCompare` (the token comparison),
+  `TestCorpusParse` (every file parsed twice: no panics, span and
+  ordering invariants), `TestCorpusFormatGate` and `TestCorpusLines`
+  (section 8), `TestCorpusLint` (whole-lib run, no internal errors, core
+  directories free of syntax-group findings), `TestCorpusEdit` (an
+  editor session on the whole lib, section 6) and
+  `TestCorpusPartialCheckout` (10.6).
 
 ## 10. Mudlib profiles
 
@@ -1032,7 +1071,7 @@ Details that keep stubs honest:
   `#pragma dgdtools partial`; the index treats its symbol table as partial,
   so lookups through it are unknown, exactly as with the original.
 - Declarations inside a conditional branch the builder could only guess at
-  are emitted under `#ifdef __DGDLINT_UNDECIDED__`, so the consumer also
+  are emitted under `#ifdef __DGDTOOLS_UNDECIDED__`, so the consumer also
   sees them as guessed.
 - Object-local macros are dropped unless the object's declarations use
   them (a type macro, a path macro in an inherit statement); a `.c` file
@@ -1042,10 +1081,9 @@ Details that keep stubs honest:
   functions are absent, a call to one in a profiled object is reported as
   "not defined … or is private there" (`callable-not-found`) where the
   whole lib would say "is private" (`static-crossobj`): the same bug under
-  another name. `omit` and `exclude` globs are recorded
-  as `holes`, because "under a covered directory but deliberately absent"
-  must read as unknown, not as missing. (This was a real false positive
-  in the first version of the tests.)
+  another name. `omit` and `exclude` globs are recorded as `holes`,
+  because "under a covered directory but deliberately absent" must read
+  as unknown, not as missing.
 
 **File format:** gzip of `dgdtools-profile 1`, the manifest, and the stubs
 in path order (`=== /std/room.c` separators). No timestamps: the same lib
@@ -1062,31 +1100,33 @@ closure of what all of those include and inherit. `omit` always wins.
 Inference finds files, not directories, so only a `share` glob that takes
 a whole directory makes it `covered`.
 
-Measured on VikingMUD (ten trees, 9,106 whole-lib findings; "extra" is 54
-in every row, so precision does not move):
+Measured on VikingMUD (the ten trees of 10.6, 9,123 whole-lib findings;
+N is `share_min_owners`, the core globs are `std`, `obj`, `room`,
+`secure` and `dgd`; no selection adds a false finding to the two of
+10.6):
 
 | Selection | Size | Stubs | Identical | Lost |
 |---|---|---|---|---|
-| core `share` globs only (previous) | 46,926 B | 465 | 8,989 | 117 |
-| inference only, N=2 / 3 / 5 | 254,689 / 159,168 / 102,919 B | 2,012 / 923 / 451 | 8,972 / 8,962 / 8,951 | 134 / 144 / 155 |
-| N=2 + core globs | 260,885 B | 2,218 | 9,045 | 61 |
-| N=3 + core globs | 166,962 B | 1,161 | 9,036 | 70 |
-| **N=5 + core globs** | 113,878 B | 723 | 9,026 | 80 |
+| core `share` globs only | 46,728 B | 465 | 9,004 | 119 |
+| inference only, N=2 / 3 / 5 | 255,958 / 159,079 / 102,671 B | 2,046 / 927 / 452 | 8,989 / 8,979 / 8,966 | 134 / 144 / 157 |
+| N=2 + core globs | 262,208 B | 2,252 | 9,062 | 61 |
+| N=3 + core globs | 166,867 B | 1,165 | 9,053 | 70 |
+| **N=5 + core globs** | 113,567 B | 723 | 9,041 | 82 |
 
 Inference alone is worse than the core list: without covered directories
 "`/std/nosuch` does not exist" cannot be proven, and core files with few
 users drop out. Inference on top of the core globs recovers findings
 against widely used code outside the core (parts of `/com`, domain
 libraries such as `/d/*/std`, daemons). N=5 is the default: it recovers
-37 of the 56 findings N=2 would, at under half the size, and pulls in the
-fewest wizard files (55 under `/players`, 189 under `/d`, against 845 and
-875 at N=2). Those files' public declarations become part of the profile;
+37 of the 58 findings N=2 would, at under half the size, and pulls in the
+fewest wizard files (55 under `/players`, 189 under `/d`, against 874 and
+880 at N=2). Those files' public declarations become part of the profile;
 `omit: ["players/**"]` keeps them out.
 
 ### 10.3 Using a profile
 
 - **No profile is embedded in the tools.** A profile describes one mud and
-  is published by that mud (VikingMUD's lives in its own repository).
+  is published by that mud.
   `profile: NAME` is looked up as `NAME.profile` in, in order: the
   directory of the config file that names it (the working directory for
   `--profile`); each entry of `$DGDTOOLS_PROFILE_PATH`; the user config
@@ -1124,10 +1164,10 @@ fewest wizard files (55 under `/players`, 189 under `/d`, against 845 and
 No: one line is required. A profile asserts facts ("`/std/room` has no
 function `set_shrot`"). Applied to the wrong mud those are confident
 false errors, the clang-tidy-guessing-flags failure, and dgdtools is a
-general DGD tool that happens to embed one mud's profile. The cost of
-being explicit is a one-line file (`profile: viking`) or a flag; the cost
-of guessing wrong is the tool's credibility. With no config at all the
-behaviour is unchanged: file-local rules and a note.
+general DGD tool that ships no mud's profile and knows no mud's name.
+The cost of being explicit is a one-line file (`profile: NAME`) or a
+flag; the cost of guessing wrong is the tool's credibility. With no
+config at all: file-local rules and a note.
 
 The lib *path* of a checkout, by contrast, is inferred, because the
 evidence is in the path and the mapping is printed in the run's notes;
@@ -1143,7 +1183,7 @@ and says so in the message ("nor in this checkout; inheritors elsewhere
 in the lib cannot be seen"). The strictly safe alternative, treating
 every such miss as unknown, would silence the single most useful runtime
 check for a wizard (`add_action("do_x")` with no `do_x`). Measured cost:
-1 false finding in 9,043 (below).
+1 false finding in 9,095 (below).
 
 ### 10.6 Measured: ten real trees, profile only vs. whole lib
 
@@ -1153,21 +1193,23 @@ it, and compares with linting the same tree in place.
 
 | | findings |
 |---|---|
-| whole lib, the ten trees | 9,106 |
-| profile only | 9,043 |
-| identical | 8,989 (98.7% of whole-lib) |
-| lost (whole-lib only) | 117 |
+| whole lib, the ten trees | 9,123 |
+| profile only | 9,095 |
+| identical | 9,041 (99.1% of whole-lib) |
+| lost (whole-lib only) | 82 |
 | extra: syntax errors behind an include that can no longer be proven missing | 52 |
 | extra: other | 2 |
 
 Trees: players/drake, helgrim, iomi, crovax, klopf, knubo, mousepad,
-caveral, okjuna and d/Valinor (6,437 of the findings).
+caveral, okjuna and d/Valinor (6,437 of the findings). The profile is
+the one the lib's own configuration builds (`examples/viking`): 723
+stubs, 113,567 bytes.
 
-- **Lost (116)** are all references to code in neither the checkout nor
-  the profile, now unknown: `target-object-missing` for
-  `/d/Odyssey/…`, `/players/graxius/…`; `callback-arity` and
-  `callable-not-found` against `/d/Empire/daemons/weapond`, `/com/s/more`;
-  `include-not-found` for `"../bob.h"` (above the checkout).
+- **Lost (82)** are references to code in neither the checkout nor the
+  profile, which is unknown from a checkout: `target-object-missing` for
+  objects in other wizards' trees and other domains, `callback-arity`
+  and `callable-not-found` against their daemons, `include-not-found`
+  for an include that reaches above the checkout.
 - **Extra syntax errors (52)** are real errors in files whose first
   problem is an `#include` reaching outside the checkout. With the whole
   lib that include is provably missing, which is fatal and withholds what
@@ -1176,29 +1218,36 @@ caveral, okjuna and d/Valinor (6,437 of the findings).
 - **Extra other (2):** one is false: `store_fp("do_clippy")` in
   `/players/knubo/clippy/clippy.c`, whose `do_clippy` is provided by
   another wizard's file that inherits it (10.5). The other is a true
-  finding renamed: `MONSTER_D->get_id_string()` calls a private function,
-  which the whole lib reports as `static-crossobj` ("is private") and the
-  profile, which lists no private functions, as `callable-not-found`.
+  finding under another name: `MONSTER_D->get_id_string()` calls a
+  private function, which the whole lib reports as `static-crossobj`
+  ("is private") and the profile, which lists no private functions, as
+  `callable-not-found`.
 
-### 10.7 The viking profile, and what it exposes
+### 10.7 One real profile, and what it exposes
 
-`viking.profile` (kept outside this repository, with its build inputs
-and a rebuild script): 46,926 bytes compressed, 217 KB of declarations; 394 objects and 71 headers from `/std`, `/obj`, `/room`,
-`/secure`, `/dgd` plus what they include and inherit; covered:
-`/dgd/ /obj/ /room/ /secure/ /std/` and the include dirs. `/com` was left
-out (wizard code rarely references commands; it stays unknown).
+The profile `dgdtools profile build` writes for VikingMUD from
+`examples/viking/dgdtools.yml`: 113,567 bytes compressed, 507 KB of
+declarations, 572 objects and 151 headers. 465 of the 723 files are the
+`share` globs (`/room` 180, `/std` 101, `/secure` 69, `/dgd` 66, `/obj`
+49) with what they include and inherit; the other 258 were found by use
+or are reached from files that were (189 under `/d`, 55 under
+`/players`, 10 commands, 4 under `/doc`). Covered: `/dgd/ /obj/ /room/
+/secure/ /std/` and the include dirs. The commands in `/com` are in it
+only where five owners use one: wizard code rarely references commands,
+and the rest stay unknown.
 
-The owner has decided it may be public. **Publishing it gives anyone who
-fetches it:** the paths of
-those 465 files; the full declarations (names, types, specifiers,
-parameter names) of their non-private functions and global variables,
-including `/secure` daemons and the login objects; and the full text of
+**Publishing a profile gives anyone who fetches it:** the paths of the
+files in it; the full declarations (names, types, specifiers, parameter
+names) of their non-private functions and global variables, including,
+here, `/secure` daemons and the login objects; and the full text of
 every `#define` in the shared headers (path constants, level constants,
 prompt macros). It publishes no function bodies, comments, private
-functions, private variables or data. A scan for credentials, e-mail addresses, IPs and URLs found only a
-public URL and identifier names such as `password`. Whether that surface
-may be public is the lib owner's decision; `omit:` removes anything from
-the next build.
+functions, private variables or data. Whether that surface may be public
+is the lib owner's decision, to be made by reading it: `dgdtools profile
+show NAME` summarizes a profile, `dgdtools profile show NAME
+/std/room.c` prints one stub, and the file is gzipped text (`gzip -dc
+NAME.profile` is all of it). `omit:` removes anything from the next
+build, wizards' files found by use among them.
 
 ### 10.8 Other LPC drivers
 
@@ -1226,11 +1275,9 @@ today. Generalizing to FluffOS or LDMud is mostly not profile work:
 
 The profile format itself needs nothing but new stub syntax.
 
-## 11. Implemented vs. deferred
+## 11. Deferred
 
-Implemented: everything in sections 2–7 except the items below.
-
-Deferred, in rough priority order:
+Not built, in rough priority order:
 
 1. **Conditions inside headers that depend on the includer.** A header's
    table is built from the header alone and shared (2.2); such a
@@ -1240,8 +1287,8 @@ Deferred, in rough priority order:
    direct-call arity, redeclaration): the next 2,500 files the driver
    rejects. Needs the kfun table, scopes, and inherited variables.
 3. **Receiver flow** for `ob->fn()` where `ob` is a local assigned from
-   `clone_object("…")` and the like: 77% of late-bound call sites still
-   have an unknown receiver.
+   `clone_object("…")` and the like: 76% of late-bound call sites have
+   an unknown receiver (9.3).
 4. **`--fix`** (see 4.1) and more fixes than `adjacent-strings`.
 5. **Linting headers** (`.h` files with code) and `.c` fragments in the
    context of their includers.
@@ -1250,11 +1297,11 @@ Deferred, in rough priority order:
    statement keeps its line breaks. Giving the formatter the project's
    headers would lay it out too, at the price of a result that depends
    on other files.
-7. **`dgdtools lsp`** (6.1) and **`dgdtools rename`** (both names are
-   reserved by the command), plus `dgdtools init` to write a starter
-   config. Line wrapping in the formatter is not planned
-   ([dgdfmt.md](dgdfmt.md) 2.2).
-8. **Type rules** on the declarations the index now keeps. Candidates,
+7. **`dgdtools lsp`** and **`dgdtools rename`** (both names are
+   reserved by the command; the plan for both is [lsp.md](lsp.md)), plus
+   `dgdtools init` to write a starter config. Line wrapping in the
+   formatter is not planned ([formatter.md](formatter.md) 2.2).
+8. **Type rules** on the declarations the index keeps. Candidates,
    by the driver errors they would catch (file counts from the oracle):
    wrong argument count in a direct call to a function declared in the
    chain ("too many/too few arguments", 289 files; needs the kfun table
@@ -1262,10 +1309,10 @@ Deferred, in rough priority order:
    `"/path"->fn()` ("void value not ignored", 46); definition that does
    not match its prototype ("declaration does not match prototype", 43);
    literal assigned or returned against a declared `int`/`string`
-   ("incompatible types", 246, a subset). None is added yet: each needs
-   macro-expanded types or the kfun table to be provable.
-9. **Profiles:** recognizing a checkout by evidence in its files when its path says
-   nothing; fetching or updating profiles is deliberately out of scope
-   (no network access in the tool).
+   ("incompatible types", 246, a subset). Each needs macro-expanded
+   types or the kfun table to be provable.
+9. **Profiles:** recognizing a checkout by evidence in its files when
+   its path says nothing; fetching or updating profiles is deliberately
+   out of scope (no network access in the tool).
 10. Backslash-newline outside strings is tolerated (not reported) but not
    modelled by the lexer.

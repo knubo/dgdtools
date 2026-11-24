@@ -23,7 +23,7 @@
 // and in the whole lib.
 //
 // There is one style and three settings (indentation with tabs or
-// spaces, its width, line endings); see docs/design/dgdfmt.md for why.
+// spaces, its width, line endings); see docs/design/formatter.md for why.
 // Between a comment `dgdtools-ignore-start format` and the
 // `dgdtools-ignore-end format` that answers it (pkg/directive) nothing is
 // touched, and Lines formats only part of a file.
@@ -75,7 +75,7 @@ const maxBlankLines = 2
 
 // Options are the formatter's settings and what the project says about
 // its macros. There are three settings, the ones an editor has to agree
-// with; everything else is the one style (docs/design/dgdfmt.md). The
+// with; everything else is the one style (docs/design/formatter.md). The
 // dialect is not an option here: a result is always relexed under the
 // dialect the input File was lexed with.
 type Options struct {

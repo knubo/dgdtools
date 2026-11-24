@@ -11,7 +11,7 @@ import (
 
 // The syntax group: constructs the DGD compiler rejects. An object with
 // one of these does not load. Every rule here was checked against DGD
-// 1.7.9 (see docs/design/dgdlint-rewrite.md, "Verification").
+// 1.7.9 (see docs/design/architecture.md, "Verification").
 
 var ruleSyntaxError = &Rule{
 	Code: "E001", Name: "syntax-error", Group: GroupSyntax,

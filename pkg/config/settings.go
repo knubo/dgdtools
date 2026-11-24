@@ -12,7 +12,7 @@ import (
 	"github.com/mmcdole/dgdtools/pkg/fileset"
 )
 
-// Format are the formatter's settings (docs/design/dgdfmt.md). A zero
+// Format are the formatter's settings (docs/design/formatter.md). A zero
 // field is not set: the value comes from an outer configuration, from
 // .editorconfig, or is the default.
 type Format struct {

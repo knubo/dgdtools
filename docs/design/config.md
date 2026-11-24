@@ -2,10 +2,9 @@
 
 One binary, `dgdtools`; one configuration file, `dgdtools.yml`. This
 document says how the file is laid out, how the settings of one source
-file are found, and what the command looks like. The linter's rules and
-the project model they need are in
-[dgdlint-rewrite.md](dgdlint-rewrite.md); the formatter is in
-[dgdfmt.md](dgdfmt.md).
+file are found, and what the command looks like. The linter and the
+project model it needs are in [architecture.md](architecture.md); the
+formatter is in [formatter.md](formatter.md).
 
 ## 1. What the others do
 
@@ -94,7 +93,7 @@ A `dgdtools.yml` is one of two things.
 - A **settings scope** says `root: false`. It adjusts `lint:` and
   `format:` for the files under its directory, inside whatever project
   those files belong to. Any other key in it is an error naming the key
-  (`players/drake/dgdtools.yml: exclude belongs in the project's root
+  (`usr/ann/dgdtools.yml: exclude belongs in the project's root
   config; this file is a settings scope (root: false) and holds only
   lint.rules, lint.overrides and format`), and so are `lint.fail_on` and
   `lint.baseline`, which describe a run, not a file. (`root:` is the lib
@@ -103,7 +102,7 @@ A `dgdtools.yml` is one of two things.
   "false" is written `"false"`; `root: true` is an error.)
 
 ```yaml
-# players/drake/dgdtools.yml
+# usr/ann/dgdtools.yml
 root: false
 format: {indent_style: tab}
 lint:
@@ -178,10 +177,10 @@ specific statement (Prettier's rule). Nothing else is read from
 
 `dgdtools.yml` in the user configuration directory
 (`os.UserConfigDir()/dgdtools/`, else `~/.config/dgdtools/`) is used for
-a path only when no project config is found for it. It is then that path's root
-config, with one difference: it has no directory to be a lib root, so a
-relative `root:` in it is an error. Its use is a wizard with a bare
-checkout and no file in it: `profile: viking` there, once.
+a path only when no project config is found for it. It is then that
+path's root config, with one difference: it has no directory to be a lib
+root, so a relative `root:` in it is an error. Its use is a wizard with
+a bare checkout and no file in it: `profile: NAME` there, once.
 
 It never merges with a project config. What a project's files are
 formatted and linted by must not depend on who runs the tool. Settings
@@ -263,8 +262,8 @@ dgdtools version
 - **`lint` and `format`**, the plain verbs; no aliases (`fmt`, `check`):
   one spelling in every script and every answer on a forum.
 - **Reserved:** `lsp` (the language server) and `rename` (semantic
-  rename) are names the dispatcher knows and answers with "not available
-  in this version" and exit 2. They are not in the help: help lists what
+  rename), both planned in [lsp.md](lsp.md), are names the dispatcher
+  knows and answers with "not part of this version" and exit 2. They are not in the help: help lists what
   works. Reserving them means an editor plugin configured for a newer
   version gets a precise message, and no later command has to work
   around a squatter.

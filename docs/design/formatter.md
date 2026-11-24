@@ -2,7 +2,7 @@
 
 `dgdtools format` and `pkg/format`. How the engine lays a file out (the
 plan from the syntax tree, the printer, every `#if` arm, the fallback
-where the parser gives up) is in [dgdlint-rewrite.md](dgdlint-rewrite.md),
+where the parser gives up) is in [architecture.md](architecture.md),
 section 8. This document is about what the tool is: its model, its
 options, and how it is driven.
 
@@ -34,7 +34,7 @@ Three things recur in the tools people do not fight with:
 
 ## 2. Decisions
 
-### 2.1 The model stays: trivia only, behind a gate
+### 2.1 The model: trivia only, behind a gate
 
 The formatter writes every significant token's bytes unchanged and
 chooses only the whitespace between them. The result is returned only if
@@ -67,7 +67,7 @@ Why not wrap:
   everybody's hand-laid descriptions and tables are reflowed to it. On
   this corpus that is most of the text in the lib, changed for no gain.
 - A wrapper has to understand everything it wraps. Where the parser
-  gives up, the formatter today moves no line break at all, which is
+  gives up, the formatter moves no line break at all, which is
   what keeps it a fixed point; a wrapper would need a second, weaker
   layout for those regions.
 - Width-driven output is unstable under small edits (one more argument
@@ -145,7 +145,7 @@ form, for generated files that are not excluded by path.
   mechanism is enough. clang-format and black have the same pair.
 - The comment is one of the tool's directives (`pkg/directive`; the
   grammar and why there is one prefix for linter and formatter are in
-  [dgdlint-rewrite.md](dgdlint-rewrite.md), section 4). The formatter
+  [architecture.md](architecture.md), section 4). The formatter
   reads the `format` target and nothing else; the form for a single
   line, `dgdtools-ignore format`, is not defined for it, and the linter
   says so (`invalid-suppression`).
@@ -162,7 +162,7 @@ dgdtools format PATH...            rewrite the files in place
 dgdtools format --check PATH...    write nothing; list the files that would change
 dgdtools format --diff PATH...     write nothing; print unified diffs
 dgdtools format -                  standard input to standard output
-dgdtools format --stdin-filename players/x/room.c   (implies -)
+dgdtools format --stdin-filename usr/ann/room.c     (implies -)
 ```
 
 - **In place by default**, as ruff format, black, rustfmt and `gofmt -w`
@@ -304,4 +304,4 @@ scope after excludes):
 | refused: does not tokenize | 765 |
 | gate failures | 0 |
 | changed by a second pass | 0 |
-| wall time, `format --check lib` | 5 s (12 CPUs) |
+| wall time, `format --check lib` | 5.5 s (12 CPUs) |
