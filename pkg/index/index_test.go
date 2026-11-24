@@ -1,0 +1,911 @@
+package index
+
+import (
+	"context"
+	"fmt"
+	"io/fs"
+	"sync"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/mmcdole/dgdtools/pkg/config"
+	"github.com/mmcdole/dgdtools/pkg/pp"
+	"github.com/mmcdole/dgdtools/pkg/vfs"
+)
+
+// probeFS counts reads and walks, and can hold one file's read open.
+type probeFS struct {
+	vfs.FS
+	mu    sync.Mutex
+	reads map[string]int
+	walks int
+	// gate, when set, blocks reads of that path: entered is closed when
+	// the first one arrives and the read continues when release is closed.
+	gate             string
+	entered, release chan struct{}
+	once             sync.Once
+}
+
+func (p *probeFS) ReadFile(name string) ([]byte, error) {
+	p.mu.Lock()
+	if p.reads == nil {
+		p.reads = map[string]int{}
+	}
+	p.reads[name]++
+	gated := name == p.gate
+	p.mu.Unlock()
+	if gated {
+		p.once.Do(func() { close(p.entered) })
+		<-p.release
+	}
+	return p.FS.ReadFile(name)
+}
+
+func (p *probeFS) WalkDir(root string, fn fs.WalkDirFunc) error {
+	p.mu.Lock()
+	p.walks++
+	p.mu.Unlock()
+	return p.FS.WalkDir(root, fn)
+}
+
+func (p *probeFS) count(name string) int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.reads[name]
+}
+
+func (p *probeFS) reset() {
+	p.mu.Lock()
+	p.reads, p.walks = nil, 0
+	p.mu.Unlock()
+}
+
+// lib_ is a small whole lib under /lib: files on "disk", an overlay for
+// edits, and a probe on what the index reads.
+type lib_ struct {
+	ix   *Index
+	disk vfs.Mem
+	ov   *vfs.Overlay
+	fs   *probeFS
+}
+
+func newLib(t *testing.T, files map[string]string, tweak ...func(*config.Config)) *lib_ {
+	t.Helper()
+	m := vfs.Mem{
+		"/lib/include/std.h": "#define ROOM \"/std/room\"\n#define status int\n",
+		"/lib/sys/auto.c":    "string object_name() { return \"x\"; }\nstatic void hidden_auto() { }\n",
+		"/lib/sys/forced.h":  "#define TRUE 1\n",
+	}
+	for k, v := range files {
+		m["/lib/"+k] = v
+	}
+	cfg := config.Default()
+	cfg.Root = "/lib"
+	cfg.Lint.IncludeDirs = []string{"/include"}
+	cfg.Lint.IncludeFile = "/sys/forced.h"
+	cfg.Lint.AutoObjects = []string{"/sys/auto"}
+	for _, f := range tweak {
+		f(cfg)
+	}
+	ov := vfs.NewOverlay(m)
+	pfs := &probeFS{FS: ov}
+	return &lib_{ix: New(cfg, Layout{Root: "/lib"}, pfs), disk: m, ov: ov, fs: pfs}
+}
+
+func (l *lib_) set(t *testing.T, rel, src string) []string {
+	t.Helper()
+	l.ov.Set("/lib/"+rel, []byte(src))
+	return l.ix.Invalidate("/lib/" + rel)
+}
+
+var bg = context.Background()
+
+// ------------------------------------------------------------- facts
+
+func TestUnitFacts(t *testing.T) {
+	l := newLib(t, map[string]string{
+		"std/room.c": "#include <std.h>\n" +
+			"inherit \"/std/base\";\n" +
+			"private inherit helper \"/std/helper\";\n" +
+			"inherit BROKEN;\n" +
+			"string *names;\nprivate static int count;\n" +
+			"static varargs status query(string what, mixed extra...) { return 1; }\n" +
+			"void proto(int a);\n",
+		"std/base.c":   "void create() { }\n",
+		"std/helper.c": "void help() { }\n",
+	})
+	s := l.ix.Snapshot()
+	u := s.Unit("/std/room")
+	require.NotNil(t, u)
+	assert.Equal(t, "/lib/std/room.c", u.Path)
+	assert.Equal(t, "/std/room", u.LibPath)
+	assert.False(t, u.Stub)
+	assert.Equal(t, []string{"/lib/std/room.c", "/lib/include/std.h", "/lib/sys/forced.h"}, u.Deps)
+
+	q := u.Funcs["query"]
+	assert.True(t, q.Static)
+	assert.Equal(t, "static varargs status query(string what, mixed extra...)", q.Decl)
+	assert.Equal(t, "status", q.Type)
+	assert.Equal(t, 0, q.MinArgs)
+	assert.Equal(t, -1, q.MaxArgs)
+	assert.Equal(t, Loc{Path: "/lib/std/room.c", Off: q.Off, Line: 7, Col: 23}, q.Loc)
+	assert.Equal(t, []string{"string what", "mixed extra..."}, Params(q.Decl))
+	assert.True(t, u.Funcs["proto"].PrototypeOnly)
+
+	names := u.Vars["names"]
+	assert.Equal(t, "string *", names.Type)
+	assert.Equal(t, Loc{Path: "/lib/std/room.c", Off: names.Off, Line: 5, Col: 9}, names.Loc)
+	assert.True(t, u.Vars["count"].Private)
+	assert.True(t, u.Vars["count"].Static)
+
+	require.Len(t, u.Inherits, 3)
+	assert.Equal(t, InheritRef{Raw: `"/std/base"`, Path: "/std/base", Resolved: true, Off: u.Inherits[0].Off, End: u.Inherits[0].End}, u.Inherits[0])
+	assert.True(t, u.Inherits[1].Private)
+	assert.Equal(t, "helper", u.Inherits[1].Label)
+	assert.False(t, u.Inherits[2].Resolved, "a macro nobody defines")
+
+	assert.Nil(t, s.Unit("/std/none"))
+	assert.Nil(t, s.UnitAt("/lib/std/none.c"))
+	assert.Same(t, u, s.UnitAt("/lib/std/../std/room.c"), "paths are cleaned")
+}
+
+func TestIncludes(t *testing.T) {
+	l := newLib(t, map[string]string{
+		"obj/defs.h":     "#define WHERE \"/std/here\"\n",
+		"include/defs.h": "#define WHERE \"/std/there\"\n",
+		"include/code.h": "int shared;\nvoid from_header() { }\n",
+		"obj/a.c":        "#include \"defs.h\"\n#include <code.h>\ninherit WHERE;\n",
+		"obj/b.c":        "#include <defs.h>\ninherit WHERE;\n",
+		"obj/c.c":        "#include \"/obj/defs.h\"\n#include \"gone.h\"\n#include <gone2.h>\ninherit WHERE;\n",
+		"obj/d.c":        "#include \"nest.h\"\n",
+		"obj/nest.h":     "#include \"nest2.h\"\n",
+		"std/here.c":     "", "std/there.c": "",
+	})
+	s := l.ix.Snapshot()
+	a, b, c := s.Unit("/obj/a"), s.Unit("/obj/b"), s.Unit("/obj/c")
+	assert.Equal(t, "/std/here", a.Inherits[0].Path, `"name" looks next to the file first`)
+	assert.Equal(t, "/std/there", b.Inherits[0].Path, "<name> looks in the include dirs only")
+	assert.Equal(t, "/std/here", c.Inherits[0].Path, "an absolute name is a lib path")
+
+	assert.Contains(t, a.Funcs, "from_header", "code in a header belongs to the includer")
+	assert.Contains(t, a.Vars, "shared")
+	assert.Equal(t, "/lib/include/code.h", a.Funcs["from_header"].Path)
+	assert.Equal(t, []string{"/include/code.h"}, a.code)
+	assert.False(t, a.Partial)
+
+	require.Len(t, c.BadIncludes, 2, "the lib is complete: a missing include is provably missing")
+	assert.Equal(t, `"gone.h"`, c.BadIncludes[0].Raw)
+	assert.Equal(t, `<gone2.h>`, c.BadIncludes[1].Raw)
+	assert.True(t, c.Partial)
+	assert.Equal(t, []string{"/lib/obj/defs.h", "/lib/obj/gone.h", "/lib/include/gone.h", "/lib/include/gone2.h"}, c.watch,
+		"the places an include was looked for are watched too")
+
+	d := s.Unit("/obj/d")
+	assert.Empty(t, d.BadIncludes)
+	assert.Equal(t, 1, d.UnknownIncludes, "an include of an include failed")
+
+	p, ok := s.ResolveInclude("/lib/obj/a.c", pp.Include{Name: "defs.h"})
+	assert.True(t, ok)
+	assert.Equal(t, "/lib/obj/defs.h", p)
+	_, ok = s.ResolveInclude("/lib/obj/a.c", pp.Include{Name: "nope.h"})
+	assert.False(t, ok)
+	file, ok := s.IncludeDeclares("/lib/obj/a.c", pp.Include{Name: "code.h", Angle: true})
+	assert.True(t, ok)
+	assert.Equal(t, "/lib/include/code.h", file)
+	_, ok = s.IncludeDeclares("/lib/obj/a.c", pp.Include{Name: "defs.h"})
+	assert.False(t, ok)
+
+	assert.Equal(t, 1, l.fs.count("/lib/include/code.h"), "a header is read once for its macros and its code")
+	assert.Equal(t, 1, l.fs.count("/lib/sys/forced.h"))
+}
+
+func TestParse(t *testing.T) {
+	l := newLib(t, map[string]string{
+		"std/base.c": "void create() { }\n",
+		"obj/a.c":    "inherit \"/std/base\";\nvoid f() { }\n",
+	})
+	s := l.ix.Snapshot()
+
+	p := s.Parse("/lib/obj/a.c")
+	require.NotNil(t, p)
+	require.NotNil(t, p.Tree)
+	assert.Equal(t, "/lib/obj/a.c", p.Tok.Path)
+	assert.NotNil(t, p.View.Lookup("TRUE"), "the force-included header is in view")
+	assert.Equal(t, 1, l.fs.count("/lib/obj/a.c"), "tree and facts come from one read")
+	assert.Same(t, p.Unit, s.Unit("/obj/a"))
+
+	// A file the generation already knows is parsed for its tree only.
+	base := s.Unit("/std/base")
+	require.NotNil(t, s.Chain("/obj/a").Funcs["create"])
+	p = s.Parse("/lib/std/base.c")
+	require.NotNil(t, p)
+	assert.Same(t, base, p.Unit, "the facts are not rebuilt")
+	assert.Equal(t, 2, l.fs.count("/lib/std/base.c"))
+
+	assert.Nil(t, s.Parse("/lib/obj/none.c"))
+}
+
+// ------------------------------------------------------------ chains
+
+func TestChain(t *testing.T) {
+	l := newLib(t, map[string]string{
+		"std/top.c":  "int top_var;\nvoid shared() { }\nvoid only_top() { }\nprivate void secret() { }\nvoid later();\n",
+		"std/mid.c":  "inherit \"/std/top\";\nstring mid_var;\nvoid shared() { }\nvoid later() { }\n",
+		"std/side.c": "void side() { }\nvoid later();\n",
+		"obj/leaf.c": "inherit \"/std/mid\";\nprivate inherit \"/std/side\";\nint leaf_var;\nvoid leaf() { }\n",
+		"obj/bad.c":  "inherit UNKNOWN;\nvoid f() { }\n",
+		"obj/lost.c": "inherit \"/std/missing\";\n",
+		"obj/cyc1.c": "inherit \"/obj/cyc2\";\nvoid one() { }\n",
+		"obj/cyc2.c": "inherit \"/obj/cyc1\";\nvoid two() { }\n",
+	})
+	s := l.ix.Snapshot()
+	ch := s.Chain("/obj/leaf")
+	assert.False(t, ch.Partial)
+	assert.Equal(t, []string{"/std/top", "/std/mid", "/std/side", "/obj/leaf"}, ch.Objects)
+
+	assert.Equal(t, "/std/mid", ch.Funcs["shared"].DefinedIn, "the nearer definition wins")
+	assert.Equal(t, "/lib/std/mid.c", ch.Funcs["shared"].Path)
+	assert.Equal(t, 3, ch.Funcs["shared"].Line)
+	assert.Equal(t, "/std/top", ch.Funcs["only_top"].DefinedIn)
+	assert.True(t, ch.Funcs["secret"].Private)
+	assert.True(t, ch.Funcs["side"].Private, "everything below a private inherit is private")
+	assert.False(t, ch.Funcs["later"].PrototypeOnly, "a sibling's prototype does not hide a definition")
+	assert.Equal(t, "/obj/leaf", ch.Funcs["leaf"].DefinedIn)
+
+	assert.Equal(t, "/std/top", ch.Vars["top_var"].DefinedIn)
+	assert.Equal(t, "int", ch.Vars["top_var"].Type)
+	assert.Equal(t, "/lib/std/top.c", ch.Vars["top_var"].Path)
+	assert.Equal(t, "/std/mid", ch.Vars["mid_var"].DefinedIn)
+	assert.Equal(t, "/obj/leaf", ch.Vars["leaf_var"].DefinedIn)
+
+	assert.Same(t, ch, s.Chain("/obj/leaf"), "chains are memoized")
+	assert.True(t, s.Chain("/obj/bad").Partial, "an inherit that cannot be evaluated")
+	assert.Contains(t, s.Chain("/obj/bad").Funcs, "f")
+	assert.True(t, s.Chain("/obj/lost").Partial, "a parent with no file")
+	assert.True(t, s.Chain("/std/missing").Partial)
+
+	cyc := s.Chain("/obj/cyc1")
+	assert.True(t, cyc.Partial, "a cycle cannot be flattened")
+	assert.Contains(t, cyc.Funcs, "one")
+
+	assert.Contains(t, s.AutoFuncs(), "object_name")
+	assert.Equal(t, "(auto object)", s.AutoFuncs()["object_name"].DefinedIn)
+}
+
+func TestLookupCallable(t *testing.T) {
+	l := newLib(t, map[string]string{
+		"std/mod.c":      "void here() { }\nstatic void quiet() { }\nvoid decl();\n",
+		"obj/leaf.c":     "inherit \"/std/mod\";\nvoid cb() { }\nvoid decl() { }\n",
+		"obj/deep.c":     "inherit \"/obj/leaf\";\nvoid deep_cb() { }\n",
+		"obj/alone.c":    "void f() { }\n",
+		"obj/partial.c":  "inherit NOPE;\n",
+		"sys/auto.c":     "inherit \"/sys/autobase\";\n#include \"/sys/autocode.h\"\nstring object_name() { return \"x\"; }\n",
+		"sys/autobase.c": "void in_base() { }\n",
+		"sys/autocode.h": "void in_code() { }\n",
+		"std/code.c":     "void code_fn() { }\n",
+		"obj/user.c":     "#include \"/std/code.c\"\nvoid provided() { }\n",
+		"obj/heir.c":     "inherit \"/obj/user\";\nvoid inherited_cb() { }\n",
+	})
+	s := l.ix.Snapshot()
+	state := func(target, fn string, self bool) LookupState {
+		return s.LookupCallable(bg, target, fn, self).State
+	}
+
+	lk := s.LookupCallable(bg, "/std/mod", "here", false)
+	assert.Equal(t, LookupFound, lk.State)
+	assert.Equal(t, "/std/mod", lk.Fn.DefinedIn)
+	assert.Equal(t, LookupFound, state("/obj/leaf", "here", false), "through the chain")
+	assert.True(t, s.LookupCallable(bg, "/std/mod", "quiet", false).Fn.Static)
+	assert.Equal(t, LookupFound, state("/obj/alone", "object_name", false), "from the auto object")
+	assert.Equal(t, LookupFound, state("/obj/alone", "in_base", false), "from the auto object's parent")
+	assert.Equal(t, LookupFound, state("/obj/alone", "in_code", false), "from code the auto object includes")
+
+	assert.Equal(t, LookupMissing, state("/std/mod", "cb", false), "the named object itself lacks it")
+	assert.Equal(t, LookupUnknown, state("/obj/partial", "anything", false))
+	assert.Equal(t, LookupUnknown, state("/obj/none", "anything", false), "no such object: its chain is unknown")
+	assert.Equal(t, LookupUnknown, state("", "anything", true))
+
+	// this_object() in a module may be any inheritor.
+	assert.Equal(t, LookupFoundInUser, state("/std/mod", "cb", true))
+	assert.Equal(t, LookupFoundInUser, state("/std/mod", "deep_cb", true), "an indirect inheritor")
+	lk = s.LookupCallable(bg, "/std/mod", "nowhere", true)
+	assert.Equal(t, LookupMissing, lk.State)
+	assert.Contains(t, lk.Note, "2 inheritors")
+	assert.Equal(t, LookupMissing, state("/obj/alone", "nowhere", true))
+	assert.Empty(t, s.LookupCallable(bg, "/obj/alone", "nowhere", true).Note)
+
+	// Code in the auto object's chain runs as every object.
+	assert.Equal(t, LookupUnknown, state("/sys/auto", "nowhere", true))
+	assert.Equal(t, LookupUnknown, state("/sys/autobase", "nowhere", true))
+	assert.Equal(t, LookupUnknown, state("/sys/autocode.h", "nowhere", true))
+
+	// A file included as code runs as its includers and their inheritors.
+	assert.Equal(t, LookupFoundInUser, state("/std/code", "provided", true))
+	assert.Equal(t, LookupFoundInUser, state("/std/code", "inherited_cb", true))
+
+	assert.True(t, s.ProvidedByUsers(bg, "/std/mod", "decl"), "leaf defines what mod declares")
+	assert.False(t, s.ProvidedByUsers(bg, "/std/mod", "nowhere"))
+	assert.False(t, s.ProvidedByUsers(bg, "/obj/alone", "f"), "nobody inherits it")
+
+	users, ok := s.UsersOf(bg, "/std/mod")
+	require.True(t, ok)
+	assert.Equal(t, []string{"/obj/deep", "/obj/leaf"}, users)
+	users, _ = s.UsersOf(bg, "/std/code")
+	assert.Equal(t, []string{"/obj/heir", "/obj/user"}, users)
+}
+
+func TestNoLib(t *testing.T) {
+	m := vfs.Mem{"/any/a.c": "#include \"b.h\"\ninherit \"/std/x\";\nvoid f() { }\n", "/any/b.h": "#define B 1\n"}
+	ix := New(config.Default(), Layout{}, m)
+	assert.False(t, ix.HasLib())
+	s := ix.Snapshot()
+	u := s.UnitAt("/any/a.c")
+	require.NotNil(t, u)
+	assert.Empty(t, u.LibPath)
+	assert.Contains(t, u.Funcs, "f")
+	assert.Equal(t, []string{"/any/a.c", "/any/b.h"}, u.Deps, "a relative include still resolves")
+	assert.False(t, u.Inherits[0].Resolved)
+	assert.Nil(t, s.Unit("/std/x"))
+	assert.Equal(t, LookupUnknown, s.LookupCallable(bg, "/std/x", "f", false).State)
+	assert.False(t, s.Scan(bg))
+	_, ok := s.UsersOf(bg, "/std/x")
+	assert.False(t, ok)
+}
+
+// ------------------------------------------------------- generations
+
+func TestGenerationsShareWhatDidNotChange(t *testing.T) {
+	l := newLib(t, map[string]string{
+		"std/base.c": "void create() { }\n",
+		"obj/a.c":    "inherit \"/std/base\";\nvoid a() { }\n",
+		"obj/b.c":    "void b() { }\n",
+	})
+	s1 := l.ix.Snapshot()
+	assert.Equal(t, uint64(1), s1.Generation())
+	base, a, b := s1.Unit("/std/base"), s1.Unit("/obj/a"), s1.Unit("/obj/b")
+	chA, chB := s1.Chain("/obj/a"), s1.Chain("/obj/b")
+	require.Contains(t, chA.Funcs, "create")
+
+	affected := l.set(t, "std/base.c", "void renamed() { }\n")
+	assert.Equal(t, []string{"/lib/obj/a.c", "/lib/std/base.c"}, affected)
+	s2 := l.ix.Snapshot()
+	assert.Equal(t, uint64(2), s2.Generation())
+	assert.Equal(t, uint64(2), l.ix.Generation())
+
+	// The old generation answers as before.
+	assert.Same(t, base, s1.Unit("/std/base"))
+	assert.Same(t, chA, s1.Chain("/obj/a"))
+	assert.Contains(t, s1.Chain("/obj/a").Funcs, "create")
+
+	// The new one shares what the change did not reach.
+	l.fs.reset()
+	assert.Same(t, a, s2.Unit("/obj/a"), "a's own facts did not change")
+	assert.Same(t, b, s2.Unit("/obj/b"))
+	assert.Same(t, chB, s2.Chain("/obj/b"))
+	assert.Zero(t, l.fs.count("/lib/obj/a.c"))
+	assert.NotSame(t, base, s2.Unit("/std/base"))
+	assert.NotSame(t, chA, s2.Chain("/obj/a"), "a's chain did")
+	assert.Contains(t, s2.Chain("/obj/a").Funcs, "renamed")
+	assert.NotContains(t, s2.Chain("/obj/a").Funcs, "create")
+	assert.Equal(t, 1, l.fs.count("/lib/std/base.c"))
+	assert.Zero(t, l.fs.count("/lib/sys/forced.h"), "the force-included header is carried over")
+}
+
+func TestInvalidateAffectedSet(t *testing.T) {
+	files := map[string]string{
+		"obj/defs.h":  "#define P \"/std/base\"\n",
+		"std/base.c":  "void create() { }\n",
+		"std/mid.c":   "inherit \"/std/base\";\n",
+		"obj/leaf.c":  "#include \"defs.h\"\ninherit \"/std/mid\";\n",
+		"obj/macro.c": "#include \"defs.h\"\ninherit P;\n",
+		"obj/other.c": "void f() { }\n",
+		"std/code.c":  "void code_fn() { }\n",
+		"obj/inc.c":   "#include \"/std/code.c\"\n",
+		"obj/heir.c":  "inherit \"/obj/inc\";\n",
+	}
+	load := func(l *lib_) *Snapshot {
+		s := l.ix.Snapshot()
+		for name := range files {
+			if name != "obj/defs.h" {
+				s.UnitAt("/lib/" + name)
+			}
+		}
+		return s
+	}
+
+	t.Run("a header reaches its includers and their inheritors", func(t *testing.T) {
+		l := newLib(t, files)
+		load(l)
+		assert.Equal(t, []string{"/lib/obj/defs.h", "/lib/obj/leaf.c", "/lib/obj/macro.c"},
+			l.set(t, "obj/defs.h", "#define P \"/std/mid\"\n"))
+		assert.Equal(t, "/std/mid", l.ix.Snapshot().Unit("/obj/macro").Inherits[0].Path)
+	})
+
+	t.Run("an object reaches everything that inherits it", func(t *testing.T) {
+		l := newLib(t, files)
+		load(l)
+		assert.Equal(t, []string{"/lib/obj/leaf.c", "/lib/obj/macro.c", "/lib/std/base.c", "/lib/std/mid.c"},
+			l.set(t, "std/base.c", "void x() { }\n"))
+	})
+
+	t.Run("code reaches its includers and their inheritors", func(t *testing.T) {
+		l := newLib(t, files)
+		load(l)
+		assert.Equal(t, []string{"/lib/obj/heir.c", "/lib/obj/inc.c", "/lib/std/code.c"},
+			l.set(t, "std/code.c", "void other() { }\n"))
+		assert.Contains(t, l.ix.Snapshot().Chain("/obj/heir").Funcs, "other")
+	})
+
+	t.Run("nothing else", func(t *testing.T) {
+		l := newLib(t, files)
+		load(l)
+		assert.Equal(t, []string{"/lib/obj/other.c"}, l.set(t, "obj/other.c", "void g() { }\n"))
+		assert.Equal(t, []string{"/lib/obj/never-loaded.c"}, l.set(t, "obj/never-loaded.c", ""))
+		assert.Equal(t, []string{"/elsewhere/x.c"}, l.ix.Invalidate("/elsewhere/x.c"))
+	})
+
+	t.Run("edges follow the units", func(t *testing.T) {
+		l := newLib(t, files)
+		load(l)
+		// leaf stops including defs.h and inheriting mid.
+		l.set(t, "obj/leaf.c", "void f() { }\n")
+		assert.NotNil(t, l.ix.Snapshot().Unit("/obj/leaf"))
+		assert.NotContains(t, l.set(t, "obj/defs.h", "#define P \"/std/base\"\n#define Q 1\n"), "/lib/obj/leaf.c")
+		assert.NotContains(t, l.set(t, "std/mid.c", "inherit \"/std/base\";\nvoid m() { }\n"), "/lib/obj/leaf.c")
+		// A unit that was dropped and not read again depends on nothing.
+		l.set(t, "obj/macro.c", "void f() { }\n")
+		assert.Equal(t, []string{"/lib/obj/defs.h"}, l.set(t, "obj/defs.h", "#define P \"/std/base\"\n"))
+		for name, set := range l.ix.builtFrom {
+			assert.NotEmpty(t, set, name)
+		}
+		for name, set := range l.ix.children {
+			assert.NotEmpty(t, set, name)
+		}
+	})
+
+	t.Run("a file appearing where one was looked for", func(t *testing.T) {
+		l := newLib(t, map[string]string{
+			"include/late.h": "#define L 1\n",
+			"obj/x.c":        "#include \"late.h\"\n#include \"never.h\"\ninherit \"/std/soon\";\n",
+		})
+		s := l.ix.Snapshot()
+		require.Len(t, s.Unit("/obj/x").BadIncludes, 1)
+		require.True(t, s.Chain("/obj/x").Partial)
+
+		// Earlier in the search order than the header in use.
+		assert.Contains(t, l.set(t, "obj/late.h", "#define L 2\n"), "/lib/obj/x.c")
+		assert.Contains(t, l.ix.Snapshot().Unit("/obj/x").Deps, "/lib/obj/late.h")
+		assert.Contains(t, l.set(t, "include/never.h", ""), "/lib/obj/x.c")
+		assert.Empty(t, l.ix.Snapshot().Unit("/obj/x").BadIncludes)
+		// A parent that did not exist.
+		assert.Contains(t, l.set(t, "std/soon.c", "void create() { }\n"), "/lib/obj/x.c")
+		assert.False(t, l.ix.Snapshot().Chain("/obj/x").Partial)
+		// And one that goes away again.
+		l.ov.Delete("/lib/std/soon.c")
+		assert.Contains(t, l.ix.Invalidate("/lib/std/soon.c"), "/lib/obj/x.c")
+		assert.True(t, l.ix.Snapshot().Chain("/obj/x").Partial)
+	})
+}
+
+func TestInvalidateForceIncludeAndAutoObject(t *testing.T) {
+	l := newLib(t, map[string]string{
+		"sys/forced.h": "#include \"more.h\"\n#include \"absent.h\"\n",
+		"sys/more.h":   "#define PARENT \"/std/one\"\n",
+		"std/one.c":    "void one() { }\n",
+		"std/two.c":    "void two() { }\n",
+		"obj/a.c":      "inherit PARENT;\n",
+		"obj/b.c":      "void b() { }\n",
+	})
+	s := l.ix.Snapshot()
+	a, b := s.Unit("/obj/a"), s.Unit("/obj/b")
+	require.Contains(t, s.Chain("/obj/a").Funcs, "one")
+	assert.Contains(t, a.Deps, "/lib/sys/more.h")
+
+	// A header the forced header includes: every unit is rebuilt.
+	affected := l.set(t, "sys/more.h", "#define PARENT \"/std/two\"\n")
+	assert.Equal(t, []string{"/lib/obj/a.c", "/lib/obj/b.c", "/lib/std/one.c", "/lib/sys/more.h"}, affected)
+	s = l.ix.Snapshot()
+	assert.Contains(t, s.Chain("/obj/a").Funcs, "two")
+	assert.NotSame(t, b, s.Unit("/obj/b"))
+
+	// A header it looked for and did not find.
+	assert.Contains(t, l.set(t, "sys/absent.h", "#define NEW 1\n"), "/lib/obj/b.c")
+	// Anything else leaves the forced header's state alone.
+	l.ix.Snapshot().Unit("/obj/b")
+	l.fs.reset()
+	l.set(t, "obj/b.c", "void b2() { }\n")
+	l.ix.Snapshot().Unit("/obj/b")
+	assert.Equal(t, map[string]int{"/lib/obj/b.c": 1}, l.fs.reads)
+
+	// The auto object's functions are everybody's.
+	s = l.ix.Snapshot()
+	s.Unit("/obj/a")
+	require.Contains(t, s.AutoFuncs(), "object_name")
+	affected = l.set(t, "sys/auto.c", "string other_name() { return \"y\"; }\n")
+	assert.Subset(t, affected, []string{"/lib/obj/a.c", "/lib/obj/b.c", "/lib/sys/auto.c"})
+	assert.Contains(t, l.ix.Snapshot().AutoFuncs(), "other_name")
+	assert.NotContains(t, l.ix.Snapshot().AutoFuncs(), "object_name")
+	assert.Contains(t, s.AutoFuncs(), "object_name", "the old generation keeps its answer")
+}
+
+// A unit that is still being built when the files change belongs to the
+// generation that started it and is not handed to the next.
+func TestBuildInFlightIsNotCarried(t *testing.T) {
+	l := newLib(t, map[string]string{"obj/a.c": "void old_fn() { }\n"})
+	l.fs.gate, l.fs.entered, l.fs.release = "/lib/obj/a.c", make(chan struct{}), make(chan struct{})
+	s1 := l.ix.Snapshot()
+	built := make(chan *Unit)
+	go func() { built <- s1.Unit("/obj/a") }()
+	<-l.fs.entered // the build has started and not read the file yet
+
+	l.set(t, "obj/a.c", "void new_fn() { }\n")
+	s2 := l.ix.Snapshot()
+	close(l.fs.release)
+	u1 := <-built
+	u2 := s2.Unit("/obj/a")
+	assert.NotSame(t, u1, u2)
+	assert.Contains(t, u2.Funcs, "new_fn")
+	assert.Equal(t, uint64(1), u1.gen)
+	assert.Equal(t, uint64(2), u2.gen)
+	// The late unit did not enter the current generation's edges or scan.
+	l.set(t, "obj/a.c", "void third() { }\n")
+	assert.Contains(t, l.ix.Snapshot().Unit("/obj/a").Funcs, "third")
+}
+
+// --------------------------------------------------------------- scan
+
+func TestScan(t *testing.T) {
+	files := map[string]string{
+		"std/mod.c":      "void m() { }\n",
+		"obj/leaf.c":     "inherit \"/std/mod\";\n",
+		"attic/old.c":    "inherit \"/std/mod\";\n",
+		"obj/sub/deep.c": "inherit \"/obj/leaf\";\n",
+		"obj/old/gone.c": "inherit \"/std/mod\";\n",
+		"obj/notes.txt":  "inherit \"/std/mod\";\n",
+		"obj/x.pre.c":    "inherit \"/std/mod\";\n",
+	}
+	exclude := func(c *config.Config) { c.Exclude = []string{"attic/**", "**/old/**", "**/*.pre*"} }
+	l := newLib(t, files, exclude)
+	s := l.ix.Snapshot()
+	assert.False(t, s.Scanned())
+	require.True(t, s.Scan(bg))
+	assert.True(t, s.Scanned())
+	users, ok := s.UsersOf(bg, "/std/mod")
+	require.True(t, ok)
+	assert.Equal(t, []string{"/obj/leaf", "/obj/sub/deep"}, users, "excluded files are not scanned")
+	assert.Equal(t, 1, l.fs.walks)
+	assert.Zero(t, l.fs.count("/lib/attic/old.c"))
+
+	// A second scan reads nothing.
+	l.fs.reset()
+	require.True(t, s.Scan(bg))
+	assert.Zero(t, l.fs.walks)
+	assert.Empty(t, l.fs.reads)
+
+	// After a change the scan reads the changed file only.
+	l.set(t, "obj/leaf.c", "void f() { }\n")
+	s2 := l.ix.Snapshot()
+	assert.False(t, s2.Scanned())
+	_, ok = s.UsersOf(bg, "/std/mod")
+	assert.False(t, ok, "a generation that has been replaced cannot say who inherits")
+	users, ok = s2.UsersOf(bg, "/std/mod")
+	require.True(t, ok)
+	assert.Empty(t, users)
+	assert.Zero(t, l.fs.walks)
+	assert.Equal(t, map[string]int{"/lib/obj/leaf.c": 1}, l.fs.reads)
+
+	// Files that appear and disappear, in and out of the scan's scope.
+	l.set(t, "obj/new.c", "inherit \"/std/mod\";\n")
+	l.set(t, "attic/new.c", "inherit \"/std/mod\";\n")
+	l.set(t, "obj/old/new.c", "inherit \"/std/mod\";\n")
+	l.set(t, "obj/new.h", "inherit \"/std/mod\";\n")
+	delete(l.disk, "/lib/obj/sub/deep.c")
+	l.ix.Invalidate("/lib/obj/sub/deep.c")
+	users, ok = l.ix.Snapshot().UsersOf(bg, "/std/mod")
+	require.True(t, ok)
+	assert.Equal(t, []string{"/obj/new"}, users)
+	assert.Zero(t, l.fs.walks)
+}
+
+func TestScanCancelled(t *testing.T) {
+	files := map[string]string{"std/mod.c": "void m() { }\n"}
+	for i := range 200 {
+		files[fmt.Sprintf("obj/o%d.c", i)] = "inherit \"/std/mod\";\n"
+	}
+	l := newLib(t, files)
+	s := l.ix.Snapshot()
+
+	ctx, cancel := context.WithCancel(bg)
+	cancel()
+	assert.False(t, s.Scan(ctx))
+	_, ok := s.UsersOf(ctx, "/std/mod")
+	assert.False(t, ok, "a cancelled scan is not an answer")
+
+	// Cancelled part-way: what was indexed is kept, the rest is done by
+	// the next scan.
+	l.fs.gate, l.fs.entered, l.fs.release = "/lib/obj/o7.c", make(chan struct{}), make(chan struct{})
+	ctx, cancel = context.WithCancel(bg)
+	done := make(chan bool)
+	go func() { done <- s.Scan(ctx) }()
+	<-l.fs.entered
+	cancel()
+	close(l.fs.release)
+	assert.False(t, <-done)
+	assert.False(t, s.Scanned())
+
+	users, ok := s.UsersOf(bg, "/std/mod")
+	require.True(t, ok)
+	assert.Len(t, users, 200)
+	for i := range 200 {
+		assert.Equal(t, 1, l.fs.count(fmt.Sprintf("/lib/obj/o%d.c", i)), "each file is read once across both scans")
+	}
+}
+
+// ------------------------------------------------------------- query
+
+func TestQueryRecordsWhatItAsked(t *testing.T) {
+	l := newLib(t, map[string]string{
+		"std/mod.c":    "void m() { }\n",
+		"obj/target.c": "inherit \"/std/mod\";\nvoid hit() { }\n",
+		"obj/asker.c":  "void f() { }\n",
+		"obj/idle.c":   "void f() { }\n",
+	})
+	s := l.ix.Snapshot()
+	asker, idle := s.Unit("/obj/asker"), s.Unit("/obj/idle")
+	q := s.Query(asker, false)
+	assert.Equal(t, LookupFound, q.LookupCallable(bg, "/obj/target", "hit", false).State)
+	assert.False(t, q.ObjectExists("/obj/soon"))
+	assert.Equal(t, "/obj/rel", q.ObjectPath("obj/rel.c"))
+	s.Query(idle, false).Chain("/obj/idle")
+
+	assert.Equal(t, []string{"/lib/obj/asker.c", "/lib/obj/target.c"}, l.set(t, "obj/target.c", "void miss() { }\n"),
+		"the asker depends on the object it asked about")
+	assert.Equal(t, []string{"/lib/std/mod.c"}, l.set(t, "std/mod.c", "void m2() { }\n"),
+		"target no longer inherits mod, so nothing reaches the asker through it")
+	// A question asked generations ago still stands.
+	assert.Equal(t, []string{"/lib/obj/asker.c", "/lib/obj/soon.c"}, l.set(t, "obj/soon.c", ""))
+
+	// Once the asker itself is rebuilt, what it asked before is void.
+	l.set(t, "obj/asker.c", "void g() { }\n")
+	l.ix.Snapshot().Unit("/obj/asker")
+	assert.Equal(t, []string{"/lib/obj/target.c"}, l.set(t, "obj/target.c", "void hit() { }\n"))
+	assert.Empty(t, l.ix.refs["/obj/target"], "the void question is forgotten")
+}
+
+func TestQueryWithoutScan(t *testing.T) {
+	l := newLib(t, map[string]string{
+		"std/mod.c":  "void m() { }\n",
+		"obj/leaf.c": "inherit \"/std/mod\";\nvoid cb() { }\n",
+	})
+	s := l.ix.Snapshot()
+	mod := s.Unit("/std/mod")
+
+	q := s.Query(mod, true)
+	assert.Equal(t, LookupFound, q.LookupCallable(bg, "/std/mod", "m", true).State)
+	assert.False(t, q.NeedsScan(), "nothing needed the scan yet")
+	assert.Equal(t, LookupUnknown, q.LookupCallable(bg, "/std/mod", "cb", true).State)
+	assert.True(t, q.ProvidedByUsers(bg, "cb"), "unknown is assumed provided")
+	assert.True(t, q.NeedsScan())
+	assert.Zero(t, l.fs.walks, "the query did not start the scan")
+
+	require.True(t, s.Scan(bg))
+	q = s.Query(mod, true)
+	assert.Equal(t, LookupFoundInUser, q.LookupCallable(bg, "/std/mod", "cb", true).State)
+	assert.Equal(t, LookupMissing, q.LookupCallable(bg, "/std/mod", "nope", true).State)
+	assert.False(t, q.NeedsScan())
+
+	// Who inherits a file can change with any object: the asker is told.
+	assert.Contains(t, l.set(t, "obj/other.c", "inherit \"/std/mod\";\nvoid nope() { }\n"), "/lib/std/mod.c")
+	s = l.ix.Snapshot()
+	q = s.Query(s.Unit("/std/mod"), false)
+	assert.Equal(t, LookupFoundInUser, q.LookupCallable(bg, "/std/mod", "nope", true).State, "without NoScan the query scans")
+}
+
+// --------------------------------------------------------- partial libs
+
+func TestStubsAndCheckout(t *testing.T) {
+	stubs := vfs.Mem{
+		"stub://lib/std/room.c":    "#include <std.h>\nvoid create() {}\nint query_light() {}\n",
+		"stub://lib/include/std.h": "#define ROOM \"/std/room\"\n",
+		"stub://lib/sys/auto.c":    "string object_name() {}\n",
+	}
+	disk := vfs.Mem{
+		"/home/ann/hall.c":       "#include <std.h>\n#include \"mine.h\"\ninherit ROOM;\nvoid f() { }\n",
+		"/home/ann/mine.h":       "#define MINE 1\n",
+		"/home/ann/sub/closet.c": "inherit \"/players/ann/hall\";\n",
+	}
+	both := unionFS{disk, stubs}
+	cfg := config.Default()
+	cfg.Lint.IncludeDirs = []string{"/include"}
+	cfg.Lint.AutoObjects = []string{"/sys/auto"}
+	ix := New(cfg, Layout{
+		CheckoutDir: "/home/ann", CheckoutLib: "/players/ann",
+		Stubs: "stub://lib", Covered: []string{"/std/", "/include/"}, Holes: []string{"std/secret/**"},
+	}, both)
+	assert.True(t, ix.HasLib())
+	assert.True(t, ix.Partial())
+	assert.False(t, ix.Complete())
+
+	assert.Equal(t, "/players/ann/hall", ix.LibPath("/home/ann/hall.c"))
+	assert.Equal(t, "/std/room", ix.LibPath("stub://lib/std/room.c"))
+	assert.Empty(t, ix.LibPath("/home/bob/x.c"))
+	assert.True(t, ix.Covers("/players/ann/anything"))
+	assert.True(t, ix.Covers("/std/anything"))
+	assert.False(t, ix.Covers("/std/secret/thing"))
+	assert.False(t, ix.Covers("/obj/anything"))
+
+	s := ix.Snapshot()
+	hall := s.Unit("/players/ann/hall")
+	require.NotNil(t, hall)
+	assert.Equal(t, "/home/ann/hall.c", hall.Path)
+	assert.Equal(t, []string{"/home/ann/hall.c", "stub://lib/include/std.h", "/home/ann/mine.h"}, hall.Deps)
+	assert.False(t, hall.Stub)
+	assert.Equal(t, "/std/room", hall.Inherits[0].Path)
+
+	room := s.Unit("/std/room")
+	require.NotNil(t, room)
+	assert.True(t, room.Stub)
+	assert.Equal(t, "stub://lib/std/room.c", room.Path)
+	assert.Equal(t, "stub://lib/std/room.c", s.Chain("/players/ann/hall").Funcs["query_light"].Path)
+	assert.True(t, s.ObjectExists("/std/room"))
+	assert.False(t, s.ObjectExists("/std/nothing"))
+	assert.Nil(t, s.Unit("/players/ann/nothing"), "the checkout alone speaks for its directory")
+
+	lk := s.LookupCallable(bg, "/std/room", "hidden", false)
+	assert.Equal(t, LookupMissing, lk.State)
+	assert.Contains(t, lk.Note, "public functions only")
+
+	// The scan covers the checkout only.
+	users, ok := s.UsersOf(bg, "/players/ann/hall")
+	require.True(t, ok)
+	assert.Equal(t, []string{"/players/ann/sub/closet"}, users)
+	lk = s.LookupCallable(bg, "/players/ann/sub/closet", "nowhere", true)
+	assert.Equal(t, LookupMissing, lk.State)
+	assert.Contains(t, lk.Note, "inheritors elsewhere in the lib cannot be seen")
+}
+
+func TestRealFileWinsOverStub(t *testing.T) {
+	disk := vfs.Mem{"/lib/obj/a.c": "inherit \"/std/room\";\n", "/lib/keep": ""}
+	stubs := vfs.Mem{"stub://lib/std/room.c": "void from_stub() {}\n"}
+	ov := vfs.NewOverlay(unionFS{disk, stubs})
+	ix := New(config.Default(), Layout{Root: "/lib", Stubs: "stub://lib"}, ov)
+
+	s := ix.Snapshot()
+	assert.Contains(t, s.Chain("/obj/a").Funcs, "from_stub")
+	assert.True(t, s.Unit("/std/room").Stub)
+
+	ov.Set("/lib/std/room.c", []byte("void from_disk() { }\n"))
+	assert.Equal(t, []string{"/lib/obj/a.c", "/lib/std/room.c"}, ix.Invalidate("/lib/std/room.c"))
+	s = ix.Snapshot()
+	assert.Contains(t, s.Chain("/obj/a").Funcs, "from_disk")
+	assert.False(t, s.Unit("/std/room").Stub)
+	assert.Equal(t, "/lib/std/room.c", s.Unit("/std/room").Path)
+}
+
+// unionFS answers stub locations from one FS and everything else from
+// another, as profile.FS does.
+type unionFS struct{ disk, stubs vfs.Mem }
+
+func (u unionFS) pick(p string) vfs.Mem {
+	if len(p) > 7 && p[:7] == "stub://" {
+		return u.stubs
+	}
+	return u.disk
+}
+func (u unionFS) ReadFile(p string) ([]byte, error)            { return u.pick(p).ReadFile(p) }
+func (u unionFS) Exists(p string) bool                         { return u.pick(p).Exists(p) }
+func (u unionFS) IsDir(p string) bool                          { return u.pick(p).IsDir(p) }
+func (u unionFS) WalkDir(root string, fn fs.WalkDirFunc) error { return u.disk.WalkDir(root, fn) }
+
+// ------------------------------------------------------- concurrency
+
+// Readers on every generation while the files change under them. Run
+// under -race.
+func TestConcurrentReadersAndInvalidate(t *testing.T) {
+	const n = 60
+	files := map[string]string{"std/mod.c": "void m() { }\n"}
+	for i := range n {
+		files[fmt.Sprintf("obj/o%d.c", i)] = fmt.Sprintf("inherit \"/std/mod\";\nvoid f%d() { }\n", i)
+	}
+	l := newLib(t, files)
+
+	var wg sync.WaitGroup
+	stop := make(chan struct{})
+	for g := range 6 {
+		wg.Go(func() {
+			for i := 0; ; i++ {
+				select {
+				case <-stop:
+					return
+				default:
+				}
+				s := l.ix.Snapshot()
+				lib := fmt.Sprintf("/obj/o%d", (g*7+i)%n)
+				u := s.Unit(lib)
+				ch := s.Chain(lib)
+				if u == nil || !assert.Contains(t, ch.Funcs, "m") {
+					t.Errorf("%s: no unit or no inherited function in generation %d", lib, s.Generation())
+					return
+				}
+				// A generation never changes its mind.
+				if s.Unit(lib) != u || s.Chain(lib) != ch {
+					t.Errorf("%s: generation %d answered twice differently", lib, s.Generation())
+					return
+				}
+				q := s.Query(u, i%2 == 0)
+				q.LookupCallable(bg, lib, "nowhere", true)
+				q.LookupCallable(bg, fmt.Sprintf("/obj/o%d", (i+1)%n), "m", false)
+				if i%5 == 0 {
+					s.Parse(u.Path)
+				}
+				if i%11 == 0 {
+					s.Scan(bg)
+				}
+			}
+		})
+	}
+	for k := range 150 {
+		i := k % n
+		l.set(t, fmt.Sprintf("obj/o%d.c", i), fmt.Sprintf("inherit \"/std/mod\";\nvoid f%d() { }\nvoid edit%d() { }\n", i, k))
+		if k%40 == 0 {
+			l.set(t, "sys/forced.h", fmt.Sprintf("#define TRUE %d\n", k))
+		}
+		if k%25 == 0 {
+			l.set(t, "std/mod.c", fmt.Sprintf("void m() { }\nvoid mod%d() { }\n", k))
+		}
+	}
+	close(stop)
+	wg.Wait()
+
+	// The last generation is exactly the edited lib.
+	s := l.ix.Snapshot()
+	assert.Equal(t, uint64(1+150+4+6), s.Generation())
+	users, ok := s.UsersOf(bg, "/std/mod")
+	require.True(t, ok)
+	assert.Len(t, users, n)
+	for i := range n {
+		last := i + 60 // the last edit of file i
+		if last+60 < 150 {
+			last += 60
+		}
+		ch := s.Chain(fmt.Sprintf("/obj/o%d", i))
+		assert.Contains(t, ch.Funcs, fmt.Sprintf("edit%d", last))
+		assert.Contains(t, ch.Funcs, "mod125")
+	}
+}
+
+func TestMemo(t *testing.T) {
+	m := newMemo[int]()
+	var builds, commits int
+	var wg sync.WaitGroup
+	for range 50 {
+		wg.Go(func() {
+			v := m.load("k", func() int { builds++; return 42 }, func(v int, complete func()) { commits++; complete() })
+			assert.Equal(t, 42, v)
+		})
+	}
+	wg.Wait()
+	assert.Equal(t, 1, builds, "one build however many ask")
+	assert.Equal(t, 1, commits)
+	v, ok := m.get("k")
+	assert.True(t, ok)
+	assert.Equal(t, 42, v)
+
+	// A value still being computed is not carried to the next generation.
+	started, finish := make(chan struct{}), make(chan struct{})
+	go m.load("slow", func() int { close(started); <-finish; return 1 }, nil)
+	<-started
+	m.load("drop", func() int { return 2 }, nil)
+	_, ok = m.get("slow")
+	assert.False(t, ok)
+	assert.True(t, m.has("slow"))
+	next := m.carry(map[string]struct{}{"drop": {}})
+	close(finish)
+	assert.True(t, next.has("k"))
+	assert.False(t, next.has("slow"))
+	assert.False(t, next.has("drop"))
+	assert.Equal(t, 7, next.load("slow", func() int { return 7 }, nil), "the next generation computes its own")
+	assert.Equal(t, 1, m.load("slow", func() int { return 99 }, nil), "and the old one keeps its own")
+}
