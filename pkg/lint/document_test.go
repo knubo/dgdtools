@@ -44,7 +44,7 @@ func TestLintDocument(t *testing.T) {
 	})
 	assert.Equal(t, []string{"f"}, funcs)
 	assert.Equal(t, "/lib/obj/a.c", doc.File.Path)
-	assert.Equal(t, "3", doc.View.Lookup("LIMIT").Body)
+	assert.Equal(t, "3", doc.Env.Lookup("LIMIT").Body)
 	assert.Equal(t, "/obj/a", doc.Unit.LibPath)
 	assert.Contains(t, doc.Unit.Vars, "count")
 	assert.Equal(t, "/lib/obj/a.c", doc.Unit.Vars["count"].Path)

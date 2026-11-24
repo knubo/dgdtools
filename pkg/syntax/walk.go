@@ -263,7 +263,7 @@ func (p *parser) tainted(e *Error, declared map[string]bool) bool {
 	}
 	for _, t := range []int{e.Tok, p.prevSig(e.Tok)} {
 		// A keyword that is also a macro name: the preprocessor wins.
-		if t >= 0 && p.toks[t].Kind.IsKeyword() && p.view.Lookup(p.text(t)) != nil {
+		if t >= 0 && p.toks[t].Kind.IsKeyword() && p.env.Lookup(p.text(t)) != nil {
 			return true
 		}
 	}
@@ -282,7 +282,7 @@ func (p *parser) tainted(e *Error, declared map[string]bool) bool {
 				return true // conditional or included code inside the region
 			}
 		case token.Ident:
-			if m := p.view.Lookup(p.text(i)); m != nil && m.Class == pp.ClassFragment {
+			if m := p.env.Lookup(p.text(i)); m != nil && m.Class == pp.ClassFragment {
 				return true
 			}
 		}
@@ -298,7 +298,7 @@ func (p *parser) tainted(e *Error, declared map[string]bool) bool {
 			return false
 		}
 		name := p.text(tok)
-		return isAllCaps(name) && !declared[name] && p.view.Lookup(name) == nil
+		return isAllCaps(name) && !declared[name] && p.env.Lookup(name) == nil
 	}
 	if unseen(lo) || unseen(prev) || unseen(cur) || unseen(p.calleeOf(prev)) {
 		return true
@@ -309,11 +309,11 @@ func (p *parser) tainted(e *Error, declared map[string]bool) bool {
 		return false
 	}
 	name := p.text(prev)
-	if declared[name] || p.view.Lookup(name) != nil {
+	if declared[name] || p.env.Lookup(name) != nil {
 		return false
 	}
 	k := p.toks[cur].Kind
-	return k == token.Ident || isSpecKw(k) || pp.IsTypeKeyword(k)
+	return k == token.Ident || k.IsSpecifier() || k.IsType()
 }
 
 // lineSplice reports whether the illegal token is a backslash at the end
@@ -346,7 +346,7 @@ func (p *parser) inMacroArgs(tok int) bool {
 				continue
 			}
 			name := p.text(callee)
-			if m := p.view.Lookup(name); m != nil {
+			if m := p.env.Lookup(name); m != nil {
 				if m.FuncLike {
 					return true
 				}

@@ -13,16 +13,12 @@ import (
 	"github.com/mmcdole/dgdtools/pkg/token"
 )
 
-// parse parses src with a macro view made of the file's own #defines.
+// parse parses src in an environment made of the file's own #defines.
 func parse(src string, complete bool) *File {
 	f := lexer.Lex("test.c", []byte(src), lexer.Default)
-	sel := pp.Select(f, map[string]bool{"__DGD__": true})
-	view := &pp.View{
-		Layers:   []*pp.Table{pp.Scan(f, sel)},
-		Complete: complete,
-		Override: map[string]pp.Class{"public": pp.ClassEmpty},
-	}
-	return Parse(f, Options{Macros: view, Sel: sel})
+	env := pp.NewEnv(map[string]bool{"__DGD__": true}, map[string]pp.Class{"public": pp.ClassEmpty})
+	env.Complete = complete
+	return Parse(f, Options{Env: env, Sel: env.Scan(f, nil)})
 }
 
 // errs renders the reportable (untainted) errors as "line:col msg".
@@ -247,7 +243,7 @@ func TestMacroTolerance(t *testing.T) {
 		{"arrow macro", "#define QN query_name()\nvoid f(object o) { write(o->QN + \"x\"); }\n", true},
 		{"typed object macro", "#define I_P \"/std/player\"\nobject I_P who;\nvoid f(object I_P a, object I_P *b) {\n object I_P ply;\n ply = (object I_P) a;\n}\n", true},
 		{"ifndef __DGD__", "void f() {\n#ifndef __DGD__\n x = (*fp)();\n#endif\n}\n", true},
-		{"error in undecided branch", "void f() {\n#ifdef KILL\n x = store(a});\n#endif\n#if OPEN\n if (a && b(c) {\n#endif\n y = 1;\n#ifndef CLOSED\n write(\"x);\n#endif\n}\n", true},
+		{"error in undecided branch", "void f() {\n#ifdef KILL\n x = store(a});\n#endif\n#if OPEN\n if (a && b(c) {\n#endif\n y = 1;\n#ifndef CLOSED\n write(\"x);\n#endif\n}\n", false},
 		{"skip keeps bracket depth", "#define E\nvoid f() {\n c['C'] = m + ({ s[1..E] });\n x = 1;\n}\nvoid g() { }\n", true},
 		{"redefined after undef across layers", "#ifdef NAME\n#undef NAME\n#endif\n#define NAME \"x\"\nvoid f() { g(\"A \" + NAME + \"\"); }\n", true},
 		{"stringized macro argument", "#define TR(x) write(#x)\nvoid f() {\n TR(You can't \\n);\n}\n", true},
@@ -262,8 +258,16 @@ func TestMacroTolerance(t *testing.T) {
 		})
 	}
 
+	// With every definition in view the same conditions are decided: a
+	// name defined nowhere is not defined, and the branch that compiles is
+	// checked like any other code.
+	got := errs(parse("void f() {\n#ifdef KILL\n x = store(a});\n#endif\n#ifndef CLOSED\n write(\"x);\n#endif\n}\n", true))
+	if assert.Len(t, got, 1) {
+		assert.Contains(t, got[0], "6:8 unterminated string")
+	}
+
 	// A partial view must still report errors no macro could explain.
-	got := errs(parse("void f() {\n int count;\n count = 1\n count = 2;\n}\n", false))
+	got = errs(parse("void f() {\n int count;\n count = 1\n count = 2;\n}\n", false))
 	require.Len(t, got, 1)
 	assert.Contains(t, got[0], "3:11 missing ';'")
 }

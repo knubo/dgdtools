@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"io/fs"
+	"maps"
+	"slices"
 	"sync"
 	"testing"
 
@@ -201,6 +203,48 @@ func TestIncludes(t *testing.T) {
 	assert.Equal(t, 1, l.fs.count("/lib/sys/forced.h"))
 }
 
+// A file's conditionals are decided in the environment the driver
+// compiles it in: after the force-included header, each #include taking
+// effect where it stands.
+func TestConditionsSeeIncludes(t *testing.T) {
+	l := newLib(t, map[string]string{
+		"include/opts.h": "#define WITH_LOG\n#define LEVEL 2\n",
+		"obj/a.c": "#ifdef WITH_LOG\nvoid early() { }\n#endif\n" +
+			"#include <opts.h>\n" +
+			"#ifdef WITH_LOG\nvoid log() { }\n#else\nvoid nolog() { }\n#endif\n" +
+			"#if TRUE && LEVEL > 1\nvoid high() { }\n#endif\n" +
+			"#ifdef NOWHERE\nvoid never() { }\n#else\nvoid always() { }\n#endif\n",
+		// The same conditions where a header cannot be found: a name that
+		// was not seen may be defined there.
+		"obj/b.c": "#include <missing.h>\n" +
+			"#ifdef NOWHERE\nvoid maybe() { }\n#else\nvoid other() { }\n#endif\n",
+		// A header is read on its own, whoever includes it.
+		"include/cond.h": "#ifdef WITH_LOG\n#define LOGGER \"/obj/log\"\n#endif\n",
+		"obj/c.c":        "#include <opts.h>\n#include <cond.h>\n#ifdef LOGGER\nvoid uses() { }\n#endif\n",
+	})
+	s := l.ix.Snapshot()
+
+	a := s.Parse("/lib/obj/a.c")
+	require.NotNil(t, a)
+	assert.Equal(t, []string{"always", "high", "log"}, slices.Sorted(maps.Keys(a.Unit.Funcs)))
+	for _, i := range a.Tree.Sel.Sig {
+		assert.False(t, a.Tree.Sel.Guessed(i), "every branch of a.c is decided")
+	}
+	assert.True(t, a.Env.Complete)
+
+	b := s.Parse("/lib/obj/b.c")
+	require.NotNil(t, b)
+	assert.Contains(t, b.Unit.Funcs, "maybe", "undecided: the first branch, as a guess")
+	first, _ := b.Tree.Decls[0].Span()
+	assert.True(t, b.Tree.Sel.Guessed(first))
+
+	c := s.Parse("/lib/obj/c.c")
+	require.NotNil(t, c)
+	assert.Contains(t, c.Unit.Funcs, "uses")
+	first, _ = c.Tree.Decls[0].Span()
+	assert.True(t, c.Tree.Sel.Guessed(first), "LOGGER is defined under a condition its header could not decide")
+}
+
 func TestParse(t *testing.T) {
 	l := newLib(t, map[string]string{
 		"std/base.c": "void create() { }\n",
@@ -212,7 +256,7 @@ func TestParse(t *testing.T) {
 	require.NotNil(t, p)
 	require.NotNil(t, p.Tree)
 	assert.Equal(t, "/lib/obj/a.c", p.Tok.Path)
-	assert.NotNil(t, p.View.Lookup("TRUE"), "the force-included header is in view")
+	assert.NotNil(t, p.Env.Lookup("TRUE"), "the force-included header is in view")
 	assert.Equal(t, 1, l.fs.count("/lib/obj/a.c"), "tree and facts come from one read")
 	assert.Same(t, p.Unit, s.Unit("/obj/a"))
 

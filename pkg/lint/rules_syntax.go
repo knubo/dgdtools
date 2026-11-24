@@ -237,7 +237,7 @@ var ruleInheritOrder = &Rule{
 	Run: func(p *Pass) {
 		var first syntax.Decl
 		// A header included before an inherit that declares something.
-		if len(p.View.Layers) > 0 && p.Index != nil {
+		if p.Index != nil {
 			var lastInherit *syntax.InheritDecl
 			for _, d := range p.Tree.Decls {
 				if inh, ok := d.(*syntax.InheritDecl); ok {
@@ -245,7 +245,7 @@ var ruleInheritOrder = &Rule{
 				}
 			}
 			if lastInherit != nil {
-				for _, inc := range p.View.Layers[0].Includes {
+				for _, inc := range p.Env.Own().Includes {
 					if inc.Off > p.Tree.Off(lastInherit) || p.Tree.Sel.Guessed(inc.Tok) {
 						continue
 					}
@@ -297,7 +297,7 @@ func (p *Pass) typechecked() bool {
 // assumed to be one (an identifier it has no definition for).
 func (p *Pass) guessedSpec(fn *syntax.FuncDecl) bool {
 	for _, s := range fn.Specs {
-		if s.Kind == token.Ident && p.View.Lookup(string(p.File.Text(p.File.Tokens[s.Tok]))) == nil {
+		if s.Kind == token.Ident && p.Env.Lookup(string(p.File.Text(p.File.Tokens[s.Tok]))) == nil {
 			return true
 		}
 	}

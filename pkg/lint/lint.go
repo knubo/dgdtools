@@ -67,7 +67,8 @@ type Pass struct {
 	Ctx  context.Context
 	File *token.File
 	Tree *syntax.File
-	View *pp.View
+	// Env is the file's #define environment.
+	Env  *pp.Env
 	Unit *index.Unit
 	// Index answers cross-file questions on the file's behalf.
 	Index    *index.Query
@@ -224,8 +225,8 @@ type Document struct {
 	Generation uint64
 	File       *token.File
 	Tree       *syntax.File
-	// View is the set of macros visible in the file.
-	View *pp.View
+	// Env is the file's #define environment: the macros visible in it.
+	Env *pp.Env
 	// Unit is the file's entry in the index.
 	Unit        *index.Unit
 	Diagnostics []diag.Diagnostic
@@ -615,7 +616,7 @@ func (l *Linter) Run(ctx context.Context, req Request) (*Result, error) {
 
 // release drops what a run over many files must not keep in memory.
 func (d *Document) release() *Document {
-	d.File, d.Tree, d.View = nil, nil, nil
+	d.File, d.Tree, d.Env = nil, nil, nil
 	return d
 }
 
@@ -651,7 +652,7 @@ func (l *Linter) lintFile(ctx context.Context, s *index.Snapshot, file string, o
 	u := parsed.Unit
 	doc := &Document{
 		Path: file, Generation: s.Generation(),
-		File: parsed.Tok, Tree: parsed.Tree, View: parsed.View, Unit: u,
+		File: parsed.Tok, Tree: parsed.Tree, Env: parsed.Env, Unit: u,
 	}
 	rel := strings.TrimPrefix(u.LibPath, "/") // the file's lib-relative name
 	if u.LibPath != "" && path.Ext(rel) == "" {
@@ -700,7 +701,7 @@ func (l *Linter) lintFile(ctx context.Context, s *index.Snapshot, file string, o
 		}
 		var out []*diag.Diagnostic
 		pass := &Pass{
-			Ctx: ctx, File: parsed.Tok, Tree: parsed.Tree, View: parsed.View,
+			Ctx: ctx, File: parsed.Tok, Tree: parsed.Tree, Env: parsed.Env,
 			Unit: u, Index: query, LibPath: u.LibPath,
 			Config: l.project.Config, Settings: a.settings,
 			shared: shared, rule: r, severity: a.severity, out: &out,

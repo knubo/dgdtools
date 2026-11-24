@@ -22,7 +22,7 @@ type File struct {
 	Path    string
 	Src     []byte
 	Dialect Dialect
-	Tokens  []Token // contiguous; last element is a zero-length EOF token
+	Tokens  []Token  // contiguous; last element is a zero-length EOF token
 	Lines   []uint32 // byte offset of each line start; Lines[0] == 0
 	Errs    []diag.Diagnostic
 }

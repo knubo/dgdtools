@@ -235,7 +235,7 @@ func (l *Linter) sharedByUse(ctx context.Context, ix *index.Snapshot, minOwners 
 			}
 		}
 		var out []*diag.Diagnostic
-		pass := &Pass{Ctx: ctx, File: parsed.Tok, Tree: parsed.Tree, View: parsed.View, Unit: u,
+		pass := &Pass{Ctx: ctx, File: parsed.Tok, Tree: parsed.Tree, Env: parsed.Env, Unit: u,
 			Index: ix.Query(u, true), LibPath: u.LibPath, Config: l.project.Config,
 			shared: &fileShared{}, out: &out}
 		cf := pass.calls()
@@ -338,8 +338,8 @@ func Stub(p *index.Parsed, header bool) string {
 	// Which of the file's own macros do the declarations need? Close
 	// over macro bodies, since one macro may be written with another.
 	needed := map[string]bool{}
-	if !header && len(p.View.Layers) > 0 {
-		own := p.View.Layers[0].Macros
+	if !header {
+		own := p.Env.Own().Macros
 		var mark func(text string)
 		mark = func(text string) {
 			for _, w := range strings.FieldsFunc(text, func(r rune) bool {

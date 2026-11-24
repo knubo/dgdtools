@@ -14,6 +14,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/mmcdole/dgdtools/pkg/pp"
 	"github.com/mmcdole/dgdtools/pkg/token"
 	"github.com/mmcdole/dgdtools/pkg/vfs"
 )
@@ -323,14 +324,35 @@ func (c *Config) TokenDialect() token.Dialect {
 	return d
 }
 
-// SpecifierMacroSet returns the specifier-macro set (default: public).
-func (c *Config) SpecifierMacroSet() map[string]bool {
-	if len(c.Lint.SpecifierMacros) == 0 {
-		return map[string]bool{"public": true}
-	}
+// Predefined returns the names that are defined before the first line of
+// every file: the preprocessor's own and lint.defines.
+func (c *Config) Predefined() map[string]bool {
 	m := map[string]bool{}
-	for _, s := range c.Lint.SpecifierMacros {
-		m[s] = true
+	for _, d := range pp.Predefined {
+		m[d] = true
+	}
+	for _, d := range c.Lint.Defines {
+		m[d] = true
+	}
+	return m
+}
+
+// MacroClasses returns the macro classes the configuration gives:
+// lint.specifier_macros (default: public) are empty macros, lint.macros
+// names a class.
+func (c *Config) MacroClasses() map[string]pp.Class {
+	m := map[string]pp.Class{}
+	specifiers := c.Lint.SpecifierMacros
+	if len(specifiers) == 0 {
+		specifiers = []string{"public"}
+	}
+	for _, s := range specifiers {
+		m[s] = pp.ClassEmpty
+	}
+	for name, cls := range c.Lint.Macros {
+		if class, ok := pp.ParseClass(cls); ok {
+			m[name] = class
+		}
 	}
 	return m
 }

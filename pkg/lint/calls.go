@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/mmcdole/dgdtools/pkg/index"
+	"github.com/mmcdole/dgdtools/pkg/pp"
 	"github.com/mmcdole/dgdtools/pkg/syntax"
 	"github.com/mmcdole/dgdtools/pkg/token"
 )
@@ -99,7 +100,7 @@ func (p *Pass) extractCalls() *callFacts {
 		if !ok || lit.Kind != token.StringLit {
 			return "", false
 		}
-		return index.Unquote(t.Text(lit))
+		return pp.Unquote(t.Text(lit))
 	}
 	nargs := func(args []syntax.Expr, spread bool) int {
 		if spread {
@@ -167,11 +168,11 @@ func (p *Pass) extractCalls() *callFacts {
 						c.NArgs = 0
 					}
 				}
-				if !isIdentName(fname) {
+				if !token.IsIdent(fname) {
 					// Two-argument registrar form: fp("/obj/path", "fn")
 					// binds fn on another object.
 					if strings.Contains(fname, "/") && reg.arg+1 < len(n.Args) {
-						if fn2, ok := strLit(n.Args[reg.arg+1]); ok && isIdentName(fn2) {
+						if fn2, ok := strLit(n.Args[reg.arg+1]); ok && token.IsIdent(fn2) {
 							cf.strings = append(cf.strings, stringCall{
 								Func: fn2, Registrar: name, Kind: crossObject,
 								Target: targetPath, NArgs: -1,
@@ -210,11 +211,12 @@ func (p *Pass) classifyTarget(e syntax.Expr) (targetKind, string) {
 		}
 		return targetUnknown, ""
 	case *syntax.Ident:
-		m := p.View.Lookup(x.Name)
-		if m == nil || m.FuncLike {
+		body := p.Env.Expansion(x.Name)
+		if body == nil {
 			return targetUnknown, ""
 		}
-		if strings.ReplaceAll(strings.Trim(m.Body, "() \t"), " ", "") == "this_object" {
+		if len(body) == 3 && body[0].Kind == token.Ident && body[0].Text == "this_object" &&
+			body[1].Kind == token.LParen && body[2].Kind == token.RParen {
 			return targetSelf, ""
 		}
 	case *syntax.BasicLit, *syntax.BinaryExpr, *syntax.AdjacentStrings:
@@ -224,27 +226,12 @@ func (p *Pass) classifyTarget(e syntax.Expr) (targetKind, string) {
 	if p.LibPath == "" {
 		return targetUnknown, ""
 	}
-	s, ok := index.EvalString(p.Tree.Text(e), p.View, p.File.Dialect)
+	first, last := e.Span()
+	s, ok := p.Env.EvalString(pp.FileTokens(p.File, first, last))
 	if !ok || s == "" {
 		return targetUnknown, ""
 	}
 	return targetPath, p.Index.ObjectPath(s)
-}
-
-// isIdentName reports whether s is a plausible LPC function name.
-func isIdentName(s string) bool {
-	if s == "" {
-		return false
-	}
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		ok := c == '_' || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
-			(i > 0 && c >= '0' && c <= '9')
-		if !ok {
-			return false
-		}
-	}
-	return true
 }
 
 // lookup resolves the i'th string call through the index, once for all

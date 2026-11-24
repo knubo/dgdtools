@@ -148,23 +148,9 @@ func New(cfg *config.Config, lay Layout, fsys vfs.FS) *Index {
 		exclude:  fileset.NewMatcher(cfg.Exclude),
 		virtual:  fileset.NewMatcher(cfg.Lint.VirtualPaths),
 		holes:    fileset.NewMatcher(lay.Holes),
-		defined:  map[string]bool{},
-		override: map[string]pp.Class{},
+		defined:  cfg.Predefined(),
+		override: cfg.MacroClasses(),
 		markers:  map[string]bool{},
-	}
-	for _, d := range pp.Predefined {
-		l.defined[d] = true
-	}
-	for _, d := range cfg.Lint.Defines {
-		l.defined[d] = true
-	}
-	for s := range cfg.SpecifierMacroSet() {
-		l.override[s] = pp.ClassEmpty
-	}
-	for name, cls := range cfg.Lint.Macros {
-		if c, ok := pp.ParseClass(cls); ok {
-			l.override[name] = c
-		}
 	}
 	markers := cfg.Lint.AutosaveMarkers
 	if len(markers) == 0 {

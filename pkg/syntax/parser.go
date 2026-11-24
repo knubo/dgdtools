@@ -9,23 +9,25 @@ import (
 
 // Options configures a parse.
 type Options struct {
-	// Macros is the macro view of the file. nil means "nothing is known":
-	// the view is treated as empty and partial.
-	Macros *pp.View
-	// Sel is the active-branch selection; nil computes the default.
+	// Env is the file's #define environment and Sel the selection of
+	// active branches its scan made (pp.Env.Scan). They belong together:
+	// leave both unset to have the file read on its own, with nothing
+	// known but its own directives.
+	Env *pp.Env
 	Sel *pp.Selection
 }
 
 // Parse builds the syntax tree of f. It never fails and never panics on
 // malformed input.
 func Parse(f *token.File, opt Options) *File {
-	sel := opt.Sel
-	if sel == nil {
-		sel = pp.Select(f, nil)
+	env, sel := opt.Env, opt.Sel
+	if env == nil || sel == nil {
+		env = pp.NewEnv(nil, nil)
+		sel = env.Scan(f, nil)
 	}
 	p := &parser{
-		f: f, toks: f.Tokens, sig: sel.Sig, view: opt.Macros,
-		partial: opt.Macros == nil || !opt.Macros.Complete,
+		f: f, toks: f.Tokens, sig: sel.Sig, env: env,
+		partial: !env.Complete,
 		file:    &File{Tok: f, Sel: sel},
 	}
 	p.parseFile()
@@ -38,7 +40,7 @@ type parser struct {
 	toks    []token.Token
 	sig     []int
 	i       int
-	view    *pp.View
+	env     *pp.Env
 	partial bool
 	file    *File
 	errs    []*Error
@@ -203,10 +205,10 @@ func (p *parser) next() int {
 func (p *parser) text(tok int) string { return string(p.f.Text(p.toks[tok])) }
 
 func (p *parser) macroAt(d int) *pp.Macro {
-	if p.view == nil || p.kindAt(d) != token.Ident {
+	if p.env == nil || p.kindAt(d) != token.Ident {
 		return nil
 	}
-	return p.view.Lookup(p.text(p.idxAt(d)))
+	return p.env.Lookup(p.text(p.idxAt(d)))
 }
 
 func (p *parser) classAt(d int) (pp.Class, bool) {
@@ -392,7 +394,7 @@ func (p *parser) parseDeclRecover() (d Decl) {
 		}
 		_ = eof
 		p.file.Partial = true
-		d = &BadDecl{span: span{p.tokAt(start), maxInt(last, p.tokAt(start))}, Opaque: opaque}
+		d = &BadDecl{span: span{p.tokAt(start), max(last, p.tokAt(start))}, Opaque: opaque}
 	}()
 	return p.parseDecl()
 }
@@ -415,14 +417,6 @@ func (p *parser) skipBalanced() {
 	}
 }
 
-func isSpecKw(k token.Kind) bool {
-	switch k {
-	case token.KwPrivate, token.KwStatic, token.KwAtomic, token.KwNomask, token.KwVarargs:
-		return true
-	}
-	return false
-}
-
 // parseSpecs consumes class specifiers: keywords, and identifiers that are
 // empty/specifier macros (or, in a partial view, unknown identifiers
 // directly followed by a specifier or type keyword).
@@ -430,7 +424,7 @@ func (p *parser) parseSpecs() []Spec {
 	var specs []Spec
 	for {
 		k := p.kind()
-		if isSpecKw(k) {
+		if k.IsSpecifier() {
 			specs = append(specs, Spec{Tok: p.next(), Kind: k})
 			continue
 		}
@@ -441,7 +435,7 @@ func (p *parser) parseSpecs() []Spec {
 				continue
 			}
 			if !known && p.partial {
-				if n := p.kindAt(1); isSpecKw(n) || pp.IsTypeKeyword(n) || n == token.KwInherit {
+				if n := p.kindAt(1); n.IsSpecifier() || n.IsType() || n == token.KwInherit {
 					specs = append(specs, Spec{Tok: p.next(), Kind: token.Ident})
 					continue
 				}
@@ -454,7 +448,7 @@ func (p *parser) parseSpecs() []Spec {
 // typeStartAt reports whether the token at offset d begins a type.
 func (p *parser) typeStartAt(d int) bool {
 	k := p.kindAt(d)
-	if pp.IsTypeKeyword(k) {
+	if k.IsType() {
 		return true
 	}
 	if k != token.Ident {
@@ -626,7 +620,7 @@ func (p *parser) parseInherit(si, start int, specs []Spec) Decl {
 	// only unresolvable.)
 	if !p.partial && p.spec == 0 {
 		for t := pathStart; t <= p.prevIdx(); t++ {
-			if p.toks[t].Kind == token.Ident && p.view.Lookup(p.text(t)) == nil {
+			if p.toks[t].Kind == token.Ident && p.env.Lookup(p.text(t)) == nil {
 				p.errs = append(p.errs, &Error{
 					Msg: fmt.Sprintf("inherit path must be a string constant, but '%s' is not a defined macro (missing #include?)", p.text(t)),
 					Tok: t, Related: -1, RegionFirst: start, RegionLast: p.prevIdx(),
@@ -849,7 +843,7 @@ func (p *parser) parseStmt() (s Stmt) {
 				}
 			}
 		}
-		s = &BadStmt{span: span{p.tokAt(start), maxInt(last, p.tokAt(start))}, Opaque: opaque}
+		s = &BadStmt{span: span{p.tokAt(start), max(last, p.tokAt(start))}, Opaque: opaque}
 	}()
 	return p.stmt()
 }
@@ -1091,7 +1085,7 @@ func (p *parser) stmt() Stmt {
 			}
 		}
 	default:
-		if isSpecKw(k) || pp.IsTypeKeyword(k) {
+		if k.IsSpecifier() || k.IsType() {
 			return p.localDecl(start)
 		}
 	}
@@ -1139,7 +1133,7 @@ func (p *parser) macroStmt(m *pp.Macro) Stmt {
 // header: [specs] type [*]* name ( ... ) {
 func (p *parser) nestedFunc() (name int, ok bool) {
 	d := 0
-	for isSpecKw(p.kindAt(d)) {
+	for p.kindAt(d).IsSpecifier() {
 		d++
 	}
 	if !p.typeStartAt(d) {
@@ -1228,18 +1222,9 @@ func (p *parser) parseExprList() Expr {
 	return c
 }
 
-func isAssignOp(k token.Kind) bool {
-	switch k {
-	case token.Assign, token.PlusEq, token.MinusEq, token.StarEq, token.SlashEq,
-		token.PercentEq, token.AmpEq, token.PipeEq, token.CaretEq, token.ShlEq, token.ShrEq:
-		return true
-	}
-	return false
-}
-
 func (p *parser) parseExpr() Expr {
 	l := p.parseCond()
-	if !isAssignOp(p.kind()) {
+	if !p.kind().IsAssign() {
 		return l
 	}
 	a := &AssignExpr{Op: p.kind(), L: l}
@@ -1265,36 +1250,10 @@ func (p *parser) parseCond() Expr {
 	return x
 }
 
-func binPrec(k token.Kind) int {
-	switch k {
-	case token.LOr:
-		return 1
-	case token.LAnd:
-		return 2
-	case token.Pipe:
-		return 3
-	case token.Caret:
-		return 4
-	case token.Amp:
-		return 5
-	case token.EqEq, token.NotEq:
-		return 6
-	case token.Lt, token.Gt, token.LtEq, token.GtEq:
-		return 7
-	case token.Shl, token.Shr:
-		return 8
-	case token.Plus, token.Minus:
-		return 9
-	case token.Star, token.Slash, token.Percent:
-		return 10
-	}
-	return 0
-}
-
 func (p *parser) parseBinary(min int) Expr {
 	x := p.parseUnary()
 	for {
-		prec := binPrec(p.kind())
+		prec := p.kind().Precedence()
 		if prec < min {
 			return x
 		}
@@ -1316,7 +1275,7 @@ func (p *parser) parseUnary() Expr {
 		return &UnaryExpr{span{first, p.prevIdx()}, k, x}
 	case token.LParen:
 		// Cast: ( type [*]* ) operand
-		if pp.IsTypeKeyword(p.kindAt(1)) || (p.kindAt(1) == token.Ident && p.typeStartAt(1) &&
+		if p.kindAt(1).IsType() || (p.kindAt(1) == token.Ident && p.typeStartAt(1) &&
 			(p.kindAt(2) == token.RParen || p.kindAt(2) == token.Star)) {
 			lp := p.next()
 			t := p.parseType()
@@ -1667,11 +1626,4 @@ func (p *parser) parseCall(first int, label *Ident, scoped bool) Expr {
 		return p.adjacent(c)
 	}
 	return c
-}
-
-func maxInt(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
 }

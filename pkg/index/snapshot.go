@@ -185,15 +185,15 @@ func (s *Snapshot) header(p string) *header {
 			return &header{}
 		}
 		f := lexer.Lex(p, src, s.dialect)
-		sel := pp.Select(f, s.defined)
-		h := &header{table: pp.Scan(f, sel)}
+		// Read on its own: what it defines and declares, not how it reads
+		// in any one includer.
+		env := pp.NewEnv(s.defined, s.override)
+		sel := env.Scan(f, nil)
+		h := &header{table: env.Own()}
 		if len(sel.Sig) == 0 {
 			return h
 		}
-		// Parsed on its own: what it declares, not how it reads in any one
-		// includer.
-		view := &pp.View{Layers: []*pp.Table{h.table}, Override: s.override}
-		tree := syntax.Parse(f, syntax.Options{Macros: view, Sel: sel})
+		tree := syntax.Parse(f, syntax.Options{Env: env, Sel: sel})
 		u := &Unit{
 			Path: p, Funcs: map[string]FuncInfo{}, Vars: map[string]VarInfo{},
 			Partial: tree.Partial || h.table.Partial, Stub: s.isStub(p), Deps: []string{p}, gen: s.gen,
@@ -214,7 +214,8 @@ func (s *Snapshot) header(p string) *header {
 
 const maxIncludeDepth = 12
 
-// closure walks the include graph below a file in preprocessing order.
+// closure is the include graph below a file, walked in preprocessing
+// order.
 type closure struct {
 	order    []*pp.Table // tables in the order their definitions take effect
 	deps     []string    // files read
@@ -223,43 +224,54 @@ type closure struct {
 	seen     map[string]bool
 }
 
+func newClosure(p string) *closure {
+	return &closure{complete: true, seen: map[string]bool{p: true}, deps: []string{p}}
+}
+
+// includes returns the closure of the file at p, whose own table is t.
 func (s *Snapshot) includes(p string, t *pp.Table) *closure {
-	c := &closure{complete: true, seen: map[string]bool{p: true}, deps: []string{p}}
-	s.walkIncludes(c, p, t, 0)
+	c := newClosure(p)
+	for _, inc := range t.Includes {
+		s.include(c, p, inc, 0)
+	}
 	return c
 }
 
-func (s *Snapshot) walkIncludes(c *closure, from string, t *pp.Table, depth int) {
-	for _, inc := range t.Includes {
-		p, absent := s.resolveInclude(from, inc)
-		c.absent = append(c.absent, absent...)
-		if p == "" {
-			c.complete = false
-			continue
-		}
-		if c.seen[p] {
-			continue
-		}
-		c.seen[p] = true
-		c.deps = append(c.deps, p)
-		sub := s.header(p).table
-		if sub == nil {
-			c.complete = false
-			continue
-		}
-		if depth < maxIncludeDepth {
-			s.walkIncludes(c, p, sub, depth+1)
-		} else {
-			c.complete = false
-		}
-		c.order = append(c.order, sub)
+// include adds what one #include of the file at from brings in: the
+// included file and, below it, what that file includes. Each file is read
+// once per closure, where it is first met.
+func (s *Snapshot) include(c *closure, from string, inc pp.Include, depth int) {
+	p, absent := s.resolveInclude(from, inc)
+	c.absent = append(c.absent, absent...)
+	if p == "" {
+		c.complete = false
+		return
 	}
+	if c.seen[p] {
+		return
+	}
+	c.seen[p] = true
+	c.deps = append(c.deps, p)
+	t := s.header(p).table
+	if t == nil {
+		c.complete = false
+		return
+	}
+	if depth < maxIncludeDepth {
+		for _, sub := range t.Includes {
+			s.include(c, p, sub, depth+1)
+		}
+	} else {
+		c.complete = false
+	}
+	c.order = append(c.order, t)
 }
 
 // baseState is the driver's force-included header as one generation sees
 // it: the macro layers it gives every file, and the files it was read
 // from.
 type baseState struct {
+	// layers are its tables in the order their definitions take effect.
 	layers []*pp.Table
 	// ok is true when the header and everything it includes was read.
 	ok bool
@@ -297,46 +309,45 @@ func (s *Snapshot) baseState() *baseState {
 			return &baseState{absent: absent}
 		}
 		c := s.includes(p, t)
-		b := &baseState{ok: c.complete, deps: c.deps, absent: append(absent, c.absent...)}
-		b.layers = append(b.layers, t)
-		for i := len(c.order) - 1; i >= 0; i-- {
-			b.layers = append(b.layers, c.order[i])
+		return &baseState{
+			layers: append(c.order, t), ok: c.complete,
+			deps: c.deps, absent: append(absent, c.absent...),
 		}
-		return b
 	})
 }
 
 // ----------------------------------------------------------------- units
 
-// analysis is one file read for linting: tokens, tree, macro view.
+// analysis is one file read for linting: tokens, tree, and its #define
+// environment.
 type analysis struct {
 	tok  *token.File
 	sel  *pp.Selection
-	own  *pp.Table
-	view *pp.View
+	env  *pp.Env
 	tree *syntax.File
 	inc  *closure
 	base *baseState
 }
 
-// analyze reads and parses p; nil when it cannot be read.
+// analyze reads and parses p; nil when it cannot be read. The file is
+// read as the driver compiles it: after the force-included header, with
+// each #include taking effect where it stands.
 func (s *Snapshot) analyze(p string) *analysis {
 	src, err := s.fs.ReadFile(p)
 	if err != nil {
 		return nil
 	}
-	a := &analysis{tok: lexer.Lex(p, src, s.dialect)}
-	a.sel = pp.Select(a.tok, s.defined)
-	a.own = pp.Scan(a.tok, a.sel)
-	a.inc = s.includes(p, a.own)
-	a.base = s.baseState()
-	a.view = &pp.View{Override: s.override, Complete: a.inc.complete && a.base.ok}
-	a.view.Layers = append(a.view.Layers, a.own)
-	for i := len(a.inc.order) - 1; i >= 0; i-- {
-		a.view.Layers = append(a.view.Layers, a.inc.order[i])
-	}
-	a.view.Layers = append(a.view.Layers, a.base.layers...)
-	a.tree = syntax.Parse(a.tok, syntax.Options{Macros: a.view, Sel: a.sel})
+	a := &analysis{tok: lexer.Lex(p, src, s.dialect), base: s.baseState(), inc: newClosure(p)}
+	a.env = pp.NewEnv(s.defined, s.override)
+	a.env.Add(a.base.layers...)
+	a.env.Complete = a.base.ok
+	a.sel = a.env.Scan(a.tok, func(inc pp.Include) {
+		n := len(a.inc.order)
+		s.include(a.inc, p, inc, 0)
+		a.env.Add(a.inc.order[n:]...)
+		a.env.Complete = a.env.Complete && a.inc.complete
+	})
+	a.tree = syntax.Parse(a.tok, syntax.Options{Env: a.env, Sel: a.sel})
 	return a
 }
 
@@ -346,7 +357,7 @@ func (s *Snapshot) facts(a *analysis) *Unit {
 	u := &Unit{
 		Path: p, LibPath: s.LibPath(p), Stub: s.isStub(p),
 		Funcs: map[string]FuncInfo{}, Vars: map[string]VarInfo{},
-		Partial: tree.Partial || a.own.Partial,
+		Partial: tree.Partial || a.env.Own().Partial,
 		Deps:    append(slices.Clone(a.inc.deps), a.base.deps...),
 		gen:     s.gen,
 		watch:   append(slices.Clone(a.inc.deps[1:]), a.inc.absent...),
@@ -358,7 +369,7 @@ func (s *Snapshot) facts(a *analysis) *Unit {
 	}
 
 	// Includes: provably missing only where the lib is known completely.
-	for _, inc := range a.own.Includes {
+	for _, inc := range a.env.Own().Includes {
 		if _, ok := s.ResolveInclude(p, inc); ok {
 			continue
 		}
@@ -370,14 +381,14 @@ func (s *Snapshot) facts(a *analysis) *Unit {
 			u.UnknownIncludes++
 		}
 	}
-	if !a.view.Complete && len(u.BadIncludes) == 0 && u.UnknownIncludes == 0 {
+	if !a.env.Complete && len(u.BadIncludes) == 0 && u.UnknownIncludes == 0 {
 		u.UnknownIncludes = 1 // an include of an include failed
 	}
 
 	collectDecls(u, tree)
 	for _, d := range tree.Decls {
 		if inh, ok := d.(*syntax.InheritDecl); ok {
-			u.Inherits = append(u.Inherits, s.resolveInherit(tree, inh, u.LibPath, a.view))
+			u.Inherits = append(u.Inherits, s.resolveInherit(tree, inh, u.LibPath, a.env))
 		}
 	}
 
@@ -414,7 +425,7 @@ func (s *Snapshot) facts(a *analysis) *Unit {
 	return u
 }
 
-func (s *Snapshot) resolveInherit(tree *syntax.File, d *syntax.InheritDecl, libPath string, view *pp.View) InheritRef {
+func (s *Snapshot) resolveInherit(tree *syntax.File, d *syntax.InheritDecl, libPath string, env *pp.Env) InheritRef {
 	ref := InheritRef{Raw: tree.Text(d.Path), Off: tree.Off(d.Path), End: tree.End(d.Path), Private: d.Private}
 	if d.Label != nil {
 		ref.Label = d.Label.Name
@@ -422,7 +433,8 @@ func (s *Snapshot) resolveInherit(tree *syntax.File, d *syntax.InheritDecl, libP
 	if libPath == "" {
 		return ref
 	}
-	val, ok := EvalString(ref.Raw, view, s.dialect)
+	first, last := d.Path.Span()
+	val, ok := env.EvalString(pp.FileTokens(tree.Tok, first, last))
 	if !ok || val == "" {
 		return ref
 	}
@@ -489,13 +501,13 @@ func (s *Snapshot) UnitAt(p string) *Unit {
 	return s.unit(s.clean(p), &a)
 }
 
-// Parsed is a Unit together with its token stream, tree and macro view,
-// for the file being linted.
+// Parsed is a Unit together with its token stream, tree and #define
+// environment, for the file being linted.
 type Parsed struct {
 	Unit *Unit
 	Tok  *token.File
 	Tree *syntax.File
-	View *pp.View
+	Env  *pp.Env
 }
 
 // Parse lexes and parses the file at p for linting and returns its tree
@@ -512,7 +524,7 @@ func (s *Snapshot) Parse(p string) *Parsed {
 	if a == nil && (!s.guard(p, func() { a = s.analyze(p) }) || a == nil) {
 		return nil
 	}
-	return &Parsed{Unit: u, Tok: a.tok, Tree: a.tree, View: a.view}
+	return &Parsed{Unit: u, Tok: a.tok, Tree: a.tree, Env: a.env}
 }
 
 // IncludeDeclares reports whether the file an #include resolves to, or

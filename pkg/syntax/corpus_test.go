@@ -59,9 +59,9 @@ func TestCorpusParse(t *testing.T) {
 							}
 						}()
 						f := lexer.Lex(path, src, lexer.Default)
-						sel := pp.Select(f, map[string]bool{"__DGD__": true})
-						view := &pp.View{Layers: []*pp.Table{pp.Scan(f, sel)}, Complete: complete}
-						tree := Parse(f, Options{Macros: view, Sel: sel})
+						env := pp.NewEnv(map[string]bool{"__DGD__": true}, nil)
+						env.Complete = complete
+						tree := Parse(f, Options{Env: env, Sel: env.Scan(f, nil)})
 						if complete && len(tree.Errors) > 0 {
 							withErrors.Add(1)
 						}
