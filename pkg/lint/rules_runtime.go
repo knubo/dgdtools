@@ -139,11 +139,8 @@ var ruleTargetObjectMissing = &Rule{
 		"incomplete.",
 	Default: true, Severity: diag.Error, CrossFile: true,
 	Run: func(p *Pass) {
-		if !p.Index.Complete {
-			return
-		}
 		missing := func(lib string) bool {
-			return !p.Index.IsVirtual(lib) && !p.Index.ObjectExists(lib)
+			return p.Index.Covers(lib) && !p.Index.IsVirtual(lib) && !p.Index.ObjectExists(lib)
 		}
 		cf := p.calls()
 		for _, ref := range cf.paths {

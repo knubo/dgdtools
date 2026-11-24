@@ -21,7 +21,7 @@ modules = ([ "/x/ext.so" : "" ]);
 
 func TestDiscoverWalksUpFromThePath(t *testing.T) {
 	m := vfs.Mem{
-		"/mud/dgdtools.yml":         "root: lib\ndriver_config: etc/mud.dgd\n",
+		"/mud/dgdtools.yml":         "root: lib\nprofile_build:\n  driver_config: etc/mud.dgd\n",
 		"/mud/etc/mud.dgd":          driverCfg,
 		"/mud/lib/d/Foo/castle.c":   "",
 		"/other/.dgdtools.yml":      "lint:\n  include_dirs: [/inc]\n",
@@ -83,7 +83,7 @@ func TestDiscoverWalksUpFromThePath(t *testing.T) {
 
 func TestExplicitLintSettingsBeatDriverConfig(t *testing.T) {
 	m := vfs.Mem{
-		"/mud/dgdtools.yml": "driver_config: mud.dgd\nlint:\n  include_dirs: [/mine]\n  typechecking: 2\n",
+		"/mud/dgdtools.yml": "profile_build:\n  driver_config: mud.dgd\nlint:\n  include_dirs: [/mine]\n  typechecking: 2\n",
 		"/mud/mud.dgd":      driverCfg,
 		"/mud/a.c":          "",
 	}
@@ -153,7 +153,8 @@ lint:
 func TestExampleConfigLoads(t *testing.T) {
 	c, err := Load("../../dgdtools.example.yml")
 	require.NoError(t, err)
-	assert.Equal(t, "etc/config.viking", c.DriverConfig)
+	assert.Equal(t, "etc/config.viking", c.ProfileBuild.DriverConfig)
+	assert.Contains(t, c.ProfileBuild.Share, "std/**")
 	assert.Equal(t, "root", c.Lint.RelativeObjectPaths)
 	assert.Equal(t, "warning", c.Lint.Rules["raw-inherit-path"].Severity)
 	require.Len(t, c.Lint.Overrides, 1)

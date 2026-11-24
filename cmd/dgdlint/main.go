@@ -20,6 +20,7 @@ import (
 	"github.com/mmcdole/dgdtools/pkg/config"
 	"github.com/mmcdole/dgdtools/pkg/diag"
 	"github.com/mmcdole/dgdtools/pkg/lint"
+	"github.com/mmcdole/dgdtools/pkg/profile"
 	"github.com/mmcdole/dgdtools/pkg/report"
 	"github.com/mmcdole/dgdtools/pkg/vfs"
 )
@@ -36,17 +37,22 @@ const usage = `usage: dgdlint [flags] [path ...]     lint files and directories
        dgdlint rules                   list rules
        dgdlint explain RULE            describe one rule
        dgdlint config [path]           show the resolved project
+       dgdlint profile build [-o FILE] capture the whole lib as a profile
+       dgdlint profile show [NAME|FILE] [LIBPATH]
+                                       summarize a profile, or print one stub
 
 With no path, the whole project (the lib root of the nearest dgdtools.yml
 at or above the working directory) is linted. The project for a path is
 found by walking up from that path. Without a dgdtools.yml only
-file-local rules run.
+file-local rules run. A wizard with only their own folder puts
+"profile: NAME" in a dgdtools.yml there (or passes --profile).
 
 flags:
 `
 
 type options struct {
 	configPath, root         string
+	profile, libPath         string
 	noConfig                 bool
 	format, output           string
 	sel, ignore, enable, dis string
@@ -66,6 +72,8 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fs.StringVar(&o.configPath, "config", "", "use this `file` instead of searching for dgdtools.yml")
 	fs.StringVar(&o.root, "root", "", "lib root `dir` (the driver's \"/\"); overrides the config")
 	fs.BoolVar(&o.noConfig, "no-config", false, "do not look for a config file")
+	fs.StringVar(&o.profile, "profile", "", "mudlib profile: a `name` (see `dgdlint profile show`) or a profile file")
+	fs.StringVar(&o.libPath, "lib-path", "", "where this checkout sits in the lib, e.g. /players/you (a `path`)")
 	fs.StringVar(&o.format, "format", "human", "output `format`: "+strings.Join(report.Formats, ", "))
 	fs.StringVar(&o.format, "f", "human", "shorthand for --format")
 	fs.StringVar(&o.output, "output", "", "write findings to `file` instead of stdout")
@@ -129,10 +137,21 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	if showConfig {
 		pos = pos[1:]
 	}
-
 	fsys := vfs.OS{}
+	profileCmd := ""
+	if len(pos) > 0 && pos[0] == "profile" {
+		if len(pos) < 2 || (pos[1] != "build" && pos[1] != "show") {
+			return fail(fmt.Errorf("usage: dgdlint profile build [-o FILE] | dgdlint profile show [NAME|FILE] [LIBPATH]"))
+		}
+		profileCmd, pos = pos[1], pos[2:]
+	}
+	if profileCmd == "show" {
+		return profileShow(stdout, stderr, fsys, o, pos)
+	}
+
 	prj, err := config.Discover(fsys, pos, config.DiscoverOptions{
 		ConfigPath: o.configPath, Root: o.root, NoConfig: o.noConfig,
+		Profile: o.profile, LibPath: o.libPath,
 	})
 	if err != nil {
 		return fail(err)
@@ -160,6 +179,27 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	}
 	if showConfig {
 		printConfig(stdout, l)
+		return 0
+	}
+	if profileCmd == "build" {
+		p, err := l.BuildProfile(ctx)
+		if err != nil {
+			return fail(err)
+		}
+		data, err := p.Marshal()
+		if err != nil {
+			return fail(err)
+		}
+		out := o.output
+		if out == "" {
+			out = filepath.Join(prj.Config.Dir, profile.FileName)
+		}
+		if err := os.WriteFile(out, data, 0o644); err != nil {
+			return fail(err)
+		}
+		if !o.quiet {
+			fmt.Fprintf(stderr, "wrote %s: profile %q, %d stubs, %d bytes\n", out, p.Name, len(p.Files), len(data))
+		}
 		return 0
 	}
 
@@ -269,6 +309,55 @@ func explain(stdout, stderr io.Writer, key string) int {
 	return 2
 }
 
+// profileShow summarizes a profile, or prints one of its stubs.
+func profileShow(stdout, stderr io.Writer, fsys vfs.FS, o options, args []string) int {
+	ref := o.profile
+	if ref == "" && len(args) > 0 {
+		ref, args = args[0], args[1:]
+	}
+	if ref == "" {
+		fmt.Fprintf(stdout, "`profile: NAME` is looked up as NAME.profile in:\n  %s\n", strings.Join(profile.SearchDirs("."), "\n  "))
+		return 0
+	}
+	p, err := profile.Load(fsys, ref, ".")
+	if err != nil {
+		fmt.Fprintln(stderr, "dgdlint:", err)
+		return 2
+	}
+	if len(args) > 0 {
+		stub, ok := p.Files[args[0]]
+		if !ok {
+			fmt.Fprintf(stderr, "dgdlint: profile %s has no stub for %s\n", p.Name, args[0])
+			return 2
+		}
+		fmt.Fprint(stdout, stub)
+		return 0
+	}
+	headers, objects, bytes := 0, 0, 0
+	for name, s := range p.Files {
+		bytes += len(s)
+		if strings.HasSuffix(name, ".c") {
+			objects++
+		} else {
+			headers++
+		}
+	}
+	tc := "unknown"
+	if p.Dialect.Typechecking != nil {
+		tc = fmt.Sprint(*p.Dialect.Typechecking)
+	}
+	fmt.Fprintf(stdout, "profile:      %s (format %d) %s\n", p.Name, p.Format, p.Path)
+	fmt.Fprintf(stdout, "dialect:      %s %s %s, typechecking %s, // comments %v, closures %v\n",
+		p.Dialect.Language, p.Dialect.Driver, p.Dialect.Version, tc, p.Dialect.SlashSlash, p.Dialect.Closures)
+	fmt.Fprintf(stdout, "include dirs: %s\n", strings.Join(p.IncludeDirs, ", "))
+	fmt.Fprintf(stdout, "include file: %s\n", p.IncludeFile)
+	fmt.Fprintf(stdout, "auto objects: %s\n", strings.Join(p.AutoObjects, ", "))
+	fmt.Fprintf(stdout, "complete for: %s\n", strings.Join(p.Covered, " "))
+	fmt.Fprintf(stdout, "checkouts:    %s\n", strings.Join(p.Checkouts, ", "))
+	fmt.Fprintf(stdout, "stubs:        %d objects, %d headers, %d bytes of declarations\n", objects, headers, bytes)
+	return 0
+}
+
 func printConfig(w io.Writer, l *lint.Linter) {
 	prj := l.Project
 	orNone := func(s string) string {
@@ -282,12 +371,21 @@ func printConfig(w io.Writer, l *lint.Linter) {
 	fmt.Fprintf(w, "lib root:      %s\n", orNone(prj.Root))
 	if prj.Root == "" {
 		fmt.Fprintf(w, "mode:          file-local (cross-file rules need a lib root)\n")
+	} else if prj.Partial {
+		fmt.Fprintf(w, "mode:          partial checkout (what is not in the checkout or the profile is unknown)\n")
 	} else if l.Index.Complete {
 		fmt.Fprintf(w, "mode:          whole lib\n")
 	} else {
 		fmt.Fprintf(w, "mode:          whole lib, incomplete\n")
 	}
-	fmt.Fprintf(w, "driver config: %s\n", orNone(cfg.DriverConfig))
+	if prj.Profile != nil {
+		fmt.Fprintf(w, "profile:       %s (%d stubs)\n", prj.Profile.Name, len(prj.Profile.Files))
+	} else {
+		fmt.Fprintf(w, "profile:       (none)\n")
+	}
+	if prj.CheckoutLib != "" {
+		fmt.Fprintf(w, "checkout:      %s is %s\n", prj.CheckoutDir, prj.CheckoutLib)
+	}
 	fmt.Fprintf(w, "include dirs:  %s\n", orNone(strings.Join(cfg.Lint.IncludeDirs, ", ")))
 	fmt.Fprintf(w, "include file:  %s\n", orNone(cfg.Lint.IncludeFile))
 	fmt.Fprintf(w, "auto objects:  %s\n", orNone(strings.Join(cfg.Lint.AutoObjects, ", ")))

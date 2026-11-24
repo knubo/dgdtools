@@ -224,6 +224,57 @@ func TestBaselineWorkflow(t *testing.T) {
 	assert.Contains(t, errs, "needs a dgdtools.yml")
 }
 
+func TestProfileCommands(t *testing.T) {
+	code, out, _ := dgdlint(t, "profile", "show")
+	assert.Equal(t, 0, code)
+	assert.Contains(t, out, "NAME.profile")
+	assert.Contains(t, out, filepath.Join("dgdtools", "profiles"))
+
+	dir := lib(t, map[string]string{
+		"dgdtools.yml":            "root: lib\nprofile_build:\n  name: tiny\n  share: [\"std/**\"]\n  checkouts: [\"players/*\"]\nlint:\n  include_dirs: [/std/include]\n",
+		"lib/std/include/m.h":     "#define I_BASE \"/std/base\"\n",
+		"lib/std/base.c":          "void create() { }\nint query(int a) { return a; }\n",
+		"lib/players/x/ignored.c": "void f() { }\n",
+	})
+	wiz := lib(t, map[string]string{
+		"players/me/a.c": "#include <m.h>\ninherit I_BASE;\nvoid create() {\n ::create();\n I_BASE->query(1, 2);\n I_BASE->nope();\n}\n",
+	})
+	code, _, errs := dgdlint(t, "--config", filepath.Join(dir, "dgdtools.yml"), "profile", "build")
+	assert.Equal(t, 0, code, errs)
+	prof := filepath.Join(dir, "dgdlint.profile")
+	assert.FileExists(t, prof)
+	code, out, _ = dgdlint(t, "profile", "show", prof, "/std/base.c")
+	assert.Equal(t, 0, code)
+	assert.Equal(t, "void create() {}\nint query(int a) {}\n", out)
+
+	// The wizard: their folder, the profile, nothing else.
+	file := filepath.Join(wiz, "players/me/a.c")
+	code, out, errs = dgdlint(t, "--profile", prof, file)
+	assert.Equal(t, 1, code)
+	assert.Contains(t, out, "a.c:5:10: warning: 'query' in /std/base takes at most 1 argument(s)")
+	assert.Contains(t, out, "a.c:6:10: error: function 'nope' is not defined in /std/base")
+	assert.Contains(t, errs, "is /players/me")
+
+	// By name, found through $DGDTOOLS_PROFILE_PATH.
+	t.Setenv("DGDTOOLS_PROFILE_PATH", dir)
+	require.NoError(t, os.Rename(prof, filepath.Join(dir, "tiny.profile")))
+	prof = filepath.Join(dir, "tiny.profile")
+	code, out, _ = dgdlint(t, "profile", "show", "tiny")
+	assert.Equal(t, 0, code)
+	assert.Contains(t, out, "dialect:      lpc dgd")
+	assert.Contains(t, out, "complete for: /std/")
+	code, out, _ = dgdlint(t, "--profile", "tiny", file)
+	assert.Equal(t, 1, code)
+	assert.Contains(t, out, "function 'nope' is not defined in /std/base")
+	code, _, errs = dgdlint(t, "--profile", "nosuch", file)
+	assert.Equal(t, 2, code)
+	assert.Contains(t, errs, "not found")
+
+	code, _, errs = dgdlint(t, "--profile", prof, "profile", "build")
+	assert.Equal(t, 2, code)
+	assert.Contains(t, errs, "needs the whole lib")
+}
+
 func TestInformationalCommands(t *testing.T) {
 	code, out, _ := dgdlint(t, "rules")
 	assert.Equal(t, 0, code)

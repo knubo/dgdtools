@@ -58,8 +58,12 @@ dialect:
   closures: false            # `function` keyword (driver CLOSURES flag)
 
 root: lib                    # filesystem directory that is the lib's "/"
-driver_config: etc/mud.dgd   # read include_dirs, include_file, auto_object,
-                             # typechecking from the driver's config
+profile_build:               # what `dgdlint profile build` captures
+  name: mymud
+  driver_config: etc/mud.dgd # include_dirs, include_file, auto_object,
+                             # typechecking are read from the driver's config
+  share: ["std/**", "obj/**", "secure/**"]   # code every wizard builds on
+  checkouts: ["players/*", "d/*"]            # where wizards' own trees live
 
 exclude:                     # glob patterns, ** crosses directories
   - "**/attic/**"            # retired code kept for reference
@@ -96,7 +100,9 @@ layers one config on another (scalars and lists replace, maps merge).
 
 | Setting | Purpose |
 |---|---|
-| `driver_config` | Path to the DGD driver config. `include_dirs`, `include_file`, `auto_object` and `typechecking` are read from it; set them under `lint:` instead (`include_dirs`, `include_file`, `auto_objects`, `typechecking`) to override or if there is no driver config at hand. Without them inherit macros do not resolve and cross-file rules stay quiet rather than guess; without `typechecking` the rules that depend on it are silent. |
+| `profile` | The mudlib profile to lint against: a name, found as `NAME.profile` next to the config file, in a directory listed in `$DGDTOOLS_PROFILE_PATH`, or in the user config directory (`~/.config/dgdtools/profiles/`); or a path to a profile file. No profile is built into dgdlint. It supplies the driver settings, the shared headers and the signatures of shared objects, so a wizard needs nothing else. Files on disk always win over the profile. |
+| `lib_path` | Where a partial checkout sits in the lib (`/players/drake`), when its path on disk does not already end in `players/<name>` or `d/<Domain>`. |
+| `profile_build` | For whoever has the whole lib: `driver_config` (the DGD driver config; `include_dirs`, `include_file`, `auto_object`, `typechecking` are read from it), `share` (globs of shared code), `omit` (never put in a profile), `checkouts` (per-wizard tree patterns), `name`. Used by `dgdlint profile build`, and directly when linting the whole lib. `lint.include_dirs`, `include_file`, `auto_objects`, `typechecking` remain as explicit overrides. |
 | `relative_object_paths` | What `"std/room"` (no leading slash) is relative to: `root` (default; what DGD does) or `file`. |
 | `specifier_macros`, `macros`, `defines` | How to read macros dgdlint cannot classify itself. `specifier_macros: [public]` is the default. `macros: {FOREACH: statement}` overrides the class derived from a `#define` (`type`, `specifier`, `statement`, `expression`, `opaque`). `defines:` lists names to treat as defined in `#ifdef`. |
 | `call_registry` | Mudlib functions whose string argument names a callback on `this_object()`, e.g. `add_action("do_pull", "pull")`. |
@@ -154,6 +160,61 @@ two files differ only in formatting. `dgdcmp -dump file.c` prints the
 token stream.
 
 ## dgdlint
+
+### Quickstart for wizards: download your folder, run dgdlint
+
+You do not need the whole mud. Download your own directory keeping its
+place in the lib (`…/players/yourname/` or `…/d/YourDomain/`), put a
+one-line `dgdtools.yml` in it, and run dgdlint there:
+
+```
+$ cat players/yourname/dgdtools.yml
+profile: viking
+$ cd players/yourname && dgdlint
+room/hall.c:14:21: error: missing ';' before 'add_exit' [syntax-error]
+obj/key.c:9:19: error: function 'do_unlok' is not defined in /players/yourname/obj/key (this_object) ... [callable-not-found]
+```
+
+`profile: viking` names a **mudlib profile**, a small file your mud
+publishes (VikingMUD's is `viking.profile`). Get it once and put it where
+dgdlint looks for profiles by name, in this order:
+
+1. next to the `dgdtools.yml` that names it;
+2. in any directory listed in `$DGDTOOLS_PROFILE_PATH`;
+3. in your user config directory: `~/.config/dgdtools/profiles/`
+   (on macOS also `~/Library/Application Support/dgdtools/profiles/`,
+   on Windows `%AppData%\dgdtools\profiles\`).
+
+`profile: path/to/viking.profile` works too, and `dgdlint profile show`
+prints the directories searched. A profile holds the
+lib's driver settings, its shared headers (so `#include <mudlib.h>` and
+macros like `I_ROOM` resolve) and the names and argument counts of the
+functions in the shared objects you inherit and call. With it dgdlint
+checks your code the way it would inside the full lib. Anything that is
+neither in your folder nor in the profile (another wizard's files, a
+domain you did not download) is *unknown*: dgdlint says nothing about it
+rather than guess. If your folder is not under a `players/<name>` or
+`d/<Domain>` path, add `lib_path: /players/yourname`. `dgdlint --profile
+viking file.c` works without any config file.
+
+No profile is ever assumed: without `profile:` (or `--profile`) dgdlint
+runs its file-local rules only. A profile makes claims about a specific
+mud, and the wrong one would produce confident nonsense.
+
+**For lib maintainers:** `dgdlint profile build` (with the whole lib and a
+`profile_build:` section, above) writes `dgdlint.profile`: about 47 KB for
+VikingMUD's 465 shared files. It contains each shared file's public
+interface, like a C header or a `.d.ts`: `#define`s and `#include`s of
+shared headers, inherit statements, and every non-private function and
+global variable declaration exactly as written (types, specifiers,
+parameter names) with bodies replaced by `{}`. No function bodies, no
+comments, no private functions or variables, no object-local macros the
+declarations do not need, nothing matching `omit:`. `dgdlint profile show viking` summarizes a profile and `dgdlint
+profile show viking /std/room.c` prints one stub, so you can see exactly
+what you would be publishing. Publish the file (renamed `<mud>.profile`)
+wherever your wizards can fetch it; dgdlint itself ships no profiles.
+
+### Usage
 
 ```
 dgdlint                      # lint the project found from the working directory
@@ -315,12 +376,17 @@ An existing `dgdtools.yml` loads unchanged. Differences to know about:
 - Object paths without a leading slash (`"obj/thing"`) resolve from the
   lib root, as the driver does, not from the referencing file's
   directory. Set `relative_object_paths: file` for the old behaviour.
-- Add `driver_config:` (or `lint.typechecking:`) to get the
-  typechecking-dependent rules, which are silent otherwise.
+- The driver settings come from a profile, or from `profile_build:
+  {driver_config: …}` when you have the whole lib (`lint.include_dirs`
+  and friends still work as overrides). Without `typechecking` from one
+  of those, the typechecking-dependent rules are silent.
 - `-f json` output is now an object with a `diagnostics` array (it was a
   bare array), and has more fields per diagnostic.
 - Many more findings: the `E` rules are new. Use `--write-baseline`.
 - Tier numbers are gone; `dgdlint rules` shows `file` or `lib` scope.
+- No profile is embedded in dgdlint. `profile: NAME` finds `NAME.profile`
+  next to the config, via `$DGDTOOLS_PROFILE_PATH`, or in the user config
+  directory.
 - Unknown keys in `dgdtools.yml` are now errors (for all three tools), so
   a misspelled setting is reported instead of ignored.
 - `exclude: ["attic/**"]` only ever matched a top-level `attic`; write

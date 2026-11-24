@@ -101,6 +101,9 @@ type Table struct {
 	Path     string
 	Macros   map[string]*Macro
 	Includes []Include
+	// Partial is set by `#pragma dgdlint partial`, which a profile stub
+	// uses to say that the file it stands for could not be fully read.
+	Partial bool
 	// Undefs are the names this file #undef'd. A definition that follows
 	// an #undef deliberately replaces whatever an include defined.
 	Undefs map[string]bool
@@ -357,7 +360,7 @@ func isIdent(s string) bool {
 // the rest of its logical line with comments removed and continuations
 // joined.
 func SplitDirective(text []byte) (name, rest string) {
-	s := cleanDirective(text)
+	s := CleanDirective(text)
 	s = strings.TrimSpace(strings.TrimPrefix(s, "#"))
 	i := 0
 	for i < len(s) && s[i] >= 'a' && s[i] <= 'z' {
@@ -368,7 +371,7 @@ func SplitDirective(text []byte) (name, rest string) {
 
 // cleanDirective joins backslash-newline continuations and blanks out
 // comments (string and character literals are respected).
-func cleanDirective(text []byte) string {
+func CleanDirective(text []byte) string {
 	if !needsCleaning(text) {
 		return string(text)
 	}
@@ -454,6 +457,10 @@ func Scan(f *token.File, sel *Selection) *Table {
 			}
 			undefd[n] = true
 			t.Undefs[n] = true
+		case "pragma":
+			if strings.Join(strings.Fields(rest), " ") == "dgdlint partial" {
+				t.Partial = true
+			}
 		case "include":
 			rest = strings.TrimSpace(rest)
 			if len(rest) < 2 {

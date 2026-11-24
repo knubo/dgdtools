@@ -1,8 +1,14 @@
 # dgdtools.yml -- shared configuration for dgdfmt, dgdlint and dgdcmp.
 # Place it at your project root; every field is optional. dgdlint finds it
-# by walking up from the path it is asked to lint. The values below are a
-# working setup for a classic DGD mudlib (VikingMUD) and a reasonable
-# starting point for any DGD lib.
+# by walking up from the path it is asked to lint.
+#
+# This file is the setup for someone who has the WHOLE lib (here:
+# VikingMUD). A wizard with only their own folder needs one line instead:
+#
+#     profile: viking
+#
+# in a dgdtools.yml in that folder (plus `lib_path: /players/<name>` if
+# the folder's path does not end in players/<name> or d/<Domain>).
 
 # extends: ../shared/dgdtools.yml   # layer on another config: scalars and
 #                                   # lists replace, maps merge
@@ -13,10 +19,29 @@ dialect:
 
 root: lib                    # filesystem directory that is the lib's "/"
 
-# The DGD driver's own config file. dgdlint reads include_dirs,
-# include_file, auto_object and typechecking from it, so they do not have
-# to be copied below.
-driver_config: etc/config.viking
+# Inputs of `dgdlint profile build`, which captures this lib as a profile
+# (dgdlint.profile) for people who do not have all of it. They also serve
+# linting the whole lib directly.
+profile_build:
+  name: viking
+  # The DGD driver's own config file: include_dirs, include_file,
+  # auto_object and typechecking are read from it.
+  driver_config: etc/config.viking
+  # The code every wizard builds on. Its headers and the signatures of
+  # its objects go into the profile (never function bodies), together
+  # with everything it inherits or includes.
+  share: ["std/**", "obj/**", "room/**", "secure/**", "com/**", "dgd/**"]
+  # Never put these in a profile, even when referenced.
+  omit: []
+  # Where wizards' own trees live; lets dgdlint recognize a checkout of
+  # one of them by its path.
+  checkouts: ["players/*", "d/*"]
+
+# profile: viking            # lint against a profile instead: viking.profile
+#                            # next to this file, in $DGDTOOLS_PROFILE_PATH or
+#                            # in ~/.config/dgdtools/profiles; or a file path.
+#                            # Real files on disk always win.
+# lib_path: /players/name    # where a partial checkout sits in the lib
 
 exclude:                     # pruned from directory walks; a file named on
   - "**/attic/**"            # the command line is always linted
@@ -34,7 +59,7 @@ format:
   function_headers: split    # split (KNF: name at column 0) | joined
 
 lint:
-  # Only needed without driver_config, or to override it:
+  # Only needed without a profile or driver_config, or to override them:
   # include_dirs: ["/dgd/include", "/std/include"]
   # include_file: "/dgd/include/Std.h"   # force-included everywhere
   # auto_objects: ["/dgd/lib/object"]    # implicitly inherited by everything

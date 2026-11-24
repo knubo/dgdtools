@@ -198,7 +198,7 @@ func TestErrors(t *testing.T) {
 		{"else without if", body("else x = 1;"), []string{"'else' without a matching 'if'"}},
 		{"missing close brace", "void f() {\n if (x) {\n  y();\n}\n", []string{"missing '}' to close '{' opened on line 1"}},
 		{"nested function", "void f() {\n if (x) {\n  y();\n\nstatic int g(int a) {\n return a;\n}\nvoid h() { z() }\n",
-			[]string{"5:1 function 'g' begins inside the body of 'f'", "8:15 missing ';'"}},
+			[]string{"5:1 function 'g' begins inside the body of 'f'"}},
 		{"extra close brace", "void f() {\n x();\n}\n}\nint g() { return 1 }\n", []string{"4:1 unmatched '}'"}},
 		{"stray top-level statement", "int x;\nx = 5;\nvoid f() { }\n", []string{"2:1 unexpected 'x' at top level"}},
 		{"case before brace", body("switch (x) { case 1: x = 2; default: }"), []string{"label must be followed by a statement"}},

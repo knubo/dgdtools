@@ -27,6 +27,7 @@ import (
 	"github.com/mmcdole/dgdtools/pkg/fileset"
 	"github.com/mmcdole/dgdtools/pkg/index"
 	"github.com/mmcdole/dgdtools/pkg/pp"
+	"github.com/mmcdole/dgdtools/pkg/profile"
 	"github.com/mmcdole/dgdtools/pkg/syntax"
 	"github.com/mmcdole/dgdtools/pkg/token"
 	"github.com/mmcdole/dgdtools/pkg/vfs"
@@ -247,7 +248,14 @@ func New(prj *config.Project, fsys vfs.FS) (*Linter, error) {
 		}
 		l.override = append(l.override, compiledOverride{fileset.NewMatcher(pr.Paths), m})
 	}
-	l.Index = index.New(cfg, prj.Root, fsys)
+	lay := index.Layout{Root: prj.Root, Partial: prj.Partial, CheckoutDir: prj.CheckoutDir, CheckoutLib: prj.CheckoutLib}
+	if prj.Profile != nil && prj.Root != "" {
+		// Stubs answer for whatever is not on disk; real files win.
+		fsys = profile.NewFS(fsys, prj.Root, prj.Profile)
+		l.FS = fsys
+		lay.Covered, lay.Holes = prj.Profile.Covered, prj.Profile.Holes
+	}
+	l.Index = index.NewLayout(cfg, lay, fsys)
 	return l, nil
 }
 
@@ -401,10 +409,14 @@ func (l *Linter) Run(ctx context.Context, req Request) (*Result, error) {
 
 	paths := req.Paths
 	if len(paths) == 0 {
-		if l.Project.Root == "" {
+		switch {
+		case l.Project.Root == "":
 			return nil, fmt.Errorf("nothing to lint: give a path, or run inside a project with dgdtools.yml")
+		case l.Project.Partial:
+			paths = []string{l.Project.Base} // the checkout, not the virtual lib
+		default:
+			paths = []string{l.Project.Root}
 		}
-		paths = []string{l.Project.Root}
 	}
 	var files []string
 	seen := map[string]bool{}
@@ -430,7 +442,7 @@ func (l *Linter) Run(ctx context.Context, req Request) (*Result, error) {
 			add(abs) // a file named explicitly is linted even if excluded
 		}
 	}
-	if l.Project.Root != "" {
+	if l.Project.Root != "" && !(l.Project.Partial && l.Project.CheckoutLib == "") {
 		outside := 0
 		for _, f := range files {
 			if l.Index.LibPath(f) == "" {

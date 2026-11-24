@@ -1,6 +1,6 @@
 # dgdlint rewrite: design
 
-Status: implemented on branch `dgdlint-rewrite`. Section 10 lists what is
+Status: implemented on branch `dgdlint-rewrite`. Section 11 lists what is
 done and what is deferred; section 9 has the measurements against the
 VikingMUD lib and a DGD 1.7.9 compile oracle.
 
@@ -191,13 +191,14 @@ need the lib root (the directory that is `/` to the driver).
    dgdlint runs in *file-local mode*: file-local rules run with a partial
    macro view, cross-file rules do not run, and one note on stderr says
    so. The real pre-fix castle.c is caught in this mode.
-6. **The driver config is the compile database.** DGD's own config file
-   already states `include_dirs`, `include_file`, `auto_object` and
-   `typechecking`. `driver_config: etc/mud.dgd` in dgdtools.yml reads them
-   instead of asking the user to copy them (explicit `lint:` values win).
-   This is the role `compile_commands.json` plays for clang tooling. The
-   driver's absolute `directory` is *not* used as the root: it names a
-   path on the production host.
+6. **The driver config is the compile database, and it is a build
+   input.** DGD's own config file already states `include_dirs`,
+   `include_file`, `auto_object` and `typechecking`.
+   `profile_build: {driver_config: etc/mud.dgd}` reads them instead of
+   asking anyone to copy them; `dgdlint profile build` bakes them into a
+   profile (section 10), and a whole-lib lint uses them directly. Explicit
+   `lint:` values still win. The driver's absolute `directory` is *not*
+   used as the root: it names a path on the production host.
 7. **Subdirectory and single-file runs** lint only the named files but
    resolve against the whole lib. The index is lazy (section 6): one file
    loads only its include and inherit closure (measured: 0.08 s for two
@@ -246,8 +247,9 @@ need the lib root (the directory that is `/` to the driver).
   edits elsewhere in a file do not resurrect a finding. This is the
   PHPStan/Psalm baseline model; it needs no VCS, unlike golangci-lint's
   `--new-from-rev`. `--no-baseline` shows everything.
-- **Lib facts:** `include_dirs`, `include_file`, `auto_objects`,
-  `typechecking` (or `driver_config`), `relative_object_paths` (`root`,
+- **Lib facts:** from the profile, or from `profile_build.driver_config`
+  with the whole lib; `include_dirs`, `include_file`, `auto_objects`,
+  `typechecking` remain as overrides; `relative_object_paths` (`root`,
   the DGD semantics and the default, or `file`), `virtual_paths`, the
   call/object/format registries, `autosave_markers`.
 - **Macro and dialect knobs:** `defines:` (names treated as defined),
@@ -388,7 +390,7 @@ project:
 What the server adds itself: JSON-RPC transport, position conversion,
 debouncing, and per-document versioning. No analysis logic lives there.
 What the core still lacks for it: a "node at offset" helper and scopes for
-local variables (section 10).
+local variables (section 11).
 
 ## 7. Rules
 
@@ -563,7 +565,246 @@ Late-bound call sites with a known receiver: 6.5% (old) → 22.5% (new;
   `TestCorpusLint` (whole-lib run, no internal errors, core directories
   free of syntax-group findings). Both pass on the VikingMUD lib.
 
-## 10. Implemented vs. deferred
+## 10. Mudlib profiles
+
+### 10.1 The problem and the prior art
+
+Most wizards do not have the mud. They download `/players/<name>/` or
+`/d/<Domain>/`, write their area, and upload it. Everything their code
+leans on (the headers behind `#include <mudlib.h>`, `/std/room`, the
+daemons) is somewhere they cannot see. Without it a linter can only run
+file-local rules, and even those with a partial macro view.
+
+Every mature tool solves this the same way: ship *declarations* of the
+platform separately from the user's code. TypeScript has `lib.d.ts` and
+`@types`; Python type checkers have typeshed stubs; gopls and
+rust-analyzer read the standard library's export data; clangd without a
+`compile_commands.json` falls back to built-in system headers. A **mudlib
+profile** is that for a mud.
+
+### 10.2 What a profile is
+
+A profile is a manifest plus stub files (`pkg/profile`):
+
+- **Manifest (JSON):** the dialect (`language: lpc`, `driver: dgd`,
+  version, `//` comments, closures, typechecking level, predefined
+  macros); the driver's include dirs, force-included header and auto
+  object; how relative object paths resolve; the lib's conventions
+  (call/object/format registries, autosave markers, virtual paths,
+  specifier macros, macro class overrides); `covered` (directories the
+  profile captures completely); `holes` (globs deliberately left out);
+  `checkouts` (the per-wizard layout, `players/*`, `d/*`).
+- **Stubs:** one per shared file, *as source in the lib's own dialect*,
+  and they are the file's public interface verbatim minus bodies, as in a
+  C header, a `.d.ts` or a typeshed `.pyi`. A header's stub is its active
+  `#include`s and `#define`s. An object's stub is its `#include`s, its
+  inherit statements, and every non-private function and global variable
+  declaration exactly as written: specifiers (`static`, `nomask`,
+  `varargs`, `atomic`), return type, parameter types and names, `varargs`
+  parameters and `...`, with the body replaced by `{}`. A type written as
+  a macro stays that token (`function`, `status`): the profile carries the
+  headers that define it. A function written without a type stays without
+  one, because under typechecking that is what makes it void.
+
+  ```
+  #include <std.h>
+  inherit I_OBJECT;
+  mapping negfuns;
+  varargs string calc_obvious_exits(int brief_flag);
+  static void create() {}
+  void reset(int arg) {}
+  ```
+
+  The index keeps these declarations as facts, from real files and stubs
+  alike: `FuncInfo`/`ChainFunc` carry `Decl` (the declaration as written)
+  and `Type` (its return type), `VarInfo` carries `Type`, and
+  `index.Params(decl)` splits out the parameters. That is what hover and
+  signature help will show, and what type rules would read.
+
+Stubs being source is the central decision. The lexer, the macro
+classifier, the parser, include resolution, inherit-chain flattening and
+every lookup already work on source; a profile needs **no second
+representation of facts and no second code path**. `profile.FS` lays the
+stubs under the lib root as a `vfs.FS`: a path the real file system does
+not have is answered from the profile, and a real file always wins. This
+is the `.d.ts` model, and it is also what makes the format dialect-
+neutral: a FluffOS profile would hold FluffOS-syntax stubs.
+
+Details that keep stubs honest:
+
+- A file that could not be fully read when the profile was built carries
+  `#pragma dgdlint partial`; the index treats its symbol table as partial,
+  so lookups through it are unknown, exactly as with the original.
+- Declarations inside a conditional branch the builder could only guess at
+  are emitted under `#ifdef __DGDLINT_UNDECIDED__`, so the consumer also
+  sees them as guessed.
+- Object-local macros are dropped unless the object's declarations use
+  them (a type macro, a path macro in an inherit statement); a `.c` file
+  that other files `#include` is treated as a header and keeps its macros.
+- Function bodies, comments, private functions, private variables and
+  anything matching `omit:` never enter a profile. Because private
+  functions are absent, a call to one in a profiled object is reported as
+  "not defined … or is private there" (`callable-not-found`) where the
+  whole lib would say "is private" (`static-crossobj`): the same bug under
+  another name. `omit` and `exclude` globs are recorded
+  as `holes`, because "under a covered directory but deliberately absent"
+  must read as unknown, not as missing. (This was a real false positive
+  in the first version of the tests.)
+
+**File format:** gzip of `dgdlint-profile 1`, the manifest, and the stubs
+in path order (`=== /std/room.c` separators). No timestamps: the same lib
+gives the same bytes. Versioned; a newer format is refused with a
+"rebuild the profile" message.
+
+**Selection** (`profile_build`): files matching `share` (default: the
+usual homes of shared code, `std/**`, `obj/**`, `lib/**`, `room/**`,
+`secure/**`, `com/**`, `sys/**`, `dgd/**`, `kernel/**`, `include/**`,
+whichever exist), everything under the include dirs, the force-included
+header, the auto objects, and the closure of what those include and
+inherit. A share glob that takes a whole directory makes it `covered`.
+
+### 10.3 Using a profile
+
+- **No profile is embedded in dgdlint.** A profile describes one mud and
+  is published by that mud (VikingMUD's lives in its own repository).
+  `profile: NAME` is looked up as `NAME.profile` in, in order: the
+  directory of the config file that names it (the working directory for
+  `--profile`); each entry of `$DGDTOOLS_PROFILE_PATH`; the user config
+  directory `os.UserConfigDir()/dgdtools/profiles`; and
+  `~/.config/dgdtools/profiles` where that differs (macOS). A reference
+  with a path separator or ending in `.profile` is a path. When nothing
+  is found the error lists every location searched. The same resolution
+  is library API (`profile.SearchDirs`, `profile.Resolve`,
+  `profile.Load`), which is what a language server will call.
+- **Whole lib + profile:** if the profile's force-included header exists
+  under the root, the project is a whole lib; the profile only supplies
+  settings, and stubs fill nothing because every file is on disk. A whole
+  lib with `profile_build.driver_config` needs no profile at all.
+- **Partial checkout:** otherwise the lib root is *virtual* (only stubs
+  live under it) and the checkout directory is mounted at its lib path.
+  The lib path comes from `lib_path:`, or is read off the directory's
+  path using the profile's `checkouts` patterns
+  (`…/players/drake/rooms` is `/players/drake`).
+- **What is provable in a partial checkout** is decided per path by
+  `Index.Covers`: the checkout itself (a wizard has all of their own
+  tree) and the profile's covered directories minus holes. A reference
+  into a covered place that resolves to nothing is missing; a reference
+  anywhere else (another wizard, a domain not downloaded, `/com`) is
+  unknown and silent. An `#include` is provably missing only if every
+  place the driver would look is covered.
+- If the checkout's place in the lib cannot be determined, the profile's
+  headers still give complete macro views (so the syntax rules are
+  exact), but nothing is claimed between the wizard's own files, and one
+  note asks for `lib_path`.
+
+### 10.4 Should a lone checkout pick a profile by itself?
+
+No: one line is required. A profile asserts facts ("`/std/room` has no
+function `set_shrot`"). Applied to the wrong mud those are confident
+false errors, the clang-tidy-guessing-flags failure, and dgdtools is a
+general DGD tool that happens to embed one mud's profile. The cost of
+being explicit is a one-line file (`profile: viking`) or a flag; the cost
+of guessing wrong is the tool's credibility. With no config at all the
+behaviour is unchanged: file-local rules and a note.
+
+The lib *path* of a checkout, by contrast, is inferred, because the
+evidence is in the path and the mapping is printed in the run's notes;
+`lib_path:` overrides it.
+
+### 10.5 One assumption
+
+For `this_object()->fn()` and callbacks, a function missing from a file's
+own chain is looked for in the files that inherit or include it. In a
+partial checkout only the checkout can be searched. dgdlint assumes a
+wizard's own files are inherited by their own files, reports the miss,
+and says so in the message ("nor in this checkout; inheritors elsewhere
+in the lib cannot be seen"). The strictly safe alternative, treating
+every such miss as unknown, would silence the single most useful runtime
+check for a wizard (`add_action("do_x")` with no `do_x`). Measured cost:
+1 false finding in 9,043 (below).
+
+### 10.6 Measured: ten real trees, profile only vs. whole lib
+
+`TestCorpusPartialCheckout` builds the profile from the whole lib,
+copies each tree alone to a temp directory with a two-line config, lints
+it, and compares with linting the same tree in place.
+
+| | findings |
+|---|---|
+| whole lib, the ten trees | 9,106 |
+| profile only | 9,043 |
+| identical | 8,989 (98.7% of whole-lib) |
+| lost (whole-lib only) | 117 |
+| extra: syntax errors behind an include that can no longer be proven missing | 52 |
+| extra: other | 2 |
+
+Trees: players/drake, helgrim, iomi, crovax, klopf, knubo, mousepad,
+caveral, okjuna and d/Valinor (6,437 of the findings).
+
+- **Lost (116)** are all references to code in neither the checkout nor
+  the profile, now unknown: `target-object-missing` for
+  `/d/Odyssey/…`, `/players/graxius/…`; `callback-arity` and
+  `callable-not-found` against `/d/Empire/daemons/weapond`, `/com/s/more`;
+  `include-not-found` for `"../bob.h"` (above the checkout).
+- **Extra syntax errors (52)** are real errors in files whose first
+  problem is an `#include` reaching outside the checkout. With the whole
+  lib that include is provably missing, which is fatal and withholds what
+  follows; from a checkout it is only unknown, so the file's own errors
+  show. 47 of the 52 are one non-LPC file (`mare.c`).
+- **Extra other (2):** one is false: `store_fp("do_clippy")` in
+  `/players/knubo/clippy/clippy.c`, whose `do_clippy` is provided by
+  another wizard's file that inherits it (10.5). The other is a true
+  finding renamed: `MONSTER_D->get_id_string()` calls a private function,
+  which the whole lib reports as `static-crossobj` ("is private") and the
+  profile, which lists no private functions, as `callable-not-found`.
+
+### 10.7 The viking profile, and what it exposes
+
+`viking.profile` (kept outside this repository, with its build inputs
+and a rebuild script): 46,926 bytes compressed, 217 KB of declarations; 394 objects and 71 headers from `/std`, `/obj`, `/room`,
+`/secure`, `/dgd` plus what they include and inherit; covered:
+`/dgd/ /obj/ /room/ /secure/ /std/` and the include dirs. `/com` was left
+out (wizard code rarely references commands; it stays unknown).
+
+The owner has decided it may be public. **Publishing it gives anyone who
+fetches it:** the paths of
+those 465 files; the full declarations (names, types, specifiers,
+parameter names) of their non-private functions and global variables,
+including `/secure` daemons and the login objects; and the full text of
+every `#define` in the shared headers (path constants, level constants,
+prompt macros). It publishes no function bodies, comments, private
+functions, private variables or data. A scan for credentials, e-mail addresses, IPs and URLs found only a
+public URL and identifier names such as `password`. Whether that surface
+may be public is the lib owner's decision; `omit:` removes anything from
+the next build.
+
+### 10.8 Other LPC drivers
+
+The profile's `dialect` is data, and only `driver: dgd` is accepted
+today. Generalizing to FluffOS or LDMud is mostly not profile work:
+
+- **Grammar variants** in `pkg/lexer`/`pkg/syntax`, selected by dialect:
+  FluffOS `(: … :)` closures, `foreach`, `class`/`struct`, `ref`,
+  `function` types, array slicing `[<n]`, `efun::`; LDMud inline closures
+  `#'f`, `({…})` quoted arrays, structs, `foreach`, string ranges with
+  `<`. The three "legacy" rules become dialect-conditional (they are
+  errors only in DGD).
+- **Efun/kfun tables** per driver (name, arity, purity) for name
+  resolution and for knowing that e.g. `call_other` and `call_out` exist
+  with which argument positions; today the handful dgdlint needs are
+  hard-coded as DGD kfuns.
+- **Semantics the runtime rules encode:** visibility and `call_other`
+  reachability (`static`/`private`/`protected`/`nosave` differ),
+  `inherit` semantics (virtual inherit in LDMud, no labels in FluffOS),
+  how relative paths and includes resolve (master-object hooks rather
+  than a driver config file), simul-efuns, and the preprocessor's
+  predefined macros and directives (`#pragma strict_types`).
+- **Build input:** the driver's config format (FluffOS `config.<mud>`,
+  LDMud command-line/master settings) in place of the DGD config reader.
+
+The profile format itself needs nothing but new stub syntax.
+
+## 11. Implemented vs. deferred
 
 Implemented: everything in sections 2–7 except the items below.
 
@@ -584,7 +825,19 @@ Deferred, in rough priority order:
    context of their includers.
 6. **dgdfmt on the tree** for indentation of braceless bodies, with the
    brace stack as the fallback in error regions.
-7. **`dgdlint lsp`** (6.1), plus `dgdlint init` to write a starter config
-   from a driver config.
-8. Backslash-newline outside strings is tolerated (not reported) but not
+7. **`dgdlint lsp`** (6.1), plus `dgdlint init` to write a starter config.
+8. **Type rules** on the declarations the index now keeps. Candidates,
+   by the driver errors they would catch (file counts from the oracle):
+   wrong argument count in a direct call to a function declared in the
+   chain ("too many/too few arguments", 289 files; needs the kfun table
+   for the rest); using the value of a `void` function, including through
+   `"/path"->fn()` ("void value not ignored", 46); definition that does
+   not match its prototype ("declaration does not match prototype", 43);
+   literal assigned or returned against a declared `int`/`string`
+   ("incompatible types", 246, a subset). None is added yet: each needs
+   macro-expanded types or the kfun table to be provable.
+9. **Profiles:** recognizing a checkout by evidence in its files when its path says
+   nothing; fetching or updating profiles is deliberately out of scope
+   (no network access in the tool).
+10. Backslash-newline outside strings is tolerated (not reported) but not
    modelled by the lexer.

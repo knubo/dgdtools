@@ -55,11 +55,102 @@ type FuncInfo struct {
 	MinArgs, MaxArgs int
 	Path             string // fs path of the defining file
 	Off              uint32
+	// Decl is the declaration as written, without its body:
+	// "static varargs int query(string what, mixed extra...)".
+	// Type is its return type as written ("int", "string *", a type
+	// macro such as "status"), or "" for a function declared without one.
+	// Both come from real files and from profile stubs alike; Params
+	// splits Decl into its parameters.
+	Decl, Type string
 }
 
+// VarInfo describes one global variable of an object.
 type VarInfo struct {
-	Static bool
-	Off    uint32
+	Static, Private bool
+	// Type is the declared type as written, including '*'s.
+	Type string
+	Off  uint32
+}
+
+// Params returns the parameters of a function declaration as written
+// ("string what", "mixed extra..."), for signature help.
+func Params(decl string) []string {
+	open := strings.IndexByte(decl, '(')
+	close := strings.LastIndexByte(decl, ')')
+	if open < 0 || close <= open {
+		return nil
+	}
+	inner := strings.TrimSpace(decl[open+1 : close])
+	if inner == "" || inner == "void" {
+		return nil
+	}
+	var out []string
+	for _, p := range strings.Split(inner, ",") {
+		out = append(out, strings.TrimSpace(p))
+	}
+	return out
+}
+
+// SourceText returns the significant tokens first..last of f joined into
+// one line: the text as written minus comments, directives and layout.
+func SourceText(f *token.File, first, last int) string {
+	var b strings.Builder
+	prev := token.EOF
+	for i := first; i <= last && i < len(f.Tokens); i++ {
+		t := f.Tokens[i]
+		if t.Kind.IsTrivia() || t.Kind == token.Directive || t.Kind == token.EOF {
+			continue
+		}
+		switch {
+		case b.Len() == 0, prev == token.LParen, prev == token.Star && t.Kind != token.Star && t.Kind != token.Comma && t.Kind != token.RParen,
+			t.Kind == token.Comma, t.Kind == token.RParen, t.Kind == token.Semicolon, t.Kind == token.Ellipsis,
+			t.Kind == token.LParen && prev == token.Ident:
+		default:
+			b.WriteByte(' ')
+		}
+		b.Write(f.Text(t))
+		prev = t.Kind
+	}
+	return b.String()
+}
+
+// DeclPrefix renders the specifiers and type of a declaration as written,
+// with a trailing space when non-empty.
+func DeclPrefix(f *token.File, specs []syntax.Spec, typ *syntax.TypeSpec) string {
+	var parts []string
+	for _, s := range specs {
+		parts = append(parts, string(f.Text(f.Tokens[s.Tok])))
+	}
+	if typ != nil {
+		parts = append(parts, SourceText(f, typ.First, typ.Last))
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return strings.Join(parts, " ") + " "
+}
+
+// TypeText renders a declared type with its '*'s: "string *".
+func TypeText(f *token.File, typ *syntax.TypeSpec, stars int) string {
+	if typ == nil {
+		return ""
+	}
+	s := SourceText(f, typ.First, typ.Last)
+	if stars > 0 {
+		s += " " + strings.Repeat("*", stars)
+	}
+	return s
+}
+
+// FuncDeclText renders a function's declaration as written, without body
+// or terminator: specifiers, return type, name and parameter list.
+func FuncDeclText(f *token.File, fn *syntax.FuncDecl) string {
+	name := "operator"
+	if fn.Name != nil {
+		name = fn.Name.Name
+	}
+	return DeclPrefix(f, fn.Specs, fn.Type) + strings.Repeat("*", fn.Stars) + name +
+		"(" + SourceText(f, fn.LParen+1, fn.RParen-1) + ")"
 }
 
 // InheritRef is one inherit statement.
@@ -130,6 +221,18 @@ type Index struct {
 	Root string // absolute lib root; "" in file-local mode
 	Cfg  *config.Config
 
+	// Partial says there is no whole lib on disk: files come from a
+	// checkout of one subtree and/or from a profile's stubs. What exists
+	// is then decided per path by Covers.
+	Partial bool
+	// CheckoutDir on disk is the lib directory CheckoutLib
+	// ("/players/name"); both empty when the root is a real lib.
+	CheckoutDir, CheckoutLib string
+	// Covered are lib directory prefixes ("/std/") known completely,
+	// except for paths matching Holes.
+	Covered []string
+	Holes   *fileset.Matcher
+
 	// Complete is false when the lib on disk lacks things the config says
 	// it has (include dirs, the force-include, an auto object): a partial
 	// checkout or a wrong root. Missing references are then Unknown.
@@ -179,8 +282,28 @@ type unitEntry struct {
 // New creates an index over the project's lib. root may be "" (no lib:
 // only file-local facts are available).
 func New(cfg *config.Config, root string, fsys vfs.FS) *Index {
+	return NewLayout(cfg, Layout{Root: root}, fsys)
+}
+
+// Layout says where the lib is. For a whole lib on disk only Root is set.
+// For a partial checkout Root is a virtual directory (nothing real is
+// under it), Partial is set, CheckoutDir/CheckoutLib mount the checkout,
+// and Covered names the directories a profile knows completely.
+type Layout struct {
+	Root                     string
+	Partial                  bool
+	CheckoutDir, CheckoutLib string
+	Covered                  []string
+	Holes                    []string
+}
+
+// NewLayout creates an index for a layout.
+func NewLayout(cfg *config.Config, lay Layout, fsys vfs.FS) *Index {
+	root := lay.Root
 	ix := &Index{
-		FS: fsys, Root: root, Cfg: cfg,
+		Partial: lay.Partial, CheckoutDir: lay.CheckoutDir, CheckoutLib: lay.CheckoutLib, Covered: lay.Covered,
+		Holes: fileset.NewMatcher(lay.Holes),
+		FS:    fsys, Root: root, Cfg: cfg,
 		dialect:  cfg.TokenDialect(),
 		exclude:  fileset.NewMatcher(cfg.Exclude),
 		virtual:  fileset.NewMatcher(cfg.Lint.VirtualPaths),
@@ -211,8 +334,8 @@ func New(cfg *config.Config, root string, fsys vfs.FS) *Index {
 	}
 	ix.reset()
 
-	ix.Complete = root != ""
-	if root != "" {
+	ix.Complete = root != "" && !ix.Partial
+	if ix.Complete {
 		var missing []string
 		for _, d := range cfg.Lint.IncludeDirs {
 			if !fsys.IsDir(ix.fsPath(d)) {
@@ -223,7 +346,7 @@ func New(cfg *config.Config, root string, fsys vfs.FS) *Index {
 			missing = append(missing, f)
 		}
 		for _, a := range cfg.Lint.AutoObjects {
-			if !fsys.Exists(fileset.FSPath(root, a)) {
+			if !fsys.Exists(ix.objectFS(a)) {
 				missing = append(missing, a)
 			}
 		}
@@ -310,37 +433,116 @@ func (ix *Index) Invalidate(paths ...string) []string {
 // ---------------------------------------------------------------- paths
 
 func (ix *Index) fsPath(libPath string) string {
+	if ix.CheckoutDir != "" {
+		if libPath == ix.CheckoutLib {
+			return ix.CheckoutDir
+		}
+		if rest, ok := strings.CutPrefix(libPath, ix.CheckoutLib+"/"); ok {
+			return filepath.Join(ix.CheckoutDir, filepath.FromSlash(rest))
+		}
+	}
 	return filepath.Join(ix.Root, filepath.FromSlash(strings.TrimPrefix(libPath, "/")))
+}
+
+// objectFS is the fs path of an object's source (".c" appended when the
+// lib path has no extension).
+func (ix *Index) objectFS(libPath string) string {
+	if path.Ext(libPath) == "" {
+		libPath += ".c"
+	}
+	return ix.fsPath(libPath)
+}
+
+// rel returns fsPath relative to the lib root, slash-separated and with
+// its extension ("players/x/room.c"); false when it is outside the lib.
+func (ix *Index) rel(fsPath string) (string, bool) {
+	under := func(dir string) (string, bool) {
+		r, err := filepath.Rel(dir, fsPath)
+		if err != nil || r == ".." || strings.HasPrefix(r, ".."+string(filepath.Separator)) {
+			return "", false
+		}
+		return filepath.ToSlash(r), true
+	}
+	if ix.CheckoutDir != "" {
+		if r, ok := under(ix.CheckoutDir); ok {
+			return strings.TrimPrefix(path.Join(ix.CheckoutLib, r), "/"), true
+		}
+	}
+	if ix.Root == "" {
+		return "", false
+	}
+	return under(ix.Root)
+}
+
+// Covers reports whether the index knows everything under libPath's
+// location, so that "not found" there means "does not exist". With a whole
+// lib that is the lib's completeness; with a partial checkout it is the
+// checkout itself and the directories the profile captured completely.
+func (ix *Index) Covers(libPath string) bool {
+	if !ix.Partial {
+		return ix.Complete
+	}
+	if ix.CheckoutLib != "" && (libPath == ix.CheckoutLib || strings.HasPrefix(libPath, ix.CheckoutLib+"/")) {
+		return true
+	}
+	for _, c := range ix.Covered {
+		if strings.HasPrefix(libPath, c) {
+			// An object path has no extension; holes are file globs.
+			rel := strings.TrimPrefix(libPath, "/")
+			return !ix.Holes.Match(rel) && !ix.Holes.Match(rel+".c")
+		}
+	}
+	return false
+}
+
+// includeProvablyMissing reports whether an unresolved include is known
+// not to exist: every place the driver would look is covered.
+func (ix *Index) includeProvablyMissing(fromFS string, inc pp.Include) bool {
+	if !ix.Partial {
+		return ix.Complete
+	}
+	var cands []string
+	if !inc.Angle {
+		if strings.HasPrefix(inc.Name, "/") {
+			cands = append(cands, inc.Name)
+		} else {
+			from, ok := ix.rel(fromFS)
+			if !ok {
+				return false
+			}
+			cands = append(cands, path.Join("/", path.Dir(from), inc.Name))
+		}
+	}
+	for _, dir := range ix.Cfg.Lint.IncludeDirs {
+		cands = append(cands, path.Join(dir, inc.Name))
+	}
+	for _, c := range cands {
+		if !ix.Covers(path.Clean(c)) {
+			return false
+		}
+	}
+	return len(cands) > 0
 }
 
 // LibPath maps an fs path to its lib path ("/std/room" for std/room.c),
 // or "" when the file is not under the root.
 func (ix *Index) LibPath(fsPath string) string {
-	if ix.Root == "" {
+	rel, ok := ix.rel(fsPath)
+	if !ok {
 		return ""
 	}
-	rel, err := filepath.Rel(ix.Root, fsPath)
-	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return ""
-	}
-	return fileset.LibPath(filepath.ToSlash(rel))
+	return fileset.LibPath(rel)
 }
 
 // Excluded reports whether fsPath matches the config's exclude globs.
 func (ix *Index) Excluded(fsPath string) bool {
-	if ix.Root == "" {
-		return false
-	}
-	rel, err := filepath.Rel(ix.Root, fsPath)
-	if err != nil {
-		return false
-	}
-	return ix.exclude.Match(filepath.ToSlash(rel))
+	rel, ok := ix.rel(fsPath)
+	return ok && ix.exclude.Match(rel)
 }
 
 // ObjectExists reports whether libPath is backed by a file.
 func (ix *Index) ObjectExists(libPath string) bool {
-	p := fileset.FSPath(ix.Root, libPath)
+	p := ix.objectFS(libPath)
 	ix.mu.Lock()
 	v, ok := ix.exists[p]
 	ix.mu.Unlock()
@@ -386,12 +588,9 @@ func (ix *Index) Walk(dir string, visit func(fsPath string)) error {
 			return nil
 		}
 		if d.IsDir() {
-			if ix.Root != "" && p != dir {
-				if rel, rerr := filepath.Rel(ix.Root, p); rerr == nil {
-					rel = filepath.ToSlash(rel)
-					if ix.exclude.Match(rel) || ix.exclude.MatchDir(rel) {
-						return filepath.SkipDir
-					}
+			if p != dir {
+				if rel, ok := ix.rel(p); ok && (ix.exclude.Match(rel) || ix.exclude.MatchDir(rel)) {
+					return filepath.SkipDir
 				}
 			}
 			return nil
@@ -550,7 +749,7 @@ func (ix *Index) Unit(libPath string) *Unit {
 	if ix.Root == "" || libPath == "" {
 		return nil
 	}
-	return ix.UnitFS(fileset.FSPath(ix.Root, libPath))
+	return ix.UnitFS(ix.objectFS(libPath))
 }
 
 // UnitFS returns the indexed facts for an fs path, or nil if unreadable.
@@ -638,7 +837,7 @@ func (ix *Index) build(fsPath string) (parsed *Parsed) {
 			continue
 		}
 		u.Partial = true
-		if ix.Complete {
+		if ix.includeProvablyMissing(fsPath, inc) {
 			t := f.Tokens[inc.Tok]
 			u.BadIncludes = append(u.BadIncludes, BadInclude{Raw: inc.Raw(), Off: t.Off, End: t.End})
 		} else {
@@ -649,6 +848,9 @@ func (ix *Index) build(fsPath string) (parsed *Parsed) {
 		u.UnknownIncludes = 1 // an include of an include failed
 	}
 
+	if own.Partial {
+		u.Partial = true
+	}
 	collectDecls(u, tree, fsPath)
 	for _, d := range tree.Decls {
 		if inh, ok := d.(*syntax.InheritDecl); ok {
@@ -721,6 +923,7 @@ func collectDecls(u *Unit, tree *syntax.File, fsPath string) {
 			PrototypeOnly: fn.Body == nil,
 			MinArgs:       minA, MaxArgs: maxA,
 			Path: fsPath, Off: tree.Off(fn.Name),
+			Decl: FuncDeclText(tree.Tok, fn), Type: TypeText(tree.Tok, fn.Type, fn.Stars),
 		}
 		if old, ok := u.Funcs[fn.Name.Name]; !ok || (old.PrototypeOnly && !fi.PrototypeOnly) {
 			u.Funcs[fn.Name.Name] = fi
@@ -730,7 +933,10 @@ func collectDecls(u *Unit, tree *syntax.File, fsPath string) {
 	for _, d := range tree.Decls {
 		if vd, ok := d.(*syntax.VarDecl); ok {
 			for _, v := range vd.Vars {
-				u.Vars[v.Name.Name] = VarInfo{Static: vd.Has(token.KwStatic), Off: tree.Off(v.Name)}
+				u.Vars[v.Name.Name] = VarInfo{
+					Static: vd.Has(token.KwStatic), Private: vd.Has(token.KwPrivate),
+					Type: TypeText(tree.Tok, vd.Type, v.Stars), Off: tree.Off(v.Name),
+				}
 			}
 		}
 	}
@@ -813,11 +1019,12 @@ func (ix *Index) includedCode(fsPath string) *Unit {
 			e.unit = &Unit{FSPath: fsPath, Deps: []string{fsPath}}
 			return
 		}
-		view := &pp.View{Layers: []*pp.Table{pp.Scan(f, sel)}, Override: ix.override}
+		own := pp.Scan(f, sel)
+		view := &pp.View{Layers: []*pp.Table{own}, Override: ix.override}
 		tree := syntax.Parse(f, syntax.Options{Macros: view, Sel: sel})
 		u := &Unit{
 			FSPath: fsPath, Funcs: map[string]FuncInfo{}, Vars: map[string]VarInfo{},
-			Partial: tree.Partial, Deps: []string{fsPath},
+			Partial: tree.Partial || own.Partial, Deps: []string{fsPath},
 		}
 		collectDecls(u, tree, fsPath)
 		for _, d := range tree.Decls {
@@ -863,7 +1070,16 @@ func (ix *Index) LoadAll(ctx context.Context) bool {
 	done := true
 	once.Do(func() {
 		var paths []string
-		_ = ix.Walk(ix.Root, func(p string) { paths = append(paths, p) })
+		// With a partial checkout the checkout is all there is to scan:
+		// who else in the lib inherits these files cannot be known, and
+		// a wizard's own tree is taken to be self-contained.
+		scan := ix.Root
+		if ix.Partial {
+			scan = ix.CheckoutDir
+		}
+		if scan != "" {
+			_ = ix.Walk(scan, func(p string) { paths = append(paths, p) })
+		}
 		ch := make(chan string, 256)
 		var wg sync.WaitGroup
 		for range runtime.NumCPU() {

@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 
@@ -33,18 +34,29 @@ type Config struct {
 	// Root is the filesystem directory that is the lib's "/". Relative
 	// paths are resolved against the config file's directory.
 	Root string `yaml:"root"`
-	// DriverConfig is the DGD driver's own config file. include_dirs,
-	// include_file, auto_object and typechecking are read from it when
-	// not set under lint:.
-	DriverConfig string   `yaml:"driver_config"`
-	Exclude      []string `yaml:"exclude"`
-	Format       Format   `yaml:"format"`
-	Lint         Lint     `yaml:"lint"`
+	// Profile names the mudlib profile to lint against: a name, looked
+	// up as NAME.profile next to this file, in $DGDTOOLS_PROFILE_PATH and
+	// in the user config directory (profile.SearchDirs), or a file path. A profile supplies what
+	// the checkout does not contain: the driver's settings, the shared
+	// headers, and the signatures of the shared objects.
+	Profile string `yaml:"profile"`
+	// LibPath says where this checkout sits in the lib when it is not
+	// the whole lib: the lib path of Root, e.g. "/players/drake".
+	LibPath string `yaml:"lib_path"`
+	// ProfileBuild are the inputs of `dgdlint profile build`, for whoever
+	// has the whole lib. They also serve a whole-lib lint directly.
+	ProfileBuild ProfileBuild `yaml:"profile_build"`
+
+	Exclude []string `yaml:"exclude"`
+	Format  Format   `yaml:"format"`
+	Lint    Lint     `yaml:"lint"`
 
 	// Dir is the directory the config was loaded from ("." for defaults).
 	Dir string `yaml:"-"`
 	// Path is the config file path ("" for defaults).
 	Path string `yaml:"-"`
+	// RootSet records whether the file gave a root.
+	RootSet bool `yaml:"-"`
 }
 
 // StringList decodes from either a scalar or a sequence.
@@ -62,6 +74,29 @@ func (s *StringList) UnmarshalYAML(n *yaml.Node) error {
 	*s = l
 	return nil
 }
+
+// ProfileBuild describes how to turn a whole lib into a profile.
+type ProfileBuild struct {
+	// Name of the profile (default: the lib root's directory name).
+	Name string `yaml:"name"`
+	// DriverConfig is the DGD driver's config file: include_dirs,
+	// include_file, auto_object and typechecking are read from it.
+	DriverConfig string `yaml:"driver_config"`
+	// Share are globs (lib-relative) of the code every wizard builds on:
+	// its headers and object signatures go into the profile. The include
+	// dirs, the force-included header, the auto object, and everything
+	// the shared files inherit or include are always added.
+	Share []string `yaml:"share"`
+	// Omit are globs never to put in a profile, even when referenced.
+	Omit []string `yaml:"omit"`
+	// Checkouts are the per-wizard trees as path patterns ("players/*").
+	Checkouts []string `yaml:"checkouts"`
+}
+
+// DefaultShare is used when profile_build.share is empty: the usual
+// homes of shared code in an LPmud-style lib. Entries that do not exist
+// are ignored.
+var DefaultShare = []string{"std/**", "obj/**", "lib/**", "room/**", "secure/**", "com/**", "sys/**", "dgd/**", "kernel/**", "include/**"}
 
 type DialectCfg struct {
 	SlashSlash *bool `yaml:"slash_slash"` // default true
@@ -177,6 +212,7 @@ func LoadFS(fs vfs.FS, path string) (*Config, error) {
 	}
 	c.Dir = filepath.Dir(path)
 	c.Path = path
+	c.RootSet = c.Root != ""
 	if c.Root == "" {
 		c.Root = "."
 	}
@@ -209,16 +245,20 @@ func loadInto(fs vfs.FS, path string, c *Config, seen map[string]bool) error {
 		if err := loadInto(fs, base, c, seen); err != nil {
 			return fmt.Errorf("%s: extends: %w", path, err)
 		}
-		// Relative root/driver_config in a base are relative to the base.
-		if c.Root != "" && !filepath.IsAbs(c.Root) {
-			c.Root = filepath.Join(filepath.Dir(base), c.Root)
+		// Relative paths in a base are relative to the base.
+		abs := func(p *string) {
+			if *p != "" && !filepath.IsAbs(*p) {
+				*p = filepath.Join(filepath.Dir(base), *p)
+			}
 		}
-		if c.DriverConfig != "" && !filepath.IsAbs(c.DriverConfig) {
-			c.DriverConfig = filepath.Join(filepath.Dir(base), c.DriverConfig)
+		abs(&c.Root)
+		abs(&c.ProfileBuild.DriverConfig)
+		if strings.ContainsAny(c.Profile, `/\`) || strings.HasSuffix(c.Profile, ".profile") {
+			abs(&c.Profile)
 		}
 	}
-	root, drv := c.Root, c.DriverConfig
-	c.Root, c.DriverConfig = "", ""
+	root, drv := c.Root, c.ProfileBuild.DriverConfig
+	c.Root, c.ProfileBuild.DriverConfig = "", ""
 	// Unknown keys are errors: a misspelled setting must not be silently
 	// ignored (ruff, Biome and golangci-lint all reject them).
 	dec := yaml.NewDecoder(bytes.NewReader(data))
@@ -229,8 +269,8 @@ func loadInto(fs vfs.FS, path string, c *Config, seen map[string]bool) error {
 	if c.Root == "" {
 		c.Root = root
 	}
-	if c.DriverConfig == "" {
-		c.DriverConfig = drv
+	if c.ProfileBuild.DriverConfig == "" {
+		c.ProfileBuild.DriverConfig = drv
 	}
 	return nil
 }

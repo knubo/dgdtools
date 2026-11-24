@@ -1185,6 +1185,10 @@ func (p *parser) localDecl(start int) Stmt {
 				p.text(name), p.fnName, line),
 			Tok: first, Related: p.fnBrace, RelatedMsg: "body opened here",
 			RegionFirst: p.fnBrace, RegionLast: name,
+			// The braces are unbalanced from here on: whatever follows
+			// (often the same message for the next function) is a
+			// consequence.
+			Severe: true,
 		})
 		p.file.Partial = true
 		p.abort, p.resume = true, start

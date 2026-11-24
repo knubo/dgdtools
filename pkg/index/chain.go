@@ -120,6 +120,9 @@ type ChainFunc struct {
 	Path             string // fs path of the defining file
 	Off              uint32
 	DefinedIn        string // lib path of the object that provides it
+	// Decl and Type are the declaration and return type as written (see
+	// FuncInfo).
+	Decl, Type string
 }
 
 // Chain returns the flattened chain for a lib path.
@@ -190,6 +193,7 @@ func (ix *Index) chain(libPath string, visiting map[string]bool) (*Chain, bool) 
 			Static: fi.Static, Private: fi.Private, PrototypeOnly: fi.PrototypeOnly,
 			MinArgs: fi.MinArgs, MaxArgs: fi.MaxArgs,
 			Path: fi.Path, Off: fi.Off, DefinedIn: libPath,
+			Decl: fi.Decl, Type: fi.Type,
 		}
 	}
 	ch.Objects = append(ch.Objects, libPath)
@@ -365,6 +369,10 @@ func (ix *Index) LookupCallable(ctx context.Context, target, fn string, self boo
 		return Lookup{State: LookupUnknown}
 	}
 	if !self {
+		// A profile stub lists an object's public interface only.
+		if st, ok := ix.FS.(interface{ IsStub(string) bool }); ok && st.IsStub(ix.objectFS(target)) {
+			return Lookup{State: LookupMissing, Note: " or is private there (a profile lists public functions only)"}
+		}
 		return Lookup{State: LookupMissing}
 	}
 	// Code in the auto object's own chain runs as every object in the
@@ -377,6 +385,10 @@ func (ix *Index) LookupCallable(ctx context.Context, target, fn string, self boo
 		return Lookup{State: LookupUnknown}
 	}
 	if len(users) == 0 {
+		if ix.Partial {
+			// Only the checkout could be searched for inheritors.
+			return Lookup{State: LookupMissing, Note: " (nor in this checkout; inheritors elsewhere in the lib cannot be seen)"}
+		}
 		return Lookup{State: LookupMissing}
 	}
 	for _, u := range users {

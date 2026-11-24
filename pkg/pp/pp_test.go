@@ -48,7 +48,7 @@ func TestClassify(t *testing.T) {
 		{"static int x", ClassFragment},
 	}
 	for _, tt := range tests {
-		got := Classify(cleanDirective([]byte(tt.body)), lexer.Default)
+		got := Classify(CleanDirective([]byte(tt.body)), lexer.Default)
 		assert.Equal(t, tt.want.String(), got.String(), "%q", tt.body)
 	}
 }
