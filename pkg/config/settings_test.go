@@ -142,7 +142,7 @@ func TestScopeValidation(t *testing.T) {
 		"width":          {"format: {indent_width: 40}\n", "format.indent_width: indent width 40 is not between 1 and 16"},
 		"style":          {"format:\n  indent_style: tabs\n", "line 2: unknown indent style \"tabs\""},
 		"endings":        {"format: {line_endings: dos}\n", "unknown line endings \"dos\""},
-		"old option":     {"format: {max_blank_lines: 1}\n", "max_blank_lines"},
+		"format key":     {"format: {line_width: 80}\n", "line_width"},
 		"fail_on value":  {"lint: {fail_on: fatal}\n", `lint.fail_on: unknown severity "fatal" (want info, warning or error)`},
 		"object paths":   {"relative_object_paths: cwd\n", `relative_object_paths: unknown value "cwd" (want root or file)`},
 		"macro class":    {"conventions:\n  macros: {FOREACH: statment}\n", `conventions.macros: FOREACH: unknown class "statment" (want expression, empty, specifier, type, string, statement, opaque)`},

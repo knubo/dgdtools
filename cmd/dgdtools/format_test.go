@@ -359,8 +359,8 @@ func TestFormatErrors(t *testing.T) {
 		"cfg/a.c":               messy,
 		"typo/dgdtools.yml":     "fromat: {indent_width: 2}\n",
 		"typo/a.c":              messy,
-		"old/dgdtools.yml":      "format: {function_headers: joined}\n",
-		"old/a.c":               messy,
+		"key/dgdtools.yml":      "format: {line_width: 80}\n",
+		"key/a.c":               messy,
 		"scope/dgdtools.yml":    "",
 		"scope/in/dgdtools.yml": "root: false\nexclude: [x]\n",
 		"scope/in/a.c":          messy,
@@ -384,7 +384,7 @@ func TestFormatErrors(t *testing.T) {
 	for file, want := range map[string]string{
 		"cfg/a.c":      "unknown line endings \"dos\"",
 		"typo/a.c":     "fromat",
-		"old/a.c":      "function_headers",
+		"key/a.c":      "line_width",
 		"scope/in/a.c": "exclude belongs in the project's root config",
 	} {
 		code, _, errs = dgdtools(t, "", "format", filepath.Join(dir, file))
