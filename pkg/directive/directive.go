@@ -110,18 +110,20 @@ func Scan(f *token.File) []Directive {
 // Parse reads the token t of f as a directive; false when it is not one.
 func Parse(f *token.File, t token.Token) (Directive, bool) {
 	text := f.Text(t)
-	switch t.Kind {
-	case token.LineComment:
-	case token.BlockComment:
-		text = bytes.TrimRight(bytes.TrimSuffix(text, []byte("*/")), "* \t")
-	default:
+	if t.Kind != token.LineComment && t.Kind != token.BlockComment {
 		return Directive{}, false
 	}
-	// i walks text; the comment's opener and what decorates it come
-	// first.
+	// i walks text, from after the comment's opener and what decorates
+	// it, to before what closes it.
 	i := 2
 	for i < len(text) && (text[i] == ' ' || text[i] == '\t' || text[i] == '*') {
 		i++
+	}
+	if t.Kind == token.BlockComment {
+		text = bytes.TrimRight(bytes.TrimSuffix(text, []byte("*/")), "* \t")
+	}
+	if i > len(text) {
+		return Directive{}, false // nothing but decoration
 	}
 	if !bytes.HasPrefix(text[i:], []byte(Prefix)) {
 		return Directive{}, false

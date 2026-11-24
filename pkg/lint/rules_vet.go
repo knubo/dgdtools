@@ -1,6 +1,7 @@
 package lint
 
 import (
+	"errors"
 	"slices"
 	"strings"
 
@@ -312,8 +313,11 @@ var ruleUnformatted = &Rule{
 	Default: false, Severity: diag.Info,
 	Run: func(p *Pass) {
 		out, err := format.Format(p.File, p.Format)
-		if err != nil {
+		switch {
+		case errors.Is(err, format.ErrIllegal):
 			return // a file that does not tokenize is a syntax finding, not this one
+		case err != nil:
+			panic(err) // the formatter failed: an internal error on this file, and reported as one
 		}
 		if string(out) != string(p.File.Src) {
 			p.Report(0, 0, "file is not formatted (run `dgdtools format`)")

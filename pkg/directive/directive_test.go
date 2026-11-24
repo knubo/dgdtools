@@ -33,6 +33,11 @@ func TestParse(t *testing.T) {
 		"/* dgdtools-ignore-starting */":                   "",
 		"/* dgdtools: ignore */":                           "",
 		"// plain":                                         "",
+		"//":                                               "",
+		"/**/":                                             "",
+		"/***/":                                            "",
+		"/* */":                                            "",
+		"/*":                                               "", // not closed
 	} {
 		f := lexer.Lex("t.c", []byte(src), lexer.Default)
 		d, ok := Parse(f, f.Tokens[0])
