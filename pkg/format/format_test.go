@@ -6,7 +6,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/mmcdole/dgdtools/pkg/config"
 	"github.com/mmcdole/dgdtools/pkg/lexer"
+	"github.com/mmcdole/dgdtools/pkg/pp"
 )
 
 func fmtSrc(t *testing.T, src string, o Options) string {
@@ -28,9 +30,25 @@ func TestKNFHeaders(t *testing.T) {
 	// Already-KNF input is a fixed point.
 	assert.Equal(t, want, fmtSrc(t, want, Options{}))
 
-	// public macro is part of the header.
+	// A specifier macro is part of the header, whether the project names
+	// it or the file defines it.
 	in = "public nomask int query_count() {\n    return 1;\n}\n"
 	want = "public nomask int\nquery_count()\n{\n    return 1;\n}\n"
+	assert.Equal(t, want, fmtSrc(t, in, Options{Macros: map[string]pp.Class{"public": pp.ClassEmpty}}))
+	in = "#define visible\nvisible\nint\nquery_count() {\n    return 1;\n}\n"
+	want = "#define visible\nvisible int\nquery_count()\n{\n    return 1;\n}\n"
+	assert.Equal(t, want, fmtSrc(t, in, Options{}))
+
+	// So is a return type that is a macro from a header the formatter
+	// does not read.
+	in = "status *query_flags(status all) {\n    return flags;\n}\n"
+	want = "status *\nquery_flags(status all)\n{\n    return flags;\n}\n"
+	assert.Equal(t, want, fmtSrc(t, in, Options{}))
+
+	// A name that only may be a specifier macro (it stands where one
+	// could) is left where it is: the header begins after it.
+	in = "SETUP_COMMAND\n\nstatic int main(string str) {\n    return 1;\n}\n"
+	want = "SETUP_COMMAND\n\nstatic int\nmain(string str)\n{\n    return 1;\n}\n"
 	assert.Equal(t, want, fmtSrc(t, in, Options{}))
 
 	// K&R typeless: no header line, brace still gets its own line.
@@ -38,9 +56,9 @@ func TestKNFHeaders(t *testing.T) {
 	want = "add_penalty(int pen)\n{\n    return pen;\n}\n"
 	assert.Equal(t, want, fmtSrc(t, in, Options{}))
 
-	// Prototypes collapse to one line.
-	in = "static void\nset_count(int n);\n"
-	want = "static void set_count(int n);\n"
+	// Prototypes collapse to one line, spaced like any declaration.
+	in = "static void\nset_count(int n);\nstring *\nquery_names();\n"
+	want = "static void set_count(int n);\nstring *query_names();\n"
 	assert.Equal(t, want, fmtSrc(t, in, Options{}))
 
 	// Headers containing comments are left in their original layout.
@@ -122,12 +140,12 @@ func TestSpacingNormalization(t *testing.T) {
 
 func TestUnaryVsBinary(t *testing.T) {
 	cases := map[string]string{
-		"x=a- -b;":     "x = a - -b;",
-		"int *arr;":    "int *arr;",
-		"x=a*b;":       "x = a * b;",
+		"x=a- -b;":      "x = a - -b;",
+		"int *arr;":     "int *arr;",
+		"x=a*b;":        "x = a * b;",
 		"f(&callback);": "f(&callback);",
-		"y=!x;":        "y = !x;",
-		"z=~mask;":     "z = ~mask;",
+		"y=!x;":         "y = !x;",
+		"z=~mask;":      "z = ~mask;",
 	}
 	for in, want := range cases {
 		assert.Equal(t, want+"\n", fmtSrc(t, in, Options{}), "input: %s", in)
@@ -227,4 +245,155 @@ func TestCommentOnlyGapsPreserved(t *testing.T) {
 	out := fmtSrc(t, in, Options{})
 	assert.Contains(t, out, "int x; /* trailing */")
 	assert.Contains(t, out, "\n/* own line */\nint y;")
+}
+
+// body wraps statements in a function, so that they stand at level 1.
+func body(stmts string) string { return "void\nf()\n{\n" + stmts + "}\n" }
+
+func TestBracelessBodies(t *testing.T) {
+	// A statement governed by if/else/for/while/do without braces is one
+	// level in, however deep the nesting; else-if is a chain.
+	in := body("if (a)\nb();\nelse if (c)\n  d();\nelse\n        e();\n" +
+		"for (i = 0; i < n; i++)\nif (x[i])\nwhile (y)\ng(i,\nj);\n" +
+		"do\nz();\nwhile (q);\n")
+	want := body("    if (a)\n        b();\n    else if (c)\n        d();\n    else\n        e();\n" +
+		"    for (i = 0; i < n; i++)\n        if (x[i])\n            while (y)\n                g(i,\n                    j);\n" +
+		"    do\n        z();\n    while (q);\n")
+	assert.Equal(t, want, fmtSrc(t, in, Options{}))
+	assert.Equal(t, want, fmtSrc(t, want, Options{}))
+
+	// A body on its statement's line belongs to that line; an `if` on the
+	// line after its `else` is nested, as written.
+	in = body("if (a) b(1,\n2);\nelse\nif (k)\nl();\n")
+	want = body("    if (a) b(1,\n        2);\n    else\n        if (k)\n            l();\n")
+	assert.Equal(t, want, fmtSrc(t, in, Options{}))
+
+	// `else` joins a '}' only when that brace is its own if's.
+	in = body("if (a)\nfor (;;) {\nb();\n}\nelse\nc();\n")
+	want = body("    if (a)\n        for (;;) {\n            b();\n        }\n    else\n        c();\n")
+	assert.Equal(t, want, fmtSrc(t, in, Options{}))
+}
+
+func TestContinuationLines(t *testing.T) {
+	// A line that does not begin a statement continues one, whatever it
+	// starts with.
+	in := body("x = foo\n+ bar\n- baz;\nreturn a ? b\n: c;\ns = \"abc\"\n\"def\";\nstring u,\n*v;\n")
+	want := body("    x = foo\n        + bar\n        - baz;\n    return a ? b\n        : c;\n" +
+		"    s = \"abc\"\n        \"def\";\n    string u,\n        *v;\n")
+	assert.Equal(t, want, fmtSrc(t, in, Options{}))
+
+	// Declarations: specifiers and type stand at the left, the names on
+	// further lines continue.
+	in = "int a,\nb,\n  *c;\nprivate\n  static string\n*names;\n"
+	want = "int a,\n    b,\n    *c;\nprivate\nstatic string\n    *names;\n"
+	assert.Equal(t, want, fmtSrc(t, in, Options{}))
+}
+
+func TestCommentsFollowTheCode(t *testing.T) {
+	// A comment on its own line is indented like the line after it;
+	// before a '}' or a case label it belongs to the statements inside.
+	in := body("switch (x) {\n/* first */\ncase 1:\nif (y)\n/* why */\nz();\n/* fall */\ncase 2:\nfoo(a,\n/* about b */\nb);\n/* end */\n}\n")
+	want := body("    switch (x) {\n        /* first */\n    case 1:\n        if (y)\n            /* why */\n            z();\n" +
+		"        /* fall */\n    case 2:\n        foo(a,\n            /* about b */\n            b);\n        /* end */\n    }\n")
+	assert.Equal(t, want, fmtSrc(t, in, Options{}))
+}
+
+func TestRolesFromTheTree(t *testing.T) {
+	// Inside a function the parser says what each token is; the same
+	// tokens at top level are not statements, and only their neighbours
+	// speak for them.
+	cases := map[string]string{
+		"x=(int)-y;":                  "x = (int) -y;",
+		"if(a){b();}++c;":             "if (a) { b(); } ++c;",
+		"m=([\"a\":x?1:2,\"b\":-3]);": "m = ([ \"a\": x ? 1 : 2, \"b\": -3 ]);",
+		"x=a?-b:*c;":                  "x = a ? -b : *c;",
+		"string**p,*q;":               "string **p, *q;",
+		"x=a&b;f(&g);":                "x = a & b; f(&g);",
+		"i=j++ +k;":                   "i = j++ + k;",
+		"x=catch(y)?0:1;":             "x = catch (y) ? 0 : 1;",
+		"switch(x){case 1:y=a?b:c;}":  "switch (x) { case 1: y = a ? b : c; }",
+		"x=c['a'..'b'];l:goto l;":     "x = c['a'..'b']; l: goto l;",
+		"x=({a,({b}),([c:d])});":      "x = ({ a, ({ b }), ([ c: d ]) });",
+	}
+	for in, want := range cases {
+		assert.Equal(t, "void f() { "+want+" }\n", fmtSrc(t, "void f(){"+in+"}", Options{}), "input: %s", in)
+	}
+	assert.Equal(t, "static int *f(int *a, mixed b...);\n", fmtSrc(t, "static int*f(int*a,mixed b...);", Options{}))
+	assert.Equal(t, "x = (int) - y;\n", fmtSrc(t, "x=(int)-y;", Options{}))
+	// After a directive the token before says nothing; the tree does.
+	assert.Equal(t, body("    x = a\n#if 1\n        - 1\n#endif\n        ;\n"), fmtSrc(t, body("x=a\n#if 1\n-1\n#endif\n;\n"), Options{}))
+}
+
+func TestConditionalBranches(t *testing.T) {
+	// Every branch is laid out from the state the conditional began
+	// with, so braces opened in each of them count once; the code after
+	// continues from the branch the preprocessor model selects.
+	in := "void f() {\n#ifdef A\nif (a) {\n#else\nif (b) {\n#endif\nc();\n}\n" +
+		"#if 0\nwhile (x)\ny();\nif (q) {\n#endif\nz();\n}\n"
+	want := "void\nf()\n{\n#ifdef A\n    if (a) {\n#else\n    if (b) {\n#endif\n        c();\n    }\n" +
+		"#if 0\n    while (x)\n        y();\n    if (q) {\n#endif\n    z();\n}\n"
+	assert.Equal(t, want, fmtSrc(t, in, Options{}))
+	assert.Equal(t, want, fmtSrc(t, want, Options{}))
+
+	// Each branch is read by the parser in turn: the #else of a function
+	// is a function too.
+	in = "#ifdef B\nint g() {\nif (a)\nreturn 1;\n#else\nint g(int x) {\nif (b)\nreturn 2\n+ x;\n#endif\nreturn 0;\n}\n"
+	want = "#ifdef B\nint\ng()\n{\n    if (a)\n        return 1;\n#else\nint\ng(int x)\n{\n    if (b)\n        return 2\n            + x;\n#endif\n    return 0;\n}\n"
+	assert.Equal(t, want, fmtSrc(t, in, Options{}))
+
+	// A conditional inside a statement, and nested ones.
+	in = body("foo(a,\n#ifdef X\nb,\n#else\n#if Y\nc + d,\n#else\n-e,\n#endif\n#endif\nf);\n")
+	want = body("    foo(a,\n#ifdef X\n        b,\n#else\n#if Y\n        c + d,\n#else\n        -e,\n#endif\n#endif\n        f);\n")
+	assert.Equal(t, want, fmtSrc(t, in, Options{}))
+
+	// The branch selected is the project's: a name it predefines decides.
+	in = "void f() {\n#ifdef DEBUG\n{\n#endif\nx();\n#ifdef DEBUG\n}\n#endif\n}\n"
+	assert.Equal(t, "void\nf()\n{\n#ifdef DEBUG\n    {\n#endif\n        x();\n#ifdef DEBUG\n    }\n#endif\n}\n",
+		fmtSrc(t, in, Options{Defined: map[string]bool{"DEBUG": true}}))
+}
+
+func TestErrorRegions(t *testing.T) {
+	// What the parser cannot read keeps its lines (no brace is moved) and
+	// is indented from the last level that was understood; the code
+	// around it is laid out as usual.
+	in := body("if (a)\nb();\nforeach (x in y)\n{\nif (x)\n{\nc( x;\n}\n}\nif (d)\n{\ne();\n}\nelse\nf();\n")
+	want := body("    if (a)\n        b();\n    foreach(x in y)\n    {\n        if (x)\n        {\n            c(x;\n        }\n    }\n" +
+		"    if (d) {\n        e();\n    } else\n        f();\n")
+	assert.Equal(t, want, fmtSrc(t, in, Options{}))
+	assert.Equal(t, want, fmtSrc(t, want, Options{}))
+
+	// A declaration the parser gives up on: the brace-counting fallback,
+	// and the next declaration is unaffected.
+	in = "bad(a, new) {\nif (a) {\nb();\n}\n}\nint ok() {\nreturn 1;\n}\n"
+	want = "bad(a, new) {\n    if (a) {\n        b();\n    }\n}\nint\nok()\n{\n    return 1;\n}\n"
+	assert.Equal(t, want, fmtSrc(t, in, Options{}))
+
+	// A macro whose arguments are not expressions.
+	in = body("x = NEW(int   *, 3)+1;\n")
+	assert.Equal(t, body("    x = NEW(int *, 3) + 1;\n"), fmtSrc(t, in, Options{}))
+}
+
+func TestOptionsFromConfig(t *testing.T) {
+	c := &config.Config{}
+	c.Format.Indent = 8
+	c.Format.LineEndings = "lf"
+	c.Format.FunctionHeaders = "joined"
+	c.Lint.SpecifierMacros = []string{"visible"}
+	c.Lint.Defines = []string{"DEBUG"}
+	c.Lint.Macros = map[string]string{"STATUS": "type"}
+	o, err := OptionsFromConfig(c)
+	require.NoError(t, err)
+	assert.Equal(t, 8, o.Indent)
+	assert.Equal(t, LF, o.LineEndings)
+	assert.Equal(t, HeadersJoined, o.FuncHeaders)
+	assert.True(t, o.Defined["DEBUG"])
+	assert.True(t, o.Defined["__DGD__"])
+	assert.Equal(t, map[string]pp.Class{"visible": pp.ClassEmpty, "STATUS": pp.ClassType}, o.Macros)
+
+	c.Format.LineEndings = "dos"
+	_, err = OptionsFromConfig(c)
+	assert.ErrorContains(t, err, "format.line_endings")
+	c.Format.LineEndings, c.Format.FunctionHeaders = "", "knf"
+	_, err = OptionsFromConfig(c)
+	assert.ErrorContains(t, err, "format.function_headers")
 }

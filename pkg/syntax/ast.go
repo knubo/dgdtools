@@ -199,9 +199,10 @@ type (
 	EmptyStmt struct{ span }
 	IfStmt    struct {
 		span
-		Cond Expr
-		Then Stmt
-		Else Stmt
+		Cond    Expr
+		Then    Stmt
+		ElseTok int // the 'else' keyword; meaningful when Else != nil
+		Else    Stmt
 	}
 	WhileStmt struct {
 		span
@@ -210,8 +211,9 @@ type (
 	}
 	DoStmt struct {
 		span
-		Body Stmt
-		Cond Expr
+		Body     Stmt
+		WhileTok int // the 'while' keyword; 0 when the statement was cut short
+		Cond     Expr
 	}
 	ForStmt struct {
 		span
@@ -253,8 +255,11 @@ type (
 	// CatchStmt is `catch { ... } [: stmt]` or `try { ... } catch (e) { ... }`.
 	CatchStmt struct {
 		span
-		Body    Stmt
-		Handler Stmt
+		Body Stmt
+		// HandlerTok is the ':' or the 'catch' that introduces Handler;
+		// meaningful when Handler != nil.
+		HandlerTok int
+		Handler    Stmt
 	}
 	// MacroStmt is a use of a statement-class or empty macro standing as
 	// a statement, with or without ';'.
@@ -268,6 +273,12 @@ type (
 	BadStmt struct {
 		span
 		Opaque bool
+		// Resumed is set for the first statement read after a skipped
+		// construct. It parsed, but where the skip ended is a guess, so it
+		// is evidence of nothing and not part of the tree: Inspect does
+		// not visit it. Its shape is still the best reading of these
+		// tokens for a tool that only lays them out.
+		Resumed Stmt
 	}
 )
 
@@ -308,13 +319,18 @@ type (
 		span
 		Parts []Expr
 	}
+	// ArrayLit is ({ ... }): the node spans the parentheses, LBrace and
+	// RBrace are the braces inside them.
 	ArrayLit struct {
 		span
-		Elems []Expr
+		LBrace, RBrace int
+		Elems          []Expr
 	}
+	// MappingLit is ([ ... ]).
 	MappingLit struct {
 		span
-		Keys, Values []Expr
+		LBracket, RBracket int
+		Keys, Values       []Expr
 	}
 	// LegacyClosure is the pre-DGD `(: a, b :)` literal.
 	LegacyClosure struct {
@@ -372,6 +388,7 @@ type (
 	}
 	CondExpr struct {
 		span
+		Question, Colon  int // the '?' and ':' tokens
 		Cond, Then, Else Expr
 	}
 	AssignExpr struct {

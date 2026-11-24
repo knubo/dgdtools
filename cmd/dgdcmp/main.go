@@ -13,8 +13,8 @@ import (
 	"strings"
 
 	"github.com/mmcdole/dgdtools/pkg/lexer"
-	"github.com/mmcdole/dgdtools/pkg/token"
 	"github.com/mmcdole/dgdtools/pkg/tokcmp"
+	"github.com/mmcdole/dgdtools/pkg/token"
 )
 
 var version = "dev"

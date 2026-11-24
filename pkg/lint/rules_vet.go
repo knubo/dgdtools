@@ -297,23 +297,10 @@ var ruleMissingVisibility = &Rule{
 var ruleUnformatted = &Rule{
 	Code: "C003", Name: "unformatted", Group: GroupConvention,
 	Doc:     "file is not dgdfmt-formatted",
-	Explain: "Runs the formatter with the project's format settings and reports a difference.",
+	Explain: "Formats the file exactly as dgdfmt does, with the project's format settings, and reports a difference.",
 	Default: false, Severity: diag.Info,
 	Run: func(p *Pass) {
-		opts := format.Options{
-			Indent:        p.Config.Format.Indent,
-			MaxBlankLines: p.Config.Format.MaxBlankLines,
-		}
-		switch p.Config.Format.LineEndings {
-		case "lf":
-			opts.LineEndings = format.LF
-		case "crlf":
-			opts.LineEndings = format.CRLF
-		}
-		if p.Config.Format.FunctionHeaders == "joined" {
-			opts.FuncHeaders = format.HeadersJoined
-		}
-		out, err := format.Format(p.File, opts)
+		out, err := format.Format(p.File, p.Format)
 		if err != nil {
 			return // unlexable files are dgdfmt's problem, not a finding
 		}

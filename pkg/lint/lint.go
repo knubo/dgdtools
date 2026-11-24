@@ -30,6 +30,7 @@ import (
 	"github.com/mmcdole/dgdtools/pkg/config"
 	"github.com/mmcdole/dgdtools/pkg/diag"
 	"github.com/mmcdole/dgdtools/pkg/fileset"
+	"github.com/mmcdole/dgdtools/pkg/format"
 	"github.com/mmcdole/dgdtools/pkg/index"
 	"github.com/mmcdole/dgdtools/pkg/pp"
 	"github.com/mmcdole/dgdtools/pkg/profile"
@@ -75,6 +76,8 @@ type Pass struct {
 	LibPath  string // "" when the file has no lib path
 	Config   *config.Config
 	Settings config.RuleSettings
+	// Format are the project's formatter options.
+	Format format.Options
 
 	shared   *fileShared
 	rule     *Rule
@@ -246,6 +249,7 @@ type Linter struct {
 	rules    []*Rule
 	byKey    map[string][]*Rule // name, code, group, "all" -> rules
 	override []compiledOverride
+	format   format.Options
 
 	baselineOnce sync.Once
 	baseline     *Baseline
@@ -268,6 +272,10 @@ func New(prj *config.Project, fsys vfs.FS) (*Linter, error) {
 		l.byKey["all"] = append(l.byKey["all"], r)
 	}
 	cfg := prj.Config
+	var err error
+	if l.format, err = format.OptionsFromConfig(cfg); err != nil {
+		return nil, err
+	}
 	check := func(where string, names ...string) error {
 		for _, n := range names {
 			if n = strings.TrimSpace(n); n != "" && l.lookup(n) == nil {
@@ -703,7 +711,7 @@ func (l *Linter) lintFile(ctx context.Context, s *index.Snapshot, file string, o
 		pass := &Pass{
 			Ctx: ctx, File: parsed.Tok, Tree: parsed.Tree, Env: parsed.Env,
 			Unit: u, Index: query, LibPath: u.LibPath,
-			Config: l.project.Config, Settings: a.settings,
+			Config: l.project.Config, Settings: a.settings, Format: l.format,
 			shared: shared, rule: r, severity: a.severity, out: &out,
 		}
 		r.Run(pass)

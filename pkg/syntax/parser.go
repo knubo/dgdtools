@@ -814,7 +814,7 @@ func (p *parser) parseStmt() (s Stmt) {
 			if resumed && s != nil && !p.abort {
 				if _, block := s.(*BlockStmt); !block {
 					a, b := s.Span()
-					s = &BadStmt{span: span{a, b}, Opaque: true}
+					s = &BadStmt{span: span{a, b}, Opaque: true, Resumed: s}
 				}
 			}
 			return
@@ -908,7 +908,7 @@ func (p *parser) stmt() Stmt {
 		s.Cond = p.parenCond()
 		s.Then = p.parseStmt()
 		if p.kind() == token.KwElse && !p.abort {
-			p.next()
+			s.ElseTok = p.next()
 			s.Else = p.parseStmt()
 		}
 		s.span = done()
@@ -930,7 +930,7 @@ func (p *parser) stmt() Stmt {
 			s.span = done()
 			return s
 		}
-		p.expect(token.KwWhile)
+		s.WhileTok = p.expect(token.KwWhile)
 		s.Cond = p.parenCond()
 		p.endStmt(start)
 		s.span = done()
@@ -1025,7 +1025,7 @@ func (p *parser) stmt() Stmt {
 			p.next()
 			s := &CatchStmt{Body: p.parseBlock()}
 			if p.kind() == token.Colon && !p.abort {
-				p.next()
+				s.HandlerTok = p.next()
 				s.Handler = p.parseStmt()
 			}
 			s.span = done()
@@ -1038,7 +1038,7 @@ func (p *parser) stmt() Stmt {
 			p.unexpected("'{' after try")
 		}
 		s.Body = p.parseBlock()
-		p.expect(token.KwCatch)
+		s.HandlerTok = p.expect(token.KwCatch)
 		lp := p.expect(token.LParen)
 		if p.kind() == token.Ellipsis {
 			p.next()
@@ -1242,9 +1242,9 @@ func (p *parser) parseCond() Expr {
 	}
 	x := &CondExpr{Cond: c}
 	x.First, _ = c.Span()
-	p.next()
+	x.Question = p.next()
 	x.Then = p.parseExprList()
-	p.expect(token.Colon)
+	x.Colon = p.expect(token.Colon)
 	x.Else = p.parseCond()
 	x.Last = p.prevIdx()
 	return x
@@ -1432,8 +1432,7 @@ func (p *parser) parsePrimary() Expr {
 		switch p.kindAt(1) {
 		case token.LBrace:
 			p.next()
-			lb := p.next()
-			a := &ArrayLit{}
+			a := &ArrayLit{LBrace: p.next()}
 			for p.kind() != token.RBrace {
 				a.Elems = append(a.Elems, p.parseExpr())
 				if p.kind() != token.Comma {
@@ -1441,14 +1440,13 @@ func (p *parser) parsePrimary() Expr {
 				}
 				p.next()
 			}
-			p.expectClose(token.RBrace, lb)
+			a.RBrace = p.expectClose(token.RBrace, a.LBrace)
 			p.expectClose(token.RParen, first)
 			a.span = span{first, p.prevIdx()}
 			return a
 		case token.LBracket:
 			p.next()
-			lb := p.next()
-			m := &MappingLit{}
+			m := &MappingLit{LBracket: p.next()}
 			for p.kind() != token.RBracket {
 				m.Keys = append(m.Keys, p.parseExpr())
 				p.expect(token.Colon)
@@ -1458,7 +1456,7 @@ func (p *parser) parsePrimary() Expr {
 				}
 				p.next()
 			}
-			p.expectClose(token.RBracket, lb)
+			m.RBracket = p.expectClose(token.RBracket, m.LBracket)
 			p.expectClose(token.RParen, first)
 			m.span = span{first, p.prevIdx()}
 			return m
