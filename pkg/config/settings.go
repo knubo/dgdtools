@@ -4,12 +4,12 @@ import (
 	"fmt"
 	"path/filepath"
 	"strconv"
-	"strings"
 	"sync"
 
 	"gopkg.in/yaml.v3"
 
 	"github.com/mmcdole/dgdtools/pkg/editorconfig"
+	"github.com/mmcdole/dgdtools/pkg/fileset"
 )
 
 // Format are the formatter's settings (docs/design/dgdfmt.md). A zero
@@ -264,16 +264,11 @@ func (prj *Project) top(dir string) (string, bool) {
 	// The project's own directory holds its config, not a nested one,
 	// and scopesAt passes over that file by name.
 	for _, t := range []string{prj.Config.Dir, prj.Root, prj.CheckoutDir} {
-		if t != "" && under(t, dir) {
+		if _, below := fileset.Under(t, dir); t != "" && below {
 			return t, true
 		}
 	}
 	return "", false
-}
-
-// under reports whether dir is top or below it.
-func under(top, dir string) bool {
-	return dir == top || strings.HasPrefix(dir, strings.TrimSuffix(top, string(filepath.Separator))+string(filepath.Separator))
 }
 
 // editorsAt returns the .editorconfig files that apply to the files in

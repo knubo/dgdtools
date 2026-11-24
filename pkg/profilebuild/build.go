@@ -5,9 +5,9 @@ package profilebuild
 import (
 	"context"
 	"fmt"
-	"io/fs"
 	"path"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -54,7 +54,6 @@ func Build(ctx context.Context, prj *config.Project, fsys vfs.FS) (*profile.Prof
 		minOwners = config.DefaultShareMinOwners
 	}
 	omit := fileset.NewMatcher(pb.Omit)
-	exclude := fileset.NewMatcher(cfg.Exclude)
 	incDirs := map[string]bool{}
 	for _, d := range cfg.IncludeDirs {
 		incDirs[strings.Trim(d, "/")] = true
@@ -91,8 +90,8 @@ func Build(ctx context.Context, prj *config.Project, fsys vfs.FS) (*profile.Prof
 	queued := map[string]bool{}
 	add := func(fsPath string) {
 		fsPath = filepath.Clean(fsPath)
-		rel, err := filepath.Rel(prj.Root, fsPath)
-		if err != nil || strings.HasPrefix(rel, "..") {
+		rel, ok := fileset.Under(prj.Root, fsPath)
+		if !ok {
 			return // outside the lib: nothing to say about it
 		}
 		rel = filepath.ToSlash(rel)
@@ -103,31 +102,12 @@ func Build(ctx context.Context, prj *config.Project, fsys vfs.FS) (*profile.Prof
 		queue = append(queue, fsPath)
 	}
 	covered := map[string]bool{}
-	err := fsys.WalkDir(prj.Root, func(fp string, de fs.DirEntry, err error) error {
-		if err != nil {
-			return nil
-		}
-		rel, rerr := filepath.Rel(prj.Root, fp)
-		if rerr != nil {
-			return nil
-		}
-		rel = filepath.ToSlash(rel)
-		if de.IsDir() {
-			if rel != "." && (exclude.Match(rel) || exclude.MatchDir(rel) || omit.MatchDir(rel)) {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if ext := path.Ext(rel); ext != ".c" && ext != ".h" {
-			return nil
-		}
-		if exclude.Match(rel) {
-			return nil
-		}
-		if shared.Match(rel) || underInc(rel) {
+	// The walk the linter makes, less what is never to be in a profile.
+	skip := fileset.NewMatcher(slices.Concat(cfg.Exclude, pb.Omit))
+	err := prj.Tree().Walk(ctx, fsys, prj.Root, []string{".c", ".h"}, skip, func(fp string) {
+		if rel, ok := prj.Tree().Rel(fp); ok && (shared.Match(rel) || underInc(rel)) {
 			add(fp)
 		}
-		return nil
 	})
 	if err != nil {
 		return nil, err

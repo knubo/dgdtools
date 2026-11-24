@@ -113,7 +113,7 @@ func TestKeywordsAndDialect(t *testing.T) {
 		kinds(t, "private static nomask atomic varargs"))
 	// "function" is an identifier unless closures are enabled.
 	assert.Equal(t, []token.Kind{token.Ident}, kinds(t, "function"))
-	fc := Lex("t.c", []byte("function"), Dialect{SlashSlash: true, Closures: true})
+	fc := Lex("t.c", []byte("function"), token.Dialect{SlashSlash: true, Closures: true})
 	require.NoError(t, fc.CheckRoundTrip())
 	assert.Equal(t, token.KwFunction, fc.Tokens[0].Kind)
 	// "status" is NOT a keyword (pre-DGD leftover in old corpora).
@@ -146,7 +146,7 @@ func TestComments(t *testing.T) {
 		kinds(t, "/* /* */ x /"), "inner /* does not nest")
 
 	// // disabled without SlashSlash: two Slash tokens.
-	f2 := Lex("t.c", []byte("a // b"), Dialect{SlashSlash: false})
+	f2 := Lex("t.c", []byte("a // b"), token.Dialect{SlashSlash: false})
 	require.NoError(t, f2.CheckRoundTrip())
 	var ks []token.Kind
 	for _, tok := range f2.Significant() {

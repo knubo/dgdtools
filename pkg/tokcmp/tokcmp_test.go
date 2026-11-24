@@ -102,15 +102,3 @@ func TestStreamEndsEarly(t *testing.T) {
 	require.False(t, eq)
 	assert.True(t, div.AMissing)
 }
-
-func TestContext(t *testing.T) {
-	f := lex("int x; string y; mapping z;")
-	// find index of "y"
-	for i, tok := range f.Significant() {
-		if string(f.Text(tok)) == "y" {
-			before, after := Context(f, i, 2)
-			assert.Equal(t, []string{"x", ";", "string"}[1:], before[len(before)-2:])
-			assert.Equal(t, []string{";", "mapping"}, after)
-		}
-	}
-}

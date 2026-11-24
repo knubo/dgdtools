@@ -19,16 +19,13 @@ import (
 	"github.com/mmcdole/dgdtools/pkg/token"
 )
 
-// Dialect selects the compile-time language variants of the target driver.
-type Dialect = token.Dialect
-
 // Default is the pragmatic dialect: // comments on ("//" is never a legal
 // DGD token sequence outside strings, so accepting it is harmless),
 // closures off (stock DGD ships without CLOSURES).
-var Default = Dialect{SlashSlash: true, Closures: false}
+var Default = token.Dialect{SlashSlash: true, Closures: false}
 
 // Lex tokenizes src. The returned File always satisfies CheckRoundTrip.
-func Lex(path string, src []byte, d Dialect) *token.File {
+func Lex(path string, src []byte, d token.Dialect) *token.File {
 	lx := &lexer{
 		f:           &token.File{Path: path, Src: src, Dialect: d},
 		src:         src,
@@ -44,7 +41,7 @@ type lexer struct {
 	f       *token.File
 	src     []byte
 	pos     int
-	dialect Dialect
+	dialect token.Dialect
 
 	// atLineStart is true when only whitespace and comments have appeared
 	// since the last newline; a '#' here starts a directive (matching cpp).

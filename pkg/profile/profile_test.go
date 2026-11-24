@@ -95,7 +95,7 @@ func TestMarshal(t *testing.T) {
 func TestParseErrors(t *testing.T) {
 	for src, want := range map[string]string{
 		"":                             "not a dgdtools profile",
-		"dgdlint-profile 1\n{}\n":      "not a dgdtools profile",
+		"some-other-file 1\n{}\n":      "not a dgdtools profile",
 		"dgdtools-profile 99\n{}\n":    "profile format 99 is not supported by this dgdtools (wants 1); rebuild the profile",
 		"dgdtools-profile 1\nnonsense": "profile manifest:",
 		"dgdtools-profile 1\n{\"name\":\"x\",\"dialect\":{\"driver\":\"fluffos\"}}\n":                            `profile "x" is for driver "fluffos"; only the dgd dialect is implemented`,

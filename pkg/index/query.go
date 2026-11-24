@@ -35,9 +35,6 @@ func (s *Snapshot) Query(unit *Unit, noScan bool) *Query {
 	return &Query{s: s, unit: unit, noScan: noScan, askedAbout: map[string]struct{}{}}
 }
 
-// Snapshot returns the generation the query reads.
-func (q *Query) Snapshot() *Snapshot { return q.s }
-
 // NeedsScan reports whether some answer was "unknown" only because the
 // whole-lib scan has not completed: asking again after Snapshot.Scan may
 // find more.

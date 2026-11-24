@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/mmcdole/dgdtools/pkg/diag"
+	"github.com/mmcdole/dgdtools/pkg/fileset"
 	"github.com/mmcdole/dgdtools/pkg/lint"
 	"github.com/mmcdole/dgdtools/pkg/profile"
 )
@@ -50,11 +51,7 @@ func (o Options) under(p string) (string, bool) {
 	if _, _, stub := profile.SplitLocation(p); stub || o.BaseDir == "" {
 		return "", false
 	}
-	rel, err := filepath.Rel(o.BaseDir, p)
-	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return "", false
-	}
-	return rel, true
+	return fileset.Under(o.BaseDir, p)
 }
 
 // Write renders res in the named format.

@@ -3,7 +3,7 @@ package syntax
 // Inspect walks the tree rooted at n in source order, calling fn for each
 // node. If fn returns false the node's children are skipped.
 func Inspect(n Node, fn func(Node) bool) {
-	if isNil(n) || !fn(n) {
+	if n == nil || !fn(n) {
 		return
 	}
 	switch n := n.(type) {
@@ -148,5 +148,3 @@ func Inspect(n Node, fn func(Node) bool) {
 		}
 	}
 }
-
-func isNil(n Node) bool { return n == nil }

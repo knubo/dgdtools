@@ -20,6 +20,7 @@ import (
 	"github.com/mmcdole/dgdtools/pkg/fileset"
 	"github.com/mmcdole/dgdtools/pkg/format"
 	"github.com/mmcdole/dgdtools/pkg/lexer"
+	"github.com/mmcdole/dgdtools/pkg/token"
 )
 
 const formatUsage = `usage: dgdtools format [flags] path ...
@@ -169,7 +170,7 @@ type formatter struct {
 type job struct {
 	path, name string
 	opts       format.Options
-	dialect    lexer.Dialect
+	dialect    token.Dialect
 	// lines, when whole is not set, are the only lines to format.
 	whole bool
 	lines []format.LineRange

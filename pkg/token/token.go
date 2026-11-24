@@ -120,8 +120,6 @@ const (
 	CaretEq    // ^=
 	ShlEq      // <<=
 	ShrEq      // >>=
-
-	kindCount
 )
 
 var kindNames = [...]string{

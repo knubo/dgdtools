@@ -239,33 +239,31 @@ var ruleInheritOrder = &Rule{
 	Run: func(p *Pass) {
 		var first syntax.Decl
 		// A header included before an inherit that declares something.
-		if p.Index != nil {
-			var lastInherit *syntax.InheritDecl
-			for _, d := range p.Tree.Decls {
-				if inh, ok := d.(*syntax.InheritDecl); ok {
-					lastInherit = inh
-				}
+		var lastInherit *syntax.InheritDecl
+		for _, d := range p.Tree.Decls {
+			if inh, ok := d.(*syntax.InheritDecl); ok {
+				lastInherit = inh
 			}
-			if lastInherit != nil {
-				for _, inc := range p.Env.Own().Includes {
-					if inc.Off > p.Tree.Off(lastInherit) || p.Tree.Sel.Guessed(inc.Tok) {
-						continue
+		}
+		if lastInherit != nil {
+			for _, inc := range p.Env.Own().Includes {
+				if inc.Off > p.Tree.Off(lastInherit) || p.Tree.Sel.Guessed(inc.Tok) {
+					continue
+				}
+				if file, ok := p.Index.IncludeDeclares(inc); ok {
+					var target *syntax.InheritDecl
+					for _, d := range p.Tree.Decls {
+						if inh, ok := d.(*syntax.InheritDecl); ok && p.Tree.Off(inh) > inc.Off {
+							target = inh
+							break
+						}
 					}
-					if file, ok := p.Index.IncludeDeclares(inc); ok {
-						var target *syntax.InheritDecl
-						for _, d := range p.Tree.Decls {
-							if inh, ok := d.(*syntax.InheritDecl); ok && p.Tree.Off(inh) > inc.Off {
-								target = inh
-								break
-							}
-						}
-						if target != nil {
-							r := p.ReportNode(target, "inherit must precede all declarations, but %s (included above) declares functions or variables; include it after the inherits", inc.Raw())
-							it := p.File.Tokens[inc.Tok]
-							r.Related = append(r.Related, p.Related(it.Off, it.End, "included here"),
-								diag.Related{Path: file, Line: 1, Col: 1, Message: "declares functions or variables"})
-							return
-						}
+					if target != nil {
+						r := p.ReportNode(target, "inherit must precede all declarations, but %s (included above) declares functions or variables; include it after the inherits", inc.Raw())
+						it := p.File.Tokens[inc.Tok]
+						r.Related = append(r.Related, p.Related(it.Off, it.End, "included here"),
+							diag.Related{Path: file, Line: 1, Col: 1, Message: "declares functions or variables"})
+						return
 					}
 				}
 			}

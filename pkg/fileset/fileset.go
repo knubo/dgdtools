@@ -85,6 +85,15 @@ func (m *Matcher) MatchDir(rel string) bool {
 	return false
 }
 
+// Under returns the path of p from dir, when p is dir or lies below it.
+func Under(dir, p string) (rel string, ok bool) {
+	rel, err := filepath.Rel(dir, p)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", false
+	}
+	return rel, true
+}
+
 // Tree says where a lib is on disk: all of it under Root, or, for a
 // partial checkout, its directory CheckoutLib ("/players/name") under
 // CheckoutDir. With neither there is no lib.
@@ -98,22 +107,16 @@ type Tree struct {
 // exclude and override globs are matched against. The second result is
 // false when p is not in the lib.
 func (t Tree) Rel(p string) (string, bool) {
-	under := func(dir string) (string, bool) {
-		r, err := filepath.Rel(dir, p)
-		if err != nil || r == ".." || strings.HasPrefix(r, ".."+string(filepath.Separator)) {
-			return "", false
-		}
-		return filepath.ToSlash(r), true
-	}
 	if t.CheckoutDir != "" {
-		if r, ok := under(t.CheckoutDir); ok {
-			return strings.TrimPrefix(path.Join(t.CheckoutLib, r), "/"), true
+		if r, ok := Under(t.CheckoutDir, p); ok {
+			return strings.TrimPrefix(path.Join(t.CheckoutLib, filepath.ToSlash(r)), "/"), true
 		}
 	}
 	if t.Root == "" {
 		return "", false
 	}
-	return under(t.Root)
+	r, ok := Under(t.Root, p)
+	return filepath.ToSlash(r), ok
 }
 
 // Path is where libFile (a lib path with its extension) would be on disk;

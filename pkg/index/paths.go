@@ -142,8 +142,8 @@ func (l *lib) inScope(p string) bool {
 	if root == "" || l.isStub(p) || filepath.Ext(p) != ".c" {
 		return false
 	}
-	below, err := filepath.Rel(root, p)
-	if err != nil || below == ".." || strings.HasPrefix(below, ".."+string(filepath.Separator)) {
+	below, ok := fileset.Under(root, p)
+	if !ok {
 		return false
 	}
 	rel, ok := l.rel(p)

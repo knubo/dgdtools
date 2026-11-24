@@ -1,4 +1,5 @@
-// Package diag defines diagnostics shared by the lexer, formatter, and linter.
+// Package diag defines the diagnostics of the linter and the text edits
+// the linter and the formatter express changes in.
 package diag
 
 import (
@@ -40,9 +41,7 @@ func ParseSeverity(s string) (Severity, bool) {
 	return 0, false
 }
 
-// Diagnostic is one finding tied to a source range. Rule and Code are
-// empty for diagnostics that do not come from a lint rule (lexer errors
-// reported by the formatter).
+// Diagnostic is one finding of a lint rule, tied to a source range.
 //
 // Line and Col are 1-based; Col counts bytes. Start and End are byte
 // offsets into the file (End exclusive); use UTF16Col to derive the
@@ -170,11 +169,9 @@ const (
 	NoteUnplacedCheckout NoteKind = "unplaced-checkout"
 )
 
+// String renders the diagnostic on one line, compiler style.
 func (d Diagnostic) String() string {
-	if d.Rule != "" {
-		return fmt.Sprintf("%s:%d:%d: %s: %s [%s]", d.Path, d.Line, d.Col, d.Severity, d.Message, d.Rule)
-	}
-	return fmt.Sprintf("%s:%d:%d: %s: %s", d.Path, d.Line, d.Col, d.Severity, d.Message)
+	return fmt.Sprintf("%s:%d:%d: %s: %s [%s %s]", d.Path, d.Line, d.Col, d.Severity, d.Message, d.Code, d.Rule)
 }
 
 // UTF16Col converts a 1-based byte column within line (the bytes of one

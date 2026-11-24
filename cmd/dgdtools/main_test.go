@@ -69,10 +69,10 @@ func TestCommands(t *testing.T) {
 	code, _, errs = dgdtools(t, "", filepath.Join(dir, "a.c"))
 	assert.Equal(t, 2, code)
 	assert.Contains(t, errs, "unknown command")
-	// The binaries this one replaces are not commands of it.
-	for _, old := range []string{"fmt", "check", "dgdlint", "dgdfmt"} {
-		code, _, _ = dgdtools(t, "", old)
-		assert.Equal(t, 2, code, old)
+	// Commands have one name each.
+	for _, alias := range []string{"fmt", "check"} {
+		code, _, _ = dgdtools(t, "", alias)
+		assert.Equal(t, 2, code, alias)
 	}
 
 	// Help, for the command and for each subcommand.

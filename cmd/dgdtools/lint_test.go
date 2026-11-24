@@ -213,11 +213,8 @@ func TestLintSelectionAndFailOn(t *testing.T) {
 	assert.Contains(t, errs, "unknown severity")
 	code, _, _ = dgdtools(t, "", "lint", filepath.Join(dir, "missing.c"))
 	assert.Equal(t, 2, code)
-	// The old spellings are not flags.
-	for _, old := range []string{"--disable", "--rules", "-f"} {
-		code, _, _ = dgdtools(t, "", "lint", old, "x", file)
-		assert.Equal(t, 2, code, old)
-	}
+	code, _, _ = dgdtools(t, "", "lint", "--no-such-flag", file)
+	assert.Equal(t, 2, code)
 }
 
 func TestLintSettingsScopes(t *testing.T) {

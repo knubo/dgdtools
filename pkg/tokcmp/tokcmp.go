@@ -87,24 +87,3 @@ func tokensEqual(a *token.File, at token.Token, b *token.File, bt token.Token) b
 func trimTrailingBlanks(s []byte) []byte {
 	return bytes.TrimRight(s, " \t")
 }
-
-// Context returns up to n significant tokens on each side of token index i,
-// rendered as strings — for divergence display.
-func Context(f *token.File, i, n int) (before, after []string) {
-	if i < 0 {
-		return nil, nil
-	}
-	for j := i - 1; j >= 0 && len(before) < n; j-- {
-		t := f.Tokens[j]
-		if !t.Kind.IsTrivia() && t.Kind != token.EOF {
-			before = append([]string{string(f.Text(t))}, before...)
-		}
-	}
-	for j := i + 1; j < len(f.Tokens) && len(after) < n; j++ {
-		t := f.Tokens[j]
-		if !t.Kind.IsTrivia() && t.Kind != token.EOF {
-			after = append(after, string(f.Text(t)))
-		}
-	}
-	return before, after
-}
