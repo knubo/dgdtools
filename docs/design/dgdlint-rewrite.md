@@ -1,12 +1,15 @@
-# dgdlint rewrite: design
+# The linter and the project model: design
 
 Status: implemented on branch `dgdlint-rewrite`. Section 11 lists what is
 done and what is deferred; section 9 has the measurements against the
-VikingMUD lib and a DGD 1.7.9 compile oracle.
+VikingMUD lib and a DGD 1.7.9 compile oracle. Two companion documents
+cover what is shared with the other tools: [config.md](config.md)
+(the configuration file, per-file settings, the `dgdtools` command) and
+[dgdfmt.md](dgdfmt.md) (the formatter).
 
 ## 1. Purpose and non-negotiables
 
-dgdlint exists to find real bugs in a very large, very old DGD LPC mudlib
+The linter exists to find real bugs in a very large, very old DGD LPC mudlib
 before the driver finds them at load or boot time in production. Three
 properties follow from that and are treated as constraints, not goals:
 
@@ -20,7 +23,7 @@ properties follow from that and are treated as constraints, not goals:
 3. **Syntax errors are first-class findings.** The motivating incident was
    a production `castle.c` with `})` followed by the next statement and no
    `;`. DGD refused it at boot, a whole domain's connections vanished, and
-   the old dgdlint passed the file clean because it had no parser.
+   the linter of the time passed the file clean because it had no parser.
 
 The old design (lexer + top-level "structure" scanner + per-rule token
 heuristics) could not satisfy (3), and satisfied (1) only by each rule
@@ -40,7 +43,9 @@ pkg/pp       the preprocessor model: the ordered #define environment of
              a translation unit, macro classes, conditional-branch
              selection, the constant evaluator
 pkg/syntax   AST + hand-written error-tolerant recursive-descent parser
-pkg/config   dgdtools.yml, project discovery, DGD driver-config reader
+pkg/config   dgdtools.yml, project discovery, per-file settings (nested
+             scopes, .editorconfig), DGD driver-config reader
+pkg/editorconfig  .editorconfig files
 pkg/fileset  where a lib is on disk: path mapping, globs, the walk
 pkg/index    lazy cross-file index over syntax trees: symbols, inherit
              chains, #define environments; three-valued lookups;
@@ -51,9 +56,8 @@ pkg/format   the formatter: a layout plan from the syntax tree, a
              token-stream printer, the token-equality gate (section 8)
 pkg/tokcmp   significant-token comparison of two files
 pkg/report   output writers: human, JSON, SARIF 2.1.0, GitHub annotations
-cmd/dgdlint  thin CLI over pkg/lint + pkg/report
-cmd/dgdfmt   thin CLI over pkg/format + pkg/config
-cmd/dgdcmp   thin CLI over pkg/tokcmp
+cmd/dgdtools the one binary: a thin front end per subcommand (lint,
+             format, rules, explain, config, profile) over the packages
 ```
 
 ### 2.1 Why a hand-written recursive-descent parser
@@ -213,33 +217,37 @@ configuration it emits confident nonsense.
 
 ### 3.2 Decision
 
-dgdlint is both: syntax and vet rules are file-local, cross-file rules
+The linter is both: syntax and vet rules are file-local, cross-file rules
 need the lib root (the directory that is `/` to the driver).
 
 1. **A root is never required and never guessed.** Lib-absolute paths
    resolve against the root; a wrong root would turn every `inherit` into
    a false error. No VCS-marker or directory-name inference.
 2. **Discovery walks up from the linted path, not the cwd.**
-   `dgdlint /any/where/lib/d/Foo/castle.c` works from any directory, as
-   with ruff and clang-tidy. The nearest `dgdtools.yml` (or
-   `.dgdtools.yml`) is the project; `root:` in it (default: the config's
-   directory) is the lib root. With no path arguments, discovery starts at
-   the cwd and the whole root is linted.
+   `dgdtools lint /any/where/lib/d/Foo/castle.c` works from any
+   directory, as with ruff and clang-tidy. The nearest root config
+   (`dgdtools.yml` or `.dgdtools.yml` that is not a settings scope,
+   [config.md](config.md) section 3) is the project; `root:` in it
+   (default: the config's directory) is the lib root. With no path
+   arguments, discovery starts at the cwd and the whole root is linted.
 3. **One project per invocation.** If the arguments discover different
-   config files dgdlint exits 2 naming both, like `go` and `cargo` when
-   packages span modules. A whole-lib index has exactly one `/`.
+   root configs `dgdtools lint` exits 2 naming both, like `go` and
+   `cargo` when packages span modules. A whole-lib index has exactly one
+   `/`. Settings scopes below a root config are not projects: files
+   under different scopes of one lib are one run, each linted by its own
+   settings.
 4. **Explicit overrides:** `--config FILE`; `--root DIR`; `--no-config`.
 5. **Zero-config is useful, not noisy.** With no config and no `--root`,
-   dgdlint runs in *file-local mode*: file-local rules run with a partial
+   the linter runs in *file-local mode*: file-local rules run with a partial
    `#define` environment, cross-file rules do not run, and one note on stderr says
    so. The real pre-fix castle.c is caught in this mode.
 6. **The driver config is the compile database, and it is a build
    input.** DGD's own config file already states `include_dirs`,
    `include_file`, `auto_object` and `typechecking`.
    `profile_build: {driver_config: etc/mud.dgd}` reads them instead of
-   asking anyone to copy them; `dgdlint profile build` bakes them into a
-   profile (section 10), and a whole-lib lint uses them directly. Explicit
-   `lint:` values still win. The driver's absolute `directory` is *not*
+   asking anyone to copy them; `dgdtools profile build` bakes them into a
+   profile (section 10), and a whole-lib lint uses them directly. The
+   same keys set in `dgdtools.yml` still win. The driver's absolute `directory` is *not*
    used as the root: it names a path on the production host.
 7. **Subdirectory and single-file runs** lint only the named files but
    resolve against the whole lib. The index is lazy (section 6): one file
@@ -254,66 +262,81 @@ need the lib root (the directory that is `/` to the driver).
 
 ## 4. Configuration
 
-- **Name/format:** `dgdtools.yml` stays (shared with dgdfmt; YAML is what
-  the lib's wizards already edit). `.dgdtools.yml` is accepted too.
-  Unknown keys are errors, as in ruff, Biome and golangci-lint: a
+The file, how a file's settings are found (nested settings scopes,
+`.editorconfig`, the user-level fallback, precedence) and the command
+line are designed in [config.md](config.md). What the linter adds:
+
+- **Unknown keys are errors**, as in ruff, Biome and golangci-lint: a
   misspelled setting must not be silently ignored.
-- **Layering:** `extends: path` (a file or a list, resolved relative to
-  the extending file; later wins; scalars and lists replace, maps merge).
-  There is no implicit cascade of nested config files: per-directory
-  behaviour is expressed in one place with `overrides`, like ESLint flat
-  config and ruff's `per-file-ignores`. Hierarchical cascades are the
-  feature ESLint removed.
+- **Project keys and settings.** What the linter resolves references
+  against is the project: `root`, `profile`, `lib_path`, `exclude`,
+  `dialect` (with `typechecking`), `include_dirs`, `include_file`,
+  `auto_objects`, `relative_object_paths` (`root`, the DGD semantics and
+  the default, or `file`) and `conventions` (`specifier_macros`,
+  `macros: {NAME: type|specifier|statement|expression|opaque}`,
+  `defines`, the call/object/format registries, `autosave_markers`,
+  `virtual_paths`). They are top-level keys, the same ones a profile's
+  manifest has, and there is one set per run. How a file is linted is
+  `lint:`, and that can differ per directory.
 - **Rule selection:** every rule has a stable kebab-case **name**, a short
   stable **code** (`E…` driver-rejected, `R…` runtime failure, `S…`
   suspicious, `C…` convention), a group, a default severity and a default
-  on/off. `rules:` maps a rule name, code, or group (`all`, `syntax`,
+  on/off. `lint.rules` maps a rule name, code, or group (`all`, `syntax`,
   `runtime`, `suspicious`, `convention`) to `off | info | warning | error`
   or to a mapping `{severity: …, <options>}`. Rule entries beat group
-  entries beat `all`. Giving a severity enables the rule. The legacy
-  `enable:` / `disable:` lists keep working.
-- **Per-path overrides:** `overrides: [{paths: [globs], rules: {…}}]`
-  (lib-relative globs, `**` supported). The legacy `path_rules` (disable
-  lists) is still read.
+  entries beat `all`. Giving a severity enables the rule.
+- **Per-path settings, two forms.** `lint.overrides: [{paths: [globs],
+  rules: {…}}]` in the root config (lib-relative globs, `**` supported),
+  which keeps a lib's policy in one place; and a settings scope, a
+  `dgdtools.yml` with `root: false` in the directory it is about, which
+  lets the owner of a directory say it. For one file the layers apply in
+  this order, each over the last: the root's `rules`; its matching
+  `overrides`; then each scope from the outermost in, its `rules` and
+  its matching `overrides` (globs relative to the scope). `--select` and
+  `--enable` are applied before the per-path layers and `--ignore`
+  after, so a path that turns a rule off keeps it off and the command
+  line can still silence anything. `Linter.EffectiveRules(path)` and
+  `dgdtools config PATH` answer "what runs here".
+- **A nested file that is not valid fails the run** (a project key in a
+  scope, an unknown rule): linting its files by other settings than the
+  ones somebody wrote would be a silent wrong answer.
 - **Suppression comments:** `dgdlint:disable-next-line rule[,rule]`,
   `dgdlint:disable-line`, and `dgdlint:disable rule` … `dgdlint:enable`
   blocks, in any comment; rule names or codes. A file-scoped suppress-all
   is deliberately not offered. `unused-suppression` (off by default)
   reports directives that suppress nothing, as ESLint's
-  `--report-unused-disable-directives` and ruff's `RUF100` do.
-- **Baseline:** `dgdlint --write-baseline` records current findings in
-  `dgdlint-baseline.json` next to the config (`baseline:` to rename);
-  later runs subtract them, so legacy noise does not block CI and only
-  *new* breakage gates. Entries are keyed by (path, rule, fingerprint of
-  the text of the offending line) with a count, not by line number, so
-  edits elsewhere in a file do not resurrect a finding. This is the
-  PHPStan/Psalm baseline model; it needs no VCS, unlike golangci-lint's
-  `--new-from-rev`. `--no-baseline` shows everything.
-- **Lib facts:** from the profile, or from `profile_build.driver_config`
-  with the whole lib; `include_dirs`, `include_file`, `auto_objects`,
-  `typechecking` remain as overrides; `relative_object_paths` (`root`,
-  the DGD semantics and the default, or `file`), `virtual_paths`, the
-  call/object/format registries, `autosave_markers`.
-- **Macro and dialect knobs:** `defines:` (names treated as defined),
-  `macros: {NAME: type|specifier|statement|expression|opaque}`,
-  `specifier_macros`.
+  `--report-unused-disable-directives` and ruff's `RUF100` do. Comments
+  name the component they address (`dgdlint:` here, `dgdfmt:` for the
+  formatter's skip markers), not the binary.
+- **Baseline:** `dgdtools lint --write-baseline` records current
+  findings in `dgdtools-baseline.json` next to the config
+  (`lint.baseline` to rename); later runs subtract them, so legacy noise
+  does not block CI and only *new* breakage gates. Entries are keyed by
+  (path, rule, fingerprint of the text of the offending line) with a
+  count, not by line number, so edits elsewhere in a file do not
+  resurrect a finding. This is the PHPStan/Psalm baseline model; it
+  needs no VCS, unlike golangci-lint's `--new-from-rev`. `--no-baseline`
+  shows everything. The baseline and `lint.fail_on` describe a run, so
+  they are root-config keys.
 
 ### 4.1 CLI
 
 ```
-dgdlint [flags] [path ...]        lint files/directories (default: project)
-dgdlint rules                     list rules (code, name, default, scope)
-dgdlint explain RULE              documentation for one rule
-dgdlint config [path]             show the resolved project and settings
+dgdtools lint [flags] [path ...]  lint files/directories (default: project)
+dgdtools rules                    list rules (code, name, default, scope)
+dgdtools explain RULE             documentation for one rule
+dgdtools config [path]            the project of a path, the settings of a file
 ```
 
-Flags: `--config`, `--root`, `--no-config`, `--format human|json|sarif|github`,
-`--output FILE`, `--select RULES` (run only these), `--enable`,
-`--ignore`/`--disable`, `--fail-on SEVERITY`, `--baseline FILE`,
-`--write-baseline`, `--no-baseline`, `--local` (file-local rules only),
-`--stats`, `--max-per-file N`, `--quiet`, `--exit-zero`, `--version`.
-Flags may follow paths. The old single-dash spellings (`-f json`,
-`-enable`, `-disable`, `-rules`, `-fail-on`, `-config`) still work.
+Flags of `lint`: `--config`, `--no-config`, `--root`, `--profile`,
+`--lib-path` (where the project is; the same on every subcommand that
+needs one), `--output-format human|json|sarif|github`, `--output FILE`,
+`--select RULES` (run only these), `--enable`, `--ignore`,
+`--fail-on SEVERITY`, `--baseline FILE`, `--write-baseline`,
+`--no-baseline`, `--local` (file-local rules only), `--stats`,
+`--max-per-file N`, `--quiet`, `--exit-zero`. Flags may follow paths;
+`--` ends them. `--output-format` rather than `--format`: `format` is
+the name of the other subcommand (ruff made the same choice).
 
 **Exit codes:** `0` no findings at or above `fail_on`; `1` findings;
 `2` usage, configuration or I/O error (including an unknown rule name and
@@ -331,7 +354,7 @@ annotations.
 text edits (byte ranges + replacement) to a diagnostic; they are emitted
 in JSON and are what an editor applies. `adjacent-strings` carries one
 (insert ` +`). A `--fix` writer is deferred until semantic edits have a
-safety gate comparable to dgdfmt's token equality.
+safety gate comparable to the formatter's token equality.
 
 **Performance/caching:** a whole-lib run is parallel over files and takes
 7.9 s for 108,116 files with the default rules (old: 9.5 s). A persistent
@@ -366,12 +389,13 @@ withheld findings were unknown, so a drop in coverage is observable.
 
 ## 6. Library API and the path to an LSP server
 
-dgdlint is a library first; the CLI is one frontend.
+Everything is a library first; the command is one front end.
 
 ```go
 fs  := vfs.NewOverlay(vfs.OS{})            // editor buffers shadow disk
-prj, _ := config.Discover(fs, paths, config.DiscoverOptions{WorkDir: cwd, ProfileDirs: dirs})
+prj, _ := config.Discover(fs, paths, config.DiscoverOptions{WorkDir: cwd, ProfileDirs: dirs, UserConfig: user})
 l, _ := lint.New(prj, fs)                  // no globals; safe to keep alive
+set, _ := prj.Settings(path)               // one file's format settings and lint scopes
 
 res, _ := l.Run(ctx, lint.Request{Paths: paths})   // many files
 for _, d := range res.Diagnostics { ... }          // ranges, code, related, fixes
@@ -389,8 +413,8 @@ Properties the core guarantees (each has a test in `pkg/lint` or
 
 - **No printing, no `os.Exit`, no `flag`**, no package-level mutable
   state. `lint.Rules()` returns a fresh copy of an immutable table; each
-  `Linter` owns its index. `cmd/dgdlint` is `run(ctx, args, stdout,
-  stderr) int` over the library.
+  `Linter` owns its index. Each subcommand of `cmd/dgdtools` is
+  `func(ctx, args, stdin, stdout, stderr) int` over the library.
 - **No process state.** The library reads no environment variable, no
   home directory and no working directory. Paths are absolute; a front
   end passes its working directory (`DiscoverOptions.WorkDir`) and the
@@ -464,11 +488,11 @@ edits after a whole-lib run): `Invalidate` 1.5 ms median (2.9 ms at the
 edited file 0.1 ms median, completing the scan again under 1 ms, one
 file read per edit, and findings identical to the whole-lib run's.
 
-### 6.1 A future `dgdlint lsp`
+### 6.1 A future `dgdtools lsp`
 
-A thin layer, either a `dgdlint lsp` subcommand or a separate `dgdls`
-binary, holding one `vfs.Overlay` and one `lint.Linter` per discovered
-project:
+A thin layer, the reserved `dgdtools lsp` subcommand, holding one
+`vfs.Overlay` and, per project a `config.Workspace` discovers, one
+`lint.Linter`:
 
 | LSP feature | Maps onto |
 |---|---|
@@ -476,7 +500,7 @@ project:
 | `textDocument/publishDiagnostics` | `Linter.Lint` for the changed document, debounced, with the previous lint cancelled through its context. `Invalidate` returns the dependents; those that are open are linted again. `Diagnostic.code` = rule code, `codeDescription` = the `explain` text, `relatedInformation` = `Related`, positions via `diag.UTF16Col`. |
 | `workspace/didChangeWatchedFiles` | `Invalidate` for disk changes; a config change rebuilds the `Linter`. |
 | `textDocument/codeAction` | `Fixes` on the diagnostics in range (quick-fix edits), plus generated "suppress with `dgdlint:disable-next-line`" actions. |
-| `textDocument/definition` | the index: resolve the identifier under the cursor through `Snapshot.Chain` (functions and variables; `::` and `label::` calls), `->` calls with a known receiver through `LookupCallable`, `inherit`/`#include` paths through `ObjectPath`/`ResolveInclude`, macros through the file's `pp.Env`. `ChainFunc`, `ChainVar` and `pp.Macro` carry the defining file and position; a definition in a profile stub is at `dgdlint-profile://NAME/std/room.c`. |
+| `textDocument/definition` | the index: resolve the identifier under the cursor through `Snapshot.Chain` (functions and variables; `::` and `label::` calls), `->` calls with a known receiver through `LookupCallable`, `inherit`/`#include` paths through `ObjectPath`/`ResolveInclude`, macros through the file's `pp.Env`. `ChainFunc`, `ChainVar` and `pp.Macro` carry the defining file and position; a definition in a profile stub is at `dgdtools-profile://NAME/std/room.c`. |
 | `textDocument/hover` | the same lookups: specifiers and argument range of a function, the object that provides it, a macro's body and class. |
 | `textDocument/documentSymbol`, `workspace/symbol` | `syntax.File.Decls`; the units' symbol tables. |
 | `textDocument/formatting` | `pkg/format`, already a pure function. |
@@ -520,7 +544,7 @@ The E-rules exist because of what the oracle showed (section 9): the
 driver's most common reasons for refusing a file are not all "syntax
 error".
 
-## 8. dgdfmt
+## 8. The formatter
 
 The formatter is a trivia-only rewriter with a gate: it writes every
 significant token's bytes unchanged, synthesizes the whitespace between
@@ -563,21 +587,38 @@ line breaks and the result must be a fixed point. The statement read
 right after a skipped construct parsed, and is laid out by its shape
 (`BadStmt.Resumed`), though the rules never see it.
 
-**One file, one result.** A file is formatted from its own text and the
-project's options (`format.OptionsFromConfig`: indent, line endings,
-blank lines, header style, predefined names and configured macro
-classes). No other file is read: the parser runs with a partial
-environment, so macros from headers are met with the same tolerance as
-in a checkout with nothing else in it, and the result is the same in an
-editor buffer, in a wizard's folder and in the whole lib. `dgdfmt` finds
-each file's project the way `dgdlint` does (the nearest `dgdtools.yml`
-at or above it), which gives the dialect (the config's or its
-profile's); the `unformatted` rule calls the same function with the same
+**One file, one result.** A file is formatted from its own text and its
+options (`format.OptionsFor`: the three settings resolved for that file,
+the project's predefined names and configured macro classes). No other
+file is read: the parser runs with a partial environment, so macros from
+headers are met with the same tolerance as in a checkout with nothing
+else in it, and the result is the same in an editor buffer, in a
+wizard's folder and in the whole lib. `dgdtools format` finds each
+file's project the way `dgdtools lint` does (the nearest root config at
+or above it), which gives the dialect (the config's or its profile's);
+the `unformatted` rule calls the same function with the same per-file
 options.
 
+**Gaps.** The printer's unit of work is the gap between two significant
+tokens. A skip marker (`dgdfmt: off` … `dgdfmt: on`) and a line
+selection (`format.Lines`) are both "copy these gaps as they are": the
+tokens of a skipped gap still pass through the printer, so its bracket
+and conditional state stay right for what follows. A selected line
+whose neighbours keep their own indentation is indented from them: an
+unselected line that begins a statement teaches the indentation of its
+level, first the lines above in the same block, then the ones below.
+`format.Edits` reports a result as one replacement per changed gap.
+
+What the tool is (its one style, the three settings, skip markers,
+check and diff, formatting part of a file) is in
+[dgdfmt.md](dgdfmt.md).
+
 Measured on the Viking lib (182,126 `.c`/`.h` files): 180,850 formatted,
-1,276 refused because they do not tokenize, no gate failure, and a second
-pass over the formatted tree changes nothing.
+1,276 refused because they do not tokenize, no gate failure, with spaces
+and with tabs; a second pass over the formatted tree changes nothing;
+and for every file, all of its lines as a range give what `Format`
+gives, arbitrary ranges pass the gate, and a range of the formatted file
+changes nothing.
 
 ## 9. Verification and results
 
@@ -700,8 +741,11 @@ Late-bound call sites with a known receiver: 6.5% (old) → 22.5% (new;
   fixture lib; degraded modes (no root, incomplete lib, file outside the
   root); overlay + invalidation; cancellation; baseline; rule table
   stability.
-- `pkg/config`, `pkg/pp`, `pkg/diag`, `cmd/dgdlint` (exit codes, formats,
-  baseline workflow, discovery from anywhere).
+- `pkg/config` (discovery, settings scopes, `.editorconfig`, the
+  user-level fallback, validation), `pkg/editorconfig`, `pkg/pp`,
+  `pkg/diag`, `cmd/dgdtools` (every subcommand: exit codes, output
+  formats, baseline workflow, discovery from anywhere, check/diff/stdin,
+  line ranges, git-changed lines).
 - Corpus (`-tags corpus`): `TestCorpusParse` (182,126 `.c`/`.h` files
   parsed twice: no panics, span and ordering invariants) and
   `TestCorpusLint` (whole-lib run, no internal errors, core directories
@@ -768,7 +812,7 @@ classifier, the parser, include resolution, inherit-chain flattening and
 every lookup already work on source; a profile needs **no second
 representation of facts and no second code path**. A stub is not a file
 on disk and is not named like one: the stub for `/std/room.c` of profile
-`viking` is at `dgdlint-profile://viking/std/room.c`, `profile.FS`
+`viking` is at `dgdtools-profile://viking/std/room.c`, `profile.FS`
 answers for those locations as a `vfs.FS`, and the index reads a lib file
 from disk when it is there and from its stub location otherwise. This
 is the `.d.ts` model, and it is also what makes the format dialect-
@@ -777,7 +821,7 @@ neutral: a FluffOS profile would hold FluffOS-syntax stubs.
 Details that keep stubs honest:
 
 - A file that could not be fully read when the profile was built carries
-  `#pragma dgdlint partial`; the index treats its symbol table as partial,
+  `#pragma dgdtools partial`; the index treats its symbol table as partial,
   so lookups through it are unknown, exactly as with the original.
 - Declarations inside a conditional branch the builder could only guess at
   are emitted under `#ifdef __DGDLINT_UNDECIDED__`, so the consumer also
@@ -795,7 +839,7 @@ Details that keep stubs honest:
   must read as unknown, not as missing. (This was a real false positive
   in the first version of the tests.)
 
-**File format:** gzip of `dgdlint-profile 1`, the manifest, and the stubs
+**File format:** gzip of `dgdtools-profile 1`, the manifest, and the stubs
 in path order (`=== /std/room.c` separators). No timestamps: the same lib
 gives the same bytes. Versioned; a newer format is refused with a
 "rebuild the profile" message.
@@ -833,7 +877,7 @@ fewest wizard files (55 under `/players`, 189 under `/d`, against 845 and
 
 ### 10.3 Using a profile
 
-- **No profile is embedded in dgdlint.** A profile describes one mud and
+- **No profile is embedded in the tools.** A profile describes one mud and
   is published by that mud (VikingMUD's lives in its own repository).
   `profile: NAME` is looked up as `NAME.profile` in, in order: the
   directory of the config file that names it (the working directory for
@@ -993,12 +1037,15 @@ Deferred, in rough priority order:
 4. **`--fix`** (see 4.1) and more fixes than `adjacent-strings`.
 5. **Linting headers** (`.h` files with code) and `.c` fragments in the
    context of their includers.
-6. **dgdfmt in code the parser cannot read from the file alone**
+6. **The formatter in code the parser cannot read from the file alone**
    (`ob->QN` with `QN` a macro from a header, and the like): such a
    statement keeps its line breaks. Giving the formatter the project's
    headers would lay it out too, at the price of a result that depends
    on other files.
-7. **`dgdlint lsp`** (6.1), plus `dgdlint init` to write a starter config.
+7. **`dgdtools lsp`** (6.1) and **`dgdtools rename`** (both names are
+   reserved by the command), plus `dgdtools init` to write a starter
+   config. Line wrapping in the formatter is not planned
+   ([dgdfmt.md](dgdfmt.md) 2.2).
 8. **Type rules** on the declarations the index now keeps. Candidates,
    by the driver errors they would catch (file counts from the oracle):
    wrong argument count in a direct call to a function declared in the

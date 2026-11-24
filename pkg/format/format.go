@@ -69,9 +69,6 @@ const (
 	CRLF                        // normalize to \r\n
 )
 
-// DefaultIndentWidth is the number of spaces per level when none is set.
-const DefaultIndentWidth = 4
-
 // maxBlankLines is the most consecutive blank lines the formatter keeps.
 const maxBlankLines = 2
 
@@ -82,7 +79,7 @@ const maxBlankLines = 2
 // dialect the input File was lexed with.
 type Options struct {
 	IndentStyle IndentStyle
-	IndentWidth int // spaces per level with Spaces; 0 means DefaultIndentWidth
+	IndentWidth int // spaces per level with Spaces; 0 means config.DefaultIndentWidth
 	LineEndings LineEndings
 
 	// Defined are the names defined before the first line of every file
@@ -122,7 +119,7 @@ func (o Options) unit() string {
 	}
 	n := o.IndentWidth
 	if n <= 0 {
-		n = DefaultIndentWidth
+		n = config.DefaultIndentWidth
 	}
 	return strings.Repeat(" ", n)
 }

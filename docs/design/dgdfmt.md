@@ -88,25 +88,28 @@ and it is not planned.
 
 That is all. `indent_width` is the number of spaces per level with
 `indent_style: space` and is not used with `tab` (one tab per level;
-nothing in the engine measures columns).
+nothing in the engine measures columns). A multi-line comment moves with
+its first line: the indentation that line had is replaced, on every line
+that begins with it, by the indentation it gets, so a comment indented
+with tabs comes out indented with spaces and the reverse.
 
 `line_endings: preserve` keeps each line break's bytes and gives a new
 one the file's dominant form. It is the default because a lib that came
 through thirty years of FTP has both, and a formatter should not make
 every file differ in every line the first time it runs.
 
-Two former options are now the house style:
+Two things that could be options are the house style instead:
 
 - **Function headers: KNF, always.** Specifiers and return type on one
-  line, the name at column 0, the brace on its own line. `joined` is
-  gone. The reason for the split form is practical and specific to how
-  mud code is worked on: `grep '^name('` finds the definition of a
-  function in any file with any tool, including the ones available in a
-  mud's own editor. A definition written entirely on one line
-  (`int query_x() { return x; }`) is still left alone; that is a
-  vertical decision the author made, not a header style. No strong
-  reason for the alternative survived: it was a preference, and a
-  preference is what an opinionated formatter exists to end.
+  line, the name at column 0, the brace on its own line. The reason for
+  the split form is practical and specific to how mud code is worked on:
+  `grep '^name('` finds the definition of a function in any file with
+  any tool, including the ones available in a mud's own editor. A
+  definition written entirely on one line (`int query_x() { return x; }`)
+  is left alone; that is a vertical decision the author made, not a
+  header style. No strong reason for offering the joined form
+  (`static void create()` on one line) survived: it is a preference,
+  and a preference is what an opinionated formatter exists to end.
 - **Blank lines: at most two in a row, none at the end of a file,
   which ends with exactly one newline.** gofmt, Prettier and clang-format
   keep one; black keeps two between top-level definitions. Two is kept
@@ -168,8 +171,10 @@ dgdtools format --stdin-filename players/x/room.c   (implies -)
   tripped). An error wins over 1. Same numbers as ruff and Prettier, and
   as `dgdtools lint`.
 - `--check` prints one path per line on standard output (what
-  `gofmt -l` prints, so scripts can read it); the summary goes to
-  standard error and `--quiet` drops it.
+  `gofmt -l` prints, so scripts can read it); `--diff` prints unified
+  diffs there. The summary (`3 files reformatted, 120 files unchanged`)
+  goes to standard error and `--quiet` drops it. With `-`, the default
+  mode prints the formatted text and nothing else.
 - `--stdin-filename` names the buffer: settings are discovered from that
   path (project, nested scopes, `.editorconfig`) and messages use it.
   The file need not exist. This is what an editor that pipes a buffer
@@ -196,7 +201,8 @@ byte for byte:
 
 - a gap belongs to the line its following token starts on (so a line's
   indentation, the break before it and the spacing inside it are
-  formatted together), and to any comment or blank line inside it;
+  formatted together), and to any comment or blank line inside it; the
+  end of the file belongs to its last line of code;
 - trailing spaces on a selected line are removed even though the gap
   they are in belongs to the next line.
 
@@ -207,15 +213,21 @@ the selection changes.
 **Indentation blends in.** The unselected lines keep their indentation,
 which in a legacy file is not the canonical one (tabs, two spaces). A
 selected line is therefore indented from what is around it, the way
-clang-format does it: an unselected line that begins a statement teaches
-the indentation of its nesting level; a selected line at a level that
-has been taught uses it; at a deeper level it adds the configured unit
-to the nearest taught one. In a file that is already formatted this is
-the canonical indentation, so range formatting and whole-file formatting
-agree there.
+clang-format does it and one step further: an unselected line that
+begins a statement teaches the indentation of its nesting level; a
+selected line asks the lines above it in its block for its level, then
+the lines below it (clang-format only looks up, which leaves the first
+statement of a block out of line); with nobody to ask it adds the
+configured unit to the nearest level that was taught. Case labels and
+braces teach nothing, and the top level is always the margin. In a file
+that is already formatted this is the canonical indentation, so range
+formatting and whole-file formatting agree there; all lines as a range
+are exactly `Format`.
 
 **The gate still holds.** The token streams must be equal, and
-formatting the same gaps of the result again must change nothing.
+formatting the same gaps of the result again must change nothing (a gap
+is identified by the number of tokens before it, which formatting does
+not change). `TestCorpusLines` checks this on every file of the lib.
 
 **Command line.**
 
@@ -236,6 +248,9 @@ dgdtools format --changed --base origin/main PATH...
   formatted".
 - git is a front-end concern. The library takes line ranges and never
   runs a program.
+- A range or a changed-lines run does not normalize the rest of the
+  file: line endings, blank-line runs and indentation outside the
+  selection stay. A file converges as it is edited.
 
 Why lines and not syntax nodes: lines are what an editor selection, a
 diff hunk and `git blame` are made of, and every tool with this feature
@@ -260,7 +275,7 @@ cannot disagree.
 opts := format.OptionsFor(project.Config, settings.Format)   // settings: project.Settings(path)
 
 out, err := format.Format(file, opts)                 // the whole file
-out, err := format.Lines(file, opts, ranges)          // only these lines
+out, err := format.Lines(file, opts, ranges)          // only these lines ([]format.LineRange)
 edits := format.Edits(file, out)                      // []diag.TextEdit, one per changed gap
 ```
 
@@ -272,3 +287,17 @@ an editor buffer, in a partial checkout and in the whole lib.
 Errors are values (`ErrIllegal`, `ErrGateFailure`, `ErrNotIdempotent`,
 `ErrInternal`): a file that cannot be formatted is reported and left
 alone, in a run over many files and in an editor session alike.
+
+## 4. Measured
+
+VikingMUD lib, the mud's own configuration (110,994 `.c`/`.h` files in
+scope after excludes):
+
+| | |
+|---|---|
+| reformatted | 107,730 |
+| already formatted | 2,499 |
+| refused: does not tokenize | 765 |
+| gate failures | 0 |
+| changed by a second pass | 0 |
+| wall time, `format --check lib` | 5 s (12 CPUs) |

@@ -69,7 +69,7 @@ lint:
     - paths: ["legacy/**"]
       rules: {lifecycle-chain: off}
   fail_on: error           # root config only: one threshold per run
-  baseline: lint-baseline.json   # root config only
+  baseline: dgdtools-baseline.json   # root config only
 ```
 
 The top level holds the project keys; they are the same facts a profile's
@@ -92,8 +92,12 @@ A `dgdtools.yml` is one of two things.
   `format:` for the files under its directory, inside whatever project
   those files belong to. Any other key in it is an error naming the key
   (`players/drake/dgdtools.yml: exclude belongs in the project's root
-  config; this file is a settings scope (root: false)`), and so are
-  `lint.fail_on` and `lint.baseline`, which describe a run, not a file.
+  config; this file is a settings scope (root: false) and holds only
+  lint.rules, lint.overrides and format`), and so are `lint.fail_on` and
+  `lint.baseline`, which describe a run, not a file. (`root:` is the lib
+  root's directory in a root config; the one value that is not a
+  directory, `false`, says there is none. A directory really called
+  "false" is written `"false"`; `root: true` is an error.)
 
 ```yaml
 # players/drake/dgdtools.yml
@@ -131,8 +135,25 @@ all there is, and here the lib is known. Refusing it (Biome) would make
 a whole-lib run fail because of a file one wizard added; ignoring it
 would lint that wizard's files by settings they did not choose.
 
+A scope that is not valid (a project key in it, a rule that does not
+exist) is an error for the files under it, in `lint`, `format` and
+`config` alike: they are not quietly handled by other settings.
+
 `--config FILE` uses that file for every path and looks for no other
-`dgdtools.yml`. `--no-config` uses no configuration file of any kind.
+`dgdtools.yml` (ruff's rule: a file named by hand is the whole
+configuration); `.editorconfig` is still read. `--no-config` uses no
+configuration file of any kind, `.editorconfig` included.
+
+**Where nested files are looked for.** From the file's directory up to
+the project: below the directory of the project's config; or, when the
+config names a lib somewhere else (`root: ../lib`), from the lib root
+down. A file outside both has the project's own settings.
+
+**A directory given to a command is its project's.** `dgdtools format
+dir/` and `dgdtools lint dir/` take the project of `dir`, and every
+file under it is that project's file, formatted and linted by its own
+settings as above. Only the paths named on the command line choose
+projects.
 
 ## 4. `.editorconfig`
 
@@ -153,14 +174,16 @@ specific statement (Prettier's rule). Nothing else is read from
 ## 5. User-level configuration
 
 `dgdtools.yml` in the user configuration directory
-(`$XDG_CONFIG_HOME/dgdtools/`, `~/.config/dgdtools/`) is used for a path
-only when no project config is found for it. It is then that path's root
+(`os.UserConfigDir()/dgdtools/`, else `~/.config/dgdtools/`) is used for
+a path only when no project config is found for it. It is then that path's root
 config, with one difference: it has no directory to be a lib root, so a
 relative `root:` in it is an error. Its use is a wizard with a bare
 checkout and no file in it: `profile: viking` there, once.
 
 It never merges with a project config. What a project's files are
-formatted and linted by must not depend on who runs the tool.
+formatted and linted by must not depend on who runs the tool. Settings
+scopes above the path still apply over it, as over any root config, and
+nothing is anchored at its directory (no default baseline).
 
 ## 6. Precedence
 
@@ -184,21 +207,34 @@ user-level config and never override a project.
 ## 7. In the library
 
 Per-file resolution is not a command-line feature; the linter, the
-formatter and the language server need the same answer.
+formatter and the language server need the same answer, so it is in
+`pkg/config`.
 
 ```go
-prj, err := config.Discover(fs, paths, config.DiscoverOptions{...})  // one project (lint)
-ws := config.NewWorkspace(fs, config.DiscoverOptions{...})           // many (format, a server)
+opt := config.DiscoverOptions{WorkDir: wd, ProfileDirs: dirs, UserConfig: user, Format: flags}
+
+prj, err := config.Discover(fs, paths, opt)   // the one project of some paths (lint, config)
+ws := config.NewWorkspace(fs, opt)            // the project of any path (format, a server)
 prj, err = ws.Project(path)
 
-s, err := prj.Settings(path)   // *config.Settings: Format, where each key came from, lint layers
+s, err := prj.Settings(path)   // *config.Settings
+s.Format                       // every key set
+s.From                         // where each key came from: a file, "command line", "default"
+s.Scopes                       // the nested files that apply, outermost first (lint layers)
 ```
 
 `Discover` and `Workspace` read no environment: the front end passes
 the working directory, the profile directories and the user-level config
-path. A `Project` caches what it reads per directory;
-`Project.ResetSettings` drops the cache when a `dgdtools.yml` or
-`.editorconfig` changes under a long-lived server.
+path (`config.UserConfigPath`). A `Project` caches what it reads per
+directory and is safe for concurrent use; `Project.ResetSettings` drops
+the cache when a `dgdtools.yml` or `.editorconfig` changes under a
+long-lived server. `pkg/editorconfig` is the parser (sections, the
+glob forms of the specification, `root = true`, `unset`).
+
+`lint.New(prj, fs)` lints every file by `prj.Settings`, and
+`Linter.EffectiveRules(path)` answers which rules run on a file;
+`format.OptionsFor(prj.Config, s.Format)` are the formatter's options
+for it.
 
 ## 8. The command
 
@@ -226,10 +262,11 @@ dgdtools version
   works. Reserving them means an editor plugin configured for a newer
   version gets a precise message, and no later command has to work
   around a squatter.
-- **`dgdcmp` is gone.** Its two functions were the token comparison,
-  which is the formatter's gate and runs on every file anyway, and a
-  token dump for lexer debugging, which a test or `go run` does better
-  than a hidden subcommand that has to be kept working.
+- **No token-comparison or token-dump command.** Comparing two files'
+  significant tokens is the formatter's gate and runs on every file it
+  formats; a token dump for lexer debugging is better done by a test or
+  `go run` than by a hidden subcommand that has to be kept working.
+  `pkg/tokcmp` is the library for anyone who needs the comparison.
 - **Flags** belong to their subcommand and may stand before, between or
   after paths; `--` ends them. The flags that say where the project is
   (`--config`, `--no-config`, `--root`, `--profile`, `--lib-path`) are
@@ -238,7 +275,13 @@ dgdtools version
   was found (lint findings at or above `fail_on`; files that
   `format --check` would change); 2 usage, configuration or I/O error.
 - **Front ends are thin.** Each subcommand is
-  `func(ctx, env, args) int` over the libraries: it parses flags, reads
-  the working directory and environment, calls `pkg/config`, `pkg/lint`,
-  `pkg/format`, `pkg/report`, and prints. No analysis, no layout and no
-  configuration logic lives in `cmd/`.
+  `func(ctx, args, stdin, stdout, stderr) int` over the libraries: it
+  parses flags, reads the working directory and environment, calls
+  `pkg/config`, `pkg/lint`, `pkg/format`, `pkg/report`, and prints. No
+  analysis, no layout and no configuration logic lives in `cmd/`. The
+  one thing a front end does that a library must not is run another
+  program: `format --changed` asks git for the changed lines and hands
+  the library line ranges.
+- **`lint --output-format`**, not `--format`: next to a subcommand
+  called `format` the short name would be read wrong (ruff's choice
+  too).

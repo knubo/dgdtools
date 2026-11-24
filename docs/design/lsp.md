@@ -1,11 +1,13 @@
-# `dgdlint lsp`: implementation plan
+# `dgdtools lsp`: implementation plan
 
-Status: plan only. Nothing here is implemented. It builds on the library
-described in `dgdlint-rewrite.md` (sections 6 and 10): `pkg/lint`
+Status: plan only. Nothing here is implemented; the command reserves the
+name. It builds on the library described in `dgdlint-rewrite.md`
+(sections 6 and 10), `config.md` and `dgdfmt.md`: `pkg/lint`
 (`Linter.Lint`, `Invalidate`, `Scan`, `Generation`), `pkg/vfs`
 (`Overlay`), `pkg/index` (generations, chains, `#define` environments, declarations
-with types and positions), `pkg/profile`, `pkg/format`, `pkg/config`
-(`Discover`).
+with types and positions), `pkg/profile`, `pkg/format` (`Format`,
+`Lines`, `Edits`), `pkg/config` (`Workspace`, `Discover`,
+`Project.Settings`).
 
 The server is a thin layer: transport, document state, scheduling and
 position conversion. Analysis stays in the library; any logic the server
@@ -13,13 +15,13 @@ needs that a script or the CLI could also use goes into the library first.
 
 ## 1. Shape
 
-- `dgdlint lsp` subcommand (one binary to install and version; the server
-  must always match the linter). stdio transport only; `--log FILE` and
+- `dgdtools lsp` subcommand (one binary to install and version; the server
+  must always match the linter and the formatter). stdio transport only; `--log FILE` and
   `--trace` flags. stdout is the protocol, stderr is never written to
   except on startup failure.
 - New package `pkg/lsp` (server, document store, scheduler, protocol
   subset) and `pkg/lsp/lsptest` (in-process client for tests).
-  `cmd/dgdlint` only wires stdin/stdout to it.
+  `cmd/dgdtools` only wires stdin/stdout to it.
 
 ## 2. Transport and protocol types
 
@@ -61,33 +63,41 @@ document.
 
 - `initialize` gives `workspaceFolders` (fallback `rootUri`).
   `workspace/didChangeWorkspaceFolders` is supported.
-- A **project** is what `config.Discover` returns: config file, lib root
-  or partial-checkout mount, profile. Projects are keyed by
-  (config path, profile, lib path) and each owns one `vfs.Overlay` view
-  and one `lint.Linter`.
-- A **document** finds its project by running discovery from its own
-  directory, exactly like the CLI (nearest `dgdtools.yml` upward), cached
-  per directory. Two workspace folders under one lib share one project;
-  one folder containing two libs gets two. A file with no project gets
-  the shared "file-local" linter (no root).
-- **Zero-config wizards:** client settings `dgdlint.profile` and
-  `dgdlint.libPath` (read with `workspace/configuration`, per folder) are
+- A **project** is what `config.Workspace.Project(path)` returns:
+  config file, lib root or partial-checkout mount, profile. The
+  workspace resolves each root config once; each project owns one
+  `vfs.Overlay` view and one `lint.Linter`.
+- A **document** finds its project from its own path, exactly like the
+  CLI (nearest root config upward; settings scopes are passed over).
+  Two workspace folders under one lib share one project; one folder
+  containing two libs gets two. A file with no project gets the shared
+  one without a config (file-local rules; the user-level configuration
+  when there is one).
+- A document's **settings** are `Project.Settings(path)`: the format
+  settings and the lint layers of that file (scopes, `.editorconfig`).
+  The server asks the library and adds nothing.
+- **Zero-config wizards:** client settings `dgdtools.profile` and
+  `dgdtools.libPath` (read with `workspace/configuration`, per folder) are
   passed as `DiscoverOptions.Profile/LibPath` for folders that have no
-  `dgdtools.yml`. The server also passes what the library does not read
+  `dgdtools.yml`. They carry only what a wizard without any file needs;
+  nothing in an editor's settings overrides a project. The server also passes what the library does not read
   itself: `DiscoverOptions.ProfileDirs` from `profile.UserDirs` (the
   `$DGDTOOLS_PROFILE_PATH` value and the user's config and home
-  directories) and absolute paths throughout. A config file always wins over editor settings. No
+  directories), `DiscoverOptions.UserConfig` from
+  `config.UserConfigPath`, and absolute paths throughout. A config file always wins over editor settings. No
   profile is ever assumed (design doc 10.4); the extension's settings UI
   is where a wizard names their mud's profile (resolved with
   `profile.Resolve`, so a profile installed in the user config directory
   works for every folder).
 - **Watching:** register `workspace/didChangeWatchedFiles` for
-  `**/*.{c,h}`, `**/dgdtools.yml`, `**/.dgdtools.yml`, `**/*.profile`,
-  `**/dgdlint-baseline.json`. Source changes go to `Linter.Invalidate`;
-  a config, profile or baseline change rebuilds that project's linter and
-  re-lints its open documents.
+  `**/*.{c,h}`, `**/dgdtools.yml`, `**/.dgdtools.yml`,
+  `**/.editorconfig`, `**/*.profile`, `**/dgdtools-baseline.json`.
+  Source changes go to `Linter.Invalidate`; a change to a settings scope
+  or an `.editorconfig` goes to `Project.ResetSettings` and re-lints the
+  open documents under it; a root config, profile or baseline change
+  rebuilds that project's linter and re-lints its open documents.
 - The baseline applies in the editor as on the command line; a setting
-  `dgdlint.showBaselined` shows baselined findings as hints.
+  `dgdtools.showBaselined` shows baselined findings as hints.
 
 ## 4. Documents and text synchronization
 
@@ -205,8 +215,8 @@ knows the code base.
 |---|---|---|---|---|
 | 1 | Skeleton: initialize/shutdown, projects, incremental sync, `publishDiagnostics` with code, `codeDescription`, related information, tags (`Unnecessary` for unreachable-code) | `Linter.Lint`, `Invalidate`, `Scan`, `diag` | `PositionMapper`; `diag.ByteCol` | 5 |
 | 2 | `codeAction`: quick fixes from `Diagnostic.Fixes`; "suppress with `dgdlint:disable-next-line RULE`" and "…for this file" generated per diagnostic; "explain rule" as a command | fixes as text edits (already data) | a helper that renders a suppression comment in the file's comment style and indentation | 2 |
-| 3 | `formatting` (whole document) via dgdfmt; `rangeFormatting` deferred | `format.Format(file, format.OptionsFromConfig(cfg))`: a function of the buffer and the project's options, with its token-equality gate; a failed gate returns no edits and a log line | minimal-diff edit computation (line-based) so cursors and folds survive | 2 |
-| 4 | `definition`: `#include` targets, `inherit` paths, function calls (direct, `::`, `label::`, `->` with a known receiver, string callbacks in registrars), macros | `ResolveInclude`, `ObjectPath`, `Chain`, `LookupCallable`, the file's `pp.Env` (`pp.Macro.Path/Off`) | `syntax.PathAt(file, offset)` (innermost node chain at a position); a stub target is already located by its virtual document URI (`dgdlint-profile://NAME/std/room.c`, see `profile.Location`), which the server answers with the stub's text | 4 |
+| 3 | `formatting` and `rangeFormatting`; format-on-save of modified lines is the client's use of the latter | `format.Format(file, opts)` and `format.Lines(file, opts, ranges)` with `opts = format.OptionsFor(cfg, settings.Format)`: functions of the buffer and the file's settings, with the token-equality gate (a failed gate returns no edits and a log line); `format.Edits(file, out)` gives one text edit per changed gap, so cursors and folds survive | LSP range to line range (a range that ends at column 0 does not include that line) | 2 |
+| 4 | `definition`: `#include` targets, `inherit` paths, function calls (direct, `::`, `label::`, `->` with a known receiver, string callbacks in registrars), macros | `ResolveInclude`, `ObjectPath`, `Chain`, `LookupCallable`, the file's `pp.Env` (`pp.Macro.Path/Off`) | `syntax.PathAt(file, offset)` (innermost node chain at a position); a stub target is already located by its virtual document URI (`dgdtools-profile://NAME/std/room.c`, see `profile.Location`), which the server answers with the stub's text | 4 |
 | 5 | `hover` and `signatureHelp` | `ChainFunc.Decl/Type/DefinedIn`, `index.Params`, macro body and class, variable types | active-parameter computation from the argument list around the cursor; kfun table for built-ins (new data file) | 3 |
 | 6 | `documentSymbol`, `workspace/symbol` | `syntax.File.Decls`; units' symbol tables (whole-lib scan, cached) | fuzzy matcher | 2 |
 | 7 | `completion`: functions callable here (own chain, auto object, kfuns), `->` members for a known receiver, macros in view, `#include` and inherit paths, locals | chain + view + profile | local scopes (block-level symbol tables in `pkg/syntax`); tolerant parse at the cursor (the parser already recovers; completion context comes from tokens left of the cursor) | 5 |
@@ -385,24 +395,24 @@ unresolved names) waits for block scopes.
 - **VS Code extension** (`editors/vscode`, TypeScript, about 4 days
   on top of the grammar from 9.1):
   language id `lpc` for `*.c`/`*.h` *inside a workspace that has a
-  `dgdtools.yml` or the `dgdlint.profile` setting* (activation must not
+  `dgdtools.yml` or the `dgdtools.profile` setting* (activation must not
   hijack C files elsewhere: activate on `workspaceContains:**/dgdtools.yml`
   and offer a command "Treat this folder as an LPC lib"); the TextMate
   grammar from 9.1; `semanticTokenScopes` for the custom modifiers of
   9.2; `language-configuration.json` (brackets, comments,
-  indentation rules); `vscode-languageclient` starting `dgdlint lsp`;
-  settings `dgdlint.path`, `dgdlint.profile`, `dgdlint.libPath`,
-  `dgdlint.showBaselined`, `dgdlint.trace.server`; a content provider for
-  `dgdlint-profile:` documents. Binary acquisition: use `dgdlint.path` or
+  indentation rules); `vscode-languageclient` starting `dgdtools lsp`;
+  settings `dgdtools.path`, `dgdtools.profile`, `dgdtools.libPath`,
+  `dgdtools.showBaselined`, `dgdtools.trace.server`; a content provider for
+  `dgdtools-profile:` documents. Binary acquisition: use `dgdtools.path` or
   PATH first; otherwise download the release asset for the platform
   (GoReleaser already builds them) with a checksum, after asking.
 - **Vim and Neovim:** the `editors/vim` runtime files from 9.1 (install
-  as a plugin directory), and for Neovim a documented `vim.lsp.config` block (`cmd = {"dgdlint",
+  as a plugin directory), and for Neovim a documented `vim.lsp.config` block (`cmd = {"dgdtools",
   "lsp"}`, `root_markers = {"dgdtools.yml", ".dgdtools.yml"}`,
   `filetypes = {"lpc"}`) plus a filetype rule; submit to
   `nvim-lspconfig` once stable.
 - **Helix:** `languages.toml` entry (language `lpc`, roots
-  `dgdtools.yml`, `language-servers = ["dgdlint"]`). Helix highlights only through
+  `dgdtools.yml`, `language-servers = ["dgdtools"]`). Helix highlights only through
   tree-sitter and does not use semantic tokens, so until the deferred
   grammar of 9.1 exists Helix users get diagnostics and navigation with C
   highlighting.
@@ -419,7 +429,7 @@ unresolved names) waits for block scopes.
    grammar and the Vim syntax/ftdetect/ftplugin files, with their tests.
 2. Library prerequisites for step 1 (`diag.ByteCol`, `PositionMapper`),
    `pkg/lsp` skeleton, transcript test harness. Ship steps 1 to 3 behind
-   `dgdlint lsp` and test with Neovim (no extension needed) (9 days).
+   `dgdtools lsp` and test with Neovim (no extension needed) (9 days).
 3. VS Code extension (client, settings, grammar packaging) against steps
    1 to 3 (4 days).
 4. `syntax.PathAt`; steps 4 to 6 (9 days); then semantic tokens 9a (2
@@ -453,7 +463,7 @@ weeks, and grammars alone can ship in the first.
   `PositionMapper` in both encodings (including lines with non-ASCII and
   astral characters).
 - **Equivalence with the CLI:** for every file of a fixture lib, the
-  diagnostics published after `didOpen` equal `dgdlint --format json` for
+  diagnostics published after `didOpen` equal `dgdtools lint --output-format json` for
   that file; after an edit and its undo they are equal again (catches
   stale invalidation).
 - **Invalidation:** change a header and assert that exactly the open
@@ -477,7 +487,7 @@ weeks, and grammars alone can ship in the first.
 Decided by the owner (the numbered list below is kept for the reasoning):
 
 - JSON-RPC: `github.com/sourcegraph/jsonrpc2`.
-- `dgdlint lsp` subcommand, not a separate binary.
+- `dgdtools lsp` subcommand of the one binary.
 - Diagnostics for open documents only.
 - Latin-1 files stay as they are; editors are configured for them.
 - File association is workspace-scoped: `*.c`/`*.h` are LPC only under a
@@ -503,7 +513,7 @@ editors/
     syntax/dgdlpc.vim
     ftplugin/dgdlpc.vim
     indent/dgdlpc.vim
-  nvim/lsp/dgdlint.lua Neovim 0.11+ `vim.lsp.config` entry (candidate for
+  nvim/lsp/dgdtools.lua Neovim 0.11+ `vim.lsp.config` entry (candidate for
                        upstreaming to nvim-lspconfig once stable)
 ```
 
@@ -511,8 +521,8 @@ editors/
 
 1. **Dependency:** take `sourcegraph/jsonrpc2` (recommended) or keep the
    module dependency-free and hand-roll the transport (+2 days).
-2. **Binary:** `dgdlint lsp` subcommand (recommended) or a separate
-   `dgdls`.
+2. **Binary:** an `lsp` subcommand (recommended) or a separate
+   server binary.
 3. **Scope of diagnostics:** open documents only (recommended to start;
    matches gopls and rust-analyzer defaults) or also the whole
    project via pull diagnostics, which on a lib with 200,000 baseline
@@ -533,7 +543,7 @@ editors/
    where to put the file (recommended to start), or add a command that
    downloads a profile from a URL the user configures into the user
    config directory. The download would live in the extension, not in
-   dgdlint, which has no network code.
+   dgdtools, which has no network code.
 8. **tree-sitter grammar:** defer (recommended) or build now for Helix
    and Zed highlighting (6 to 8 days and a second grammar to maintain).
 9. **Vim:** ship a separate `dgdlpc` filetype (recommended) or try to
