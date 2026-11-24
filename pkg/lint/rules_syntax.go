@@ -179,9 +179,13 @@ var ruleBadDirective = &Rule{
 	Explain: "DGD's preprocessor rejects tokens after #else and #endif (\"bad token " +
 		"in control\"; write them as a comment) and unknown directive names " +
 		"(\"undefined control\"), even inside a skipped #if block.",
-	Default: true, Severity: diag.Error,
+	Default: true, Severity: diag.Error, AnyBranch: true,
 	Run: func(p *Pass) {
-		for _, t := range p.File.Tokens {
+		active := map[uint32]bool{}
+		for _, i := range p.Tree.Sel.Dirs {
+			active[p.File.Tokens[i].Off] = true
+		}
+		for i, t := range p.File.Tokens {
 			if t.Kind != token.Directive {
 				continue
 			}
@@ -192,25 +196,82 @@ var ruleBadDirective = &Rule{
 				p.Report(t.Off, t.End, "unknown preprocessor directive '#%s'", name)
 			case (name == "else" || name == "endif") && strings.TrimSpace(rest) != "":
 				p.Report(t.Off, t.End, "text after '#%s' is a preprocessor error in DGD; put it in a comment", name)
+			case name == "include" && active[t.Off] && !p.Tree.Sel.Guessed(i):
+				// The rest of an #include line is compiled as source:
+				// `#include "x.h";` leaves a stray ';' at top level.
+				if tail := includeTail(rest); tail != "" {
+					p.Report(t.Off, t.End, "'%s' after the #include target is an error in DGD; remove it", tail)
+				}
 			}
 		}
 	},
+}
+
+// includeTail returns what follows the target of an #include.
+func includeTail(rest string) string {
+	rest = strings.TrimSpace(rest)
+	if rest == "" {
+		return ""
+	}
+	close := byte('"')
+	if rest[0] == '<' {
+		close = '>'
+	} else if rest[0] != '"' {
+		return ""
+	}
+	end := strings.IndexByte(rest[1:], close)
+	if end < 0 {
+		return ""
+	}
+	return strings.TrimSpace(rest[end+2:])
 }
 
 var ruleInheritOrder = &Rule{
 	Code: "E008", Name: "inherit-after-declaration", Group: GroupSyntax,
 	Doc: "inherit statement after a variable or function declaration",
 	Explain: "DGD requires every inherit to precede all declarations (\"inherit " +
-		"must precede all declarations\"). Only declarations in the file itself " +
-		"are considered; a prototype pulled in by an earlier #include breaks the " +
-		"same rule but is not detected.",
+		"must precede all declarations\"). That includes declarations that " +
+		"arrive through an #include placed before the inherit: a header with a " +
+		"prototype or a variable must be included after the inherit statements.",
 	Default: true, Severity: diag.Error,
 	Run: func(p *Pass) {
 		var first syntax.Decl
+		// A header included before an inherit that declares something.
+		if len(p.View.Layers) > 0 && p.Index != nil {
+			var lastInherit *syntax.InheritDecl
+			for _, d := range p.Tree.Decls {
+				if inh, ok := d.(*syntax.InheritDecl); ok {
+					lastInherit = inh
+				}
+			}
+			if lastInherit != nil {
+				for _, inc := range p.View.Layers[0].Includes {
+					if inc.Off > p.Tree.Off(lastInherit) || p.Tree.Sel.Guessed(inc.Tok) {
+						continue
+					}
+					if file, ok := p.Index.IncludeDeclares(p.File.Path, inc); ok {
+						var target *syntax.InheritDecl
+						for _, d := range p.Tree.Decls {
+							if inh, ok := d.(*syntax.InheritDecl); ok && p.Tree.Off(inh) > inc.Off {
+								target = inh
+								break
+							}
+						}
+						if target != nil {
+							r := p.ReportNode(target, "inherit must precede all declarations, but %s (included above) declares functions or variables; include it after the inherits", inc.Raw())
+							it := p.File.Tokens[inc.Tok]
+							r.Related = append(r.Related, p.Related(it.Off, it.End, "included here"),
+								diag.Related{Path: file, Line: 1, Col: 1, Message: "declares functions or variables"})
+							return
+						}
+					}
+				}
+			}
+		}
 		for _, d := range p.Tree.Decls {
 			switch d := d.(type) {
 			case *syntax.FuncDecl, *syntax.VarDecl:
-				if first == nil {
+				if a, _ := d.Span(); first == nil && !p.Tree.Sel.Guessed(a) {
 					first = d
 				}
 			case *syntax.InheritDecl:

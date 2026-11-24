@@ -292,7 +292,18 @@ func (lx *lexer) scanString(start int) {
 			if !lx.newline() && lx.pos < len(lx.src) {
 				lx.pos++
 			}
-		case '\n', '\r':
+		case '\r':
+			if lx.peek(1) != '\n' {
+				// A bare carriage return is ordinary string content to
+				// DGD (only \n ends a line); it is not a line break
+				// here either.
+				lx.pos++
+				continue
+			}
+			lx.errorf(start, "unterminated string literal")
+			lx.emit(token.Illegal, start)
+			return
+		case '\n':
 			lx.errorf(start, "unterminated string literal")
 			lx.emit(token.Illegal, start)
 			return

@@ -66,6 +66,7 @@ func TestMinilibSeededBugs(t *testing.T) {
 		"target-object-missing user.c:29", // clone_object of missing file
 		"target-object-missing user.c:30", // -> on missing object
 		"target-object-missing broken.c:3",
+		"syntax-error broken.c:4", // inherit of a macro nobody defines
 		"include-not-found vet.c:1",
 		"assignment-in-condition vet.c:12",
 		"assignment-in-condition vet.c:16",
@@ -93,8 +94,7 @@ func TestMinilibSeededBugs(t *testing.T) {
 			"user.c:23",    //
 			"user.c:25",    //
 			"user.c:12",    // registered handler exists
-			"broken.c:10",  // partial chain: unknown, not missing
-			"syntax-error", // the fixture lib parses
+			"broken.c:10", // partial chain: unknown, not missing
 		} {
 			assert.NotContains(t, k, clean)
 		}
@@ -292,10 +292,41 @@ func TestSyntaxRules(t *testing.T) {
 		assertFinding(t, got, "bad-directive 3:1")
 		assertFinding(t, got, "bad-directive 5:1 unknown preprocessor directive '#foo'")
 		assert.Len(t, got, 3, "%v", got)
+
+		got = lintMem(t, "#include <std.h>;\n#include <std.h> /* fine */\nint a;\n", lint.Request{}, nil)
+		require.Len(t, got, 1, "%v", got)
+		assertFinding(t, got, "bad-directive 1:1 ';' after the #include target")
+	})
+	t.Run("undecided branches are not judged", func(t *testing.T) {
+		src := "#ifdef FEATURE\nfoo(a) { return 1; }\nvoid g() { \"/std/base\"->nope(); x = 1 y = 2; }\n#endif\n#ifdef __DGD__\nbar(b) { }\n#endif\n"
+		got := lintMem(t, src, lint.Request{}, nil)
+		require.Len(t, got, 1, "%v", got)
+		assertFinding(t, got, "missing-parameter-type 6:5")
+	})
+	t.Run("inherit path", func(t *testing.T) {
+		got := lintMem(t, "#include <std.h>\ninherit STD \"base\";\ninherit NOWHERE;\n", lint.Request{}, nil)
+		assertFinding(t, got, "adjacent-strings 2:13")
+		assertFinding(t, got, "syntax-error 3:9 inherit path must be a string constant")
 	})
 	t.Run("inherit after declaration", func(t *testing.T) {
 		got := lintMem(t, "inherit \"/std/base\";\nint x;\ninherit b \"/std/base\";\n", lint.Request{}, nil)
 		assertFinding(t, got, "inherit-after-declaration 3:1")
+
+		extra := map[string]string{"obj/protos.h": "int helper(int x);\n", "obj/defs.h": "#define X 1\n"}
+		got = lintMem(t, "#include \"defs.h\"\n#include \"protos.h\"\ninherit \"/std/base\";\n", lint.Request{}, extra)
+		require.Len(t, got, 1, "%v", got)
+		assertFinding(t, got, "inherit-after-declaration 3:1 inherit must precede all declarations, but \"protos.h\"")
+		got = lintMem(t, "#include \"defs.h\"\ninherit \"/std/base\";\n#include \"protos.h\"\n", lint.Request{}, extra)
+		assert.Empty(t, got)
+
+		// A declaration the header only makes under an undecided #ifdef
+		// proves nothing; one behind an include guard is certain.
+		extra["obj/protos.h"] = "#ifdef EXEC\nint one() { return 1; }\n#endif\n"
+		got = lintMem(t, "#include \"protos.h\"\ninherit \"/std/base\";\n", lint.Request{}, extra)
+		assert.Empty(t, got)
+		extra["obj/protos.h"] = "#ifndef PROTOS_H\n#define PROTOS_H\nint helper(int x);\n#endif\n"
+		got = lintMem(t, "#include \"protos.h\"\ninherit \"/std/base\";\n", lint.Request{}, extra)
+		assert.Len(t, got, 1, "%v", got)
 	})
 	t.Run("typeless functions under typechecking", func(t *testing.T) {
 		src := "foo(a, int b) { }\nbar() { return 1; }\nbaz() { return; }\nvoid v() { return 2; }\nint i() { return; }\nstatus s() { return; }\npublic ok() { }\n"

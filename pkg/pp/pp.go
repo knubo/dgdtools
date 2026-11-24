@@ -101,6 +101,9 @@ type Table struct {
 	Path     string
 	Macros   map[string]*Macro
 	Includes []Include
+	// Undefs are the names this file #undef'd. A definition that follows
+	// an #undef deliberately replaces whatever an include defined.
+	Undefs map[string]bool
 }
 
 // Selection is the single preprocessor configuration every consumer of a
@@ -114,55 +117,122 @@ type Selection struct {
 	// Conditional reports whether the file contains any #if family
 	// directive.
 	Conditional bool
+
+	guessed [][2]int // token ranges inside branches chosen by guess
 }
 
-// Select chooses the active branch of every conditional. `#if 0` and
-// `#if 1` are decided, `#ifdef`/`#ifndef`/`#if defined(X)` of a name in
-// defined are decided, and everything else takes the first branch.
+// Guessed reports whether the token at index tok lies in a conditional
+// branch that was selected by the first-branch rule rather than decided.
+// Whether such code is compiled at all is unknown.
+func (s *Selection) Guessed(tok int) bool {
+	lo, hi := 0, len(s.guessed)
+	for lo < hi {
+		m := (lo + hi) / 2
+		switch r := s.guessed[m]; {
+		case tok < r[0]:
+			hi = m
+		case tok > r[1]:
+			lo = m + 1
+		default:
+			return true
+		}
+	}
+	return false
+}
+
+// Select chooses the active branch of every conditional.
+//
+// A condition is decided when that is certain: `#if 0`/`#if 1`, and
+// #ifdef/#ifndef/#if [!]defined(X)/#if X of a name that is predefined
+// (the defined argument) or #defined earlier in this same file. Anything
+// else takes the first branch, and the tokens of that branch are marked
+// Guessed: they are parsed, but nothing is concluded from errors in them.
 func Select(f *token.File, defined map[string]bool) *Selection {
 	sel := &Selection{}
 	type frame struct {
 		parentActive bool
 		active       bool
 		anyTaken     bool
+		guess        bool // the active branch was chosen by guess
 	}
 	var stack []frame
+	local := map[string]string{} // object-like macros defined so far
 	active := true
+	gstart := -1
+	mark := func(i int) {
+		g := false
+		if active {
+			for _, fr := range stack {
+				if fr.guess {
+					g = true
+					break
+				}
+			}
+		}
+		if g && gstart < 0 {
+			gstart = i
+		} else if !g && gstart >= 0 {
+			sel.guessed = append(sel.guessed, [2]int{gstart, i})
+			gstart = -1
+		}
+	}
+	firstDirective := true
 	for i, t := range f.Tokens {
 		if t.Kind == token.Directive {
 			name, rest := SplitDirective(f.Text(t))
+			first := firstDirective && len(sel.Sig) == 0
+			firstDirective = false
 			switch name {
 			case "if", "ifdef", "ifndef":
 				sel.Conditional = true
-				take := active && decide(name, rest, defined)
-				stack = append(stack, frame{parentActive: active, active: take, anyTaken: take})
+				take, known := decide(name, rest, defined, local)
+				if name == "ifndef" && first && !known && isGuard(f, i, firstWord(strings.TrimSpace(rest))) {
+					known = true // an include guard: true the first time through
+				}
+				take = take && active
+				stack = append(stack, frame{parentActive: active, active: take, anyTaken: take, guess: take && !known})
 				active = take
+				mark(i)
 				continue
 			case "elif":
 				if n := len(stack); n > 0 {
 					fr := &stack[n-1]
-					take := fr.parentActive && !fr.anyTaken && decide("if", rest, defined)
+					take, known := decide("if", rest, defined, local)
+					take = take && fr.parentActive && !fr.anyTaken
 					fr.active, fr.anyTaken = take, fr.anyTaken || take
+					fr.guess = take && !known
 					active = take
 				}
+				mark(i)
 				continue
 			case "else":
 				if n := len(stack); n > 0 {
 					fr := &stack[n-1]
 					take := fr.parentActive && !fr.anyTaken
-					fr.active, fr.anyTaken = take, true
+					fr.active, fr.anyTaken, fr.guess = take, true, false
 					active = take
 				}
+				mark(i)
 				continue
 			case "endif":
 				if n := len(stack); n > 0 {
 					active = stack[n-1].parentActive
 					stack = stack[:n-1]
 				}
+				mark(i)
 				continue
 			}
 			if active {
 				sel.Dirs = append(sel.Dirs, i)
+				switch name {
+				case "define":
+					r := strings.TrimLeft(rest, " \t")
+					if n := firstWord(r); n != "" {
+						local[n] = strings.TrimSpace(r[len(n):])
+					}
+				case "undef":
+					delete(local, firstWord(strings.TrimSpace(rest)))
+				}
 			}
 			continue
 		}
@@ -171,24 +241,62 @@ func Select(f *token.File, defined map[string]bool) *Selection {
 		}
 		sel.Sig = append(sel.Sig, i)
 	}
+	if gstart >= 0 {
+		sel.guessed = append(sel.guessed, [2]int{gstart, len(f.Tokens)})
+	}
 	return sel
 }
 
-// decide evaluates a conditional when that is certain; otherwise true
-// (first branch).
-func decide(name, rest string, defined map[string]bool) bool {
+// Predefined are the macros the DGD preprocessor defines itself.
+var Predefined = []string{"__DGD__"}
+
+// isGuard reports whether the directive after token i is `#define name`:
+// with `#ifndef name` as the first thing in the file, an include guard.
+func isGuard(f *token.File, i int, name string) bool {
+	for j := i + 1; j < len(f.Tokens); j++ {
+		t := f.Tokens[j]
+		if t.Kind.IsTrivia() {
+			continue
+		}
+		if t.Kind != token.Directive {
+			return false
+		}
+		n, rest := SplitDirective(f.Text(t))
+		return n == "define" && name != "" && firstWord(strings.TrimLeft(rest, " \t")) == name
+	}
+	return false
+}
+
+// decide evaluates a conditional. known is false when the answer is the
+// first-branch guess rather than a certainty.
+func decide(name, rest string, defined map[string]bool, local map[string]string) (take, known bool) {
 	rest = strings.TrimSpace(rest)
+	isDef := func(n string) bool {
+		if defined[n] {
+			return true
+		}
+		_, ok := local[n]
+		return ok
+	}
 	switch name {
 	case "ifdef":
-		return true
+		return true, isDef(firstWord(rest))
 	case "ifndef":
-		return !defined[firstWord(rest)]
+		if isDef(firstWord(rest)) {
+			return false, true
+		}
+		return true, false
 	}
-	switch rest {
-	case "0":
-		return false
-	case "1":
-		return true
+	if v, ok := intLit(rest); ok {
+		return v != 0, true
+	}
+	if isIdent(rest) {
+		if body, ok := local[rest]; ok {
+			if v, ok := intLit(strings.Trim(body, "() \t")); ok {
+				return v != 0, true
+			}
+		}
+		return true, false
 	}
 	neg := false
 	r := rest
@@ -198,13 +306,26 @@ func decide(name, rest string, defined map[string]bool) bool {
 	}
 	if strings.HasPrefix(r, "defined") {
 		r = strings.TrimSpace(strings.TrimPrefix(r, "defined"))
-		r = strings.TrimSuffix(strings.TrimPrefix(r, "("), ")")
-		r = strings.TrimSpace(r)
-		if isIdent(r) && neg {
-			return !defined[r]
+		r = strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(r, "("), ")"))
+		if isIdent(r) && isDef(r) {
+			return !neg, true
 		}
 	}
-	return true
+	return true, false
+}
+
+func intLit(s string) (int, bool) {
+	if s == "" || len(s) > 9 {
+		return 0, false
+	}
+	n := 0
+	for i := 0; i < len(s); i++ {
+		if s[i] < '0' || s[i] > '9' {
+			return 0, false
+		}
+		n = n*10 + int(s[i]-'0')
+	}
+	return n, true
 }
 
 func firstWord(s string) string {
@@ -302,7 +423,8 @@ func needsCleaning(text []byte) bool {
 
 // Scan extracts the active #define and #include directives of f.
 func Scan(f *token.File, sel *Selection) *Table {
-	t := &Table{Path: f.Path, Macros: map[string]*Macro{}}
+	t := &Table{Path: f.Path, Macros: map[string]*Macro{}, Undefs: map[string]bool{}}
+	undefd := map[string]bool{}
 	for _, i := range sel.Dirs {
 		tok := f.Tokens[i]
 		name, rest := SplitDirective(f.Text(tok))
@@ -313,17 +435,25 @@ func Scan(f *token.File, sel *Selection) *Table {
 				continue
 			}
 			m.Path, m.Off = f.Path, tok.Off
-			if old, ok := t.Macros[m.Name]; ok && (old.Class != m.Class || old.FuncLike != m.FuncLike) {
+			if old, ok := t.Macros[m.Name]; ok && !undefd[m.Name] &&
+				(old.Class != m.Class || old.FuncLike != m.FuncLike) {
 				m.Class = ClassFragment // conflicting definitions: trust neither
 			}
+			delete(undefd, m.Name)
 			t.Macros[m.Name] = m
 		case "undef":
+			// `#undef X` then `#define X` is the ordinary way to
+			// redefine; an #undef that is never followed by a new
+			// definition leaves X a macro for only part of the file.
 			n := firstWord(strings.TrimSpace(rest))
-			if old, ok := t.Macros[n]; ok {
-				old.Class = ClassFragment // defined for part of the file only
-			} else if n != "" {
-				t.Macros[n] = &Macro{Name: n, Class: ClassFragment, Path: f.Path, Off: tok.Off}
+			if n == "" {
+				continue
 			}
+			if old, ok := t.Macros[n]; ok {
+				old.Class = ClassFragment
+			}
+			undefd[n] = true
+			t.Undefs[n] = true
 		case "include":
 			rest = strings.TrimSpace(rest)
 			if len(rest) < 2 {
@@ -571,6 +701,9 @@ func (v *View) Lookup(name string) *Macro {
 			}
 			if found == nil {
 				found = m
+				if t.Undefs[name] {
+					break // this file #undef'd and redefined it on purpose
+				}
 				continue
 			}
 			if m.Class != found.Class || m.FuncLike != found.FuncLike {

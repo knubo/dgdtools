@@ -49,6 +49,10 @@ type Rule struct {
 	// CrossFile rules need the lib index and do not run in file-local
 	// mode.
 	CrossFile bool
+	// AnyBranch rules also report inside conditional branches whose
+	// selection was a guess (the default for syntax and runtime rules is
+	// to stay silent there).
+	AnyBranch bool
 	Run       func(*Pass)
 }
 
@@ -83,6 +87,12 @@ func (p *Pass) Report(start, end uint32, format string, args ...any) *diag.Diagn
 	if end < start {
 		end = start
 	}
+	if !p.rule.AnyBranch && (p.rule.Group == GroupSyntax || p.rule.Group == GroupRuntime) && p.guessed(start) {
+		// Code in a conditional branch we could not decide: whether it
+		// is compiled at all is unknown, so nothing is claimed about it.
+		p.shared.stats.guessed.Add(1)
+		return &diag.Diagnostic{}
+	}
 	a, b := p.File.Pos(start), p.File.Pos(end)
 	d := &diag.Diagnostic{
 		Path: p.File.Path, Line: a.Line, Col: a.Col, EndLine: b.Line, EndCol: b.Col,
@@ -92,6 +102,14 @@ func (p *Pass) Report(start, end uint32, format string, args ...any) *diag.Diagn
 	}
 	*p.out = append(*p.out, d)
 	return d
+}
+
+// guessed reports whether byte offset off lies in a conditional branch
+// chosen by the first-branch rule.
+func (p *Pass) guessed(off uint32) bool {
+	toks := p.File.Tokens
+	i := sort.Search(len(toks), func(i int) bool { return toks[i].End > off })
+	return i < len(toks) && p.Tree.Sel.Guessed(i)
 }
 
 // ReportNode records a finding covering a syntax node.
@@ -137,10 +155,12 @@ type Stats struct {
 	CallSites          int `json:"call_sites"`
 	UnknownReceivers   int `json:"unknown_receivers"`
 	TaintedSyntax      int `json:"tainted_syntax_errors"` // possibly macro artifacts; not reported
+	GuessedBranch      int `json:"guessed_branch_findings"` // in #if branches that could not be decided; not reported
 }
 
 type runStats struct {
 	suppressed, callSites, unknownReceivers, tainted atomic.Int64
+	guessed                                          atomic.Int64
 	unresolvedInherits, unknownIncludes, partial     atomic.Int64
 }
 
@@ -475,6 +495,7 @@ func (l *Linter) Run(ctx context.Context, req Request) (*Result, error) {
 		CallSites:          int(rs.callSites.Load()),
 		UnknownReceivers:   int(rs.unknownReceivers.Load()),
 		TaintedSyntax:      int(rs.tainted.Load()),
+		GuessedBranch:      int(rs.guessed.Load()),
 		UnresolvedInherits: int(rs.unresolvedInherits.Load()),
 		UnknownIncludes:    int(rs.unknownIncludes.Load()),
 		PartialFiles:       int(rs.partial.Load()),
@@ -554,7 +575,11 @@ func (l *Linter) lintFile(ctx context.Context, fsPath string, req *Request, loca
 		if limit > 0 && len(out) > limit {
 			out = out[:limit]
 		}
-		found = append(found, out...)
+		for _, d := range out {
+			if d.Rule != "" { // dropped findings are zero values
+				found = append(found, d)
+			}
+		}
 	}
 
 	ds := make([]diag.Diagnostic, 0, len(found))

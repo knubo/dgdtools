@@ -26,6 +26,7 @@ package index
 
 import (
 	"context"
+	"fmt"
 	"io/fs"
 	"path"
 	"path/filepath"
@@ -93,7 +94,10 @@ type Unit struct {
 	Partial bool
 	// MacrosComplete is true when every reachable #include resolved.
 	MacrosComplete bool
-	BadIncludes    []BadInclude
+	// Declares is true when the file certainly declares a function or
+	// variable (outside any conditional branch chosen by guess).
+	Declares    bool
+	BadIncludes []BadInclude
 	// UnknownIncludes counts includes that could not be resolved but are
 	// not provably missing (the lib is incomplete).
 	UnknownIncludes int
@@ -183,6 +187,9 @@ func New(cfg *config.Config, root string, fsys vfs.FS) *Index {
 		defined:  map[string]bool{},
 		override: map[string]pp.Class{},
 		markers:  map[string]bool{},
+	}
+	for _, d := range pp.Predefined {
+		ix.defined[d] = true
 	}
 	for _, d := range cfg.Lint.Defines {
 		ix.defined[d] = true
@@ -583,11 +590,21 @@ func (ix *Index) Parse(fsPath string) *Parsed {
 	return nil
 }
 
-func (ix *Index) build(fsPath string) *Parsed {
+func (ix *Index) build(fsPath string) (parsed *Parsed) {
 	src, err := ix.FS.ReadFile(fsPath)
 	if err != nil {
 		return nil
 	}
+	// A bug in the analysis of one file must not take down a run over a
+	// hundred thousand: the file is reported as unreadable instead.
+	defer func() {
+		if r := recover(); r != nil {
+			ix.mu.Lock()
+			ix.Notes = append(ix.Notes, fmt.Sprintf("internal error analyzing %s (please report): %v", fsPath, r))
+			ix.mu.Unlock()
+			parsed = nil
+		}
+	}()
 	f := lexer.Lex(fsPath, src, ix.dialect)
 	sel := pp.Select(f, ix.defined)
 	own := pp.Scan(f, sel)
@@ -737,6 +754,28 @@ func ParamRange(fn *syntax.FuncDecl) (minArgs, maxArgs int) {
 	return minArgs, maxArgs
 }
 
+// IncludeDeclares reports whether the file an #include resolves to, or
+// anything it includes in turn, declares a function or a variable. It
+// returns the fs path of the first such file.
+func (ix *Index) IncludeDeclares(fromFS string, inc pp.Include) (string, bool) {
+	p, ok := ix.ResolveInclude(fromFS, inc)
+	if !ok {
+		return "", false
+	}
+	t, ok := ix.table(p)
+	if !ok {
+		return "", false
+	}
+	c := &closure{complete: true, seen: map[string]bool{p: true}, deps: []string{p}}
+	ix.walkIncludes(c, p, t, 0)
+	for _, dep := range c.deps {
+		if u := ix.includedCode(dep); u != nil && u.Declares {
+			return dep, true
+		}
+	}
+	return "", false
+}
+
 // includedCode returns the declarations a #included file contributes, or
 // nil when it is a pure header.
 func (ix *Index) includedCode(fsPath string) *Unit {
@@ -771,6 +810,14 @@ func (ix *Index) includedCode(fsPath string) *Unit {
 			Partial: tree.Partial, Deps: []string{fsPath},
 		}
 		collectDecls(u, tree, fsPath)
+		for _, d := range tree.Decls {
+			switch d.(type) {
+			case *syntax.FuncDecl, *syntax.VarDecl:
+				if first, _ := d.Span(); !sel.Guessed(first) {
+					u.Declares = true
+				}
+			}
+		}
 		e.unit = u
 	})
 	return e.unit

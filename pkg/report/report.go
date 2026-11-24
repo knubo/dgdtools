@@ -108,6 +108,7 @@ func Summary(w io.Writer, res *lint.Result, verbose bool) {
 	fmt.Fprintf(w, "  %6d  file(s) with an incomplete symbol table\n", st.PartialFiles)
 	fmt.Fprintf(w, "  %6d  of %d late-bound call sites with an unknown receiver\n", st.UnknownReceivers, st.CallSites)
 	fmt.Fprintf(w, "  %6d  syntax error(s) withheld as possible macro artifacts\n", st.TaintedSyntax)
+	fmt.Fprintf(w, "  %6d  finding(s) withheld inside #if branches that could not be decided\n", st.GuessedBranch)
 }
 
 // ------------------------------------------------------------------ JSON

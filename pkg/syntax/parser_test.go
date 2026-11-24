@@ -16,7 +16,7 @@ import (
 // parse parses src with a macro view made of the file's own #defines.
 func parse(src string, complete bool) *File {
 	f := lexer.Lex("test.c", []byte(src), lexer.Default)
-	sel := pp.Select(f, nil)
+	sel := pp.Select(f, map[string]bool{"__DGD__": true})
 	view := &pp.View{
 		Layers:   []*pp.Table{pp.Scan(f, sel)},
 		Complete: complete,
@@ -48,6 +48,7 @@ func body(stmts string) string { return "void f() {\n" + stmts + "\n}\n" }
 func TestValidPrograms(t *testing.T) {
 	srcs := map[string]string{
 		"decls": `
+#define PREFIX "/std/"
 inherit "/std/room";
 private inherit base "/std/base";
 inherit OBJ (PREFIX + "thing");
@@ -200,11 +201,15 @@ func TestErrors(t *testing.T) {
 		{"stray top-level statement", "int x;\nx = 5;\nvoid f() { }\n", []string{"2:1 unexpected 'x' at top level"}},
 		{"case before brace", body("switch (x) { case 1: x = 2; default: }"), []string{"label must be followed by a statement"}},
 		{"function pointer without closures", body("x = &g(1);"), []string{"unexpected '&'"}},
+		{"inherit of undefined macro", "inherit NOT_DEFINED;\nvoid f() { }\n", []string{"1:9 inherit path must be a string constant, but 'NOT_DEFINED' is not a defined macro"}},
 		{"unnamed parameter", "int f(int);\n", []string{"expected parameter name"}},
 		{"typeless prototype", "f();\n", []string{"has no body"}},
 		{"unterminated string", "void f() {\n write(\"abc);\n x = 1;\n}\n", []string{"unterminated string literal"}},
 		{"illegal char", "void f() {\n x = 1 @ 2;\n}\n", []string{"illegal character"}},
 		{"unknown type complete view", "status f() { return 1; }\n", []string{"1:1 unknown type 'status'"}},
+		{"decided branches", "#define ON 1\n#define FLAG\nvoid f() {\n#if ON\n a = 1\n#endif\n#ifdef FLAG\n b = 2\n#endif\n#ifndef __DGD__\n garbage here (\n#else\n c = 3\n#endif\n}\n",
+			[]string{"5:7 missing ';'", "8:7 missing ';'", "13:7 missing ';'"}},
+		{"cascade after a skip is dropped", body("x = foo(1, 2;\nelse y();\nelse z();\nok();\nq = 1\nr = 2;"), []string{"expected ')'", "6:6 missing ';'"}},
 		{"expr macro without semi", "#define MAX(a,b) ((a)>(b)?(a):(b))\nvoid f() {\n MAX(1,2)\n g();\n}\n", []string{"3:10 missing ';'"}},
 	}
 	for _, tt := range tests {
@@ -234,6 +239,18 @@ func TestMacroTolerance(t *testing.T) {
 		{"dead branch garbage", "#if 0\n)))) 'unterminated\n#else\nvoid f() { }\n#endif\n", true},
 		{"macro call with type arg", "void f() {\n x = NEW(int, 3);\n}\n", false},
 		{"top-level macro", "#define DEFUN(n) int n() { return 1; }\nDEFUN(a)\nDEFUN(b);\nvoid f() { }\n", true},
+		{"undef then define", "#undef DIR\n#define DIR \"/x/\"\nvoid f(string s) {\n switch (s) {\n case DIR+\"a\":\n  if (s) g(); else h();\n  break;\n }\n}\n", true},
+		{"error after opaque skip", "#define FRAG foo(\nvoid f() {\n switch (s) {\n case FRAG 1):\n  if (s) g();\n  else h();\n }\n}\n", true},
+		{"arrow macro", "#define QN query_name()\nvoid f(object o) { write(o->QN + \"x\"); }\n", true},
+		{"typed object macro", "#define I_P \"/std/player\"\nobject I_P who;\nvoid f(object I_P a, object I_P *b) {\n object I_P ply;\n ply = (object I_P) a;\n}\n", true},
+		{"ifndef __DGD__", "void f() {\n#ifndef __DGD__\n x = (*fp)();\n#endif\n}\n", true},
+		{"error in undecided branch", "void f() {\n#ifdef KILL\n x = store(a});\n#endif\n#if OPEN\n if (a && b(c) {\n#endif\n y = 1;\n#ifndef CLOSED\n write(\"x);\n#endif\n}\n", true},
+		{"skip keeps bracket depth", "#define E\nvoid f() {\n c['C'] = m + ({ s[1..E] });\n x = 1;\n}\nvoid g() { }\n", true},
+		{"redefined after undef across layers", "#ifdef NAME\n#undef NAME\n#endif\n#define NAME \"x\"\nvoid f() { g(\"A \" + NAME + \"\"); }\n", true},
+		{"stringized macro argument", "#define TR(x) write(#x)\nvoid f() {\n TR(You can't \\n);\n}\n", true},
+		{"keyword as macro", "#define catch \"x\"\nvoid f() { g(({ \"a\" + catch, 1 })); }\n", true},
+		{"inherit of unseen macro", "inherit SOME_ROOM;\ninherit lab OTHER;\n", false},
+		{"line splice", "void f() {\n g(\"a\" + \\\n  \"b\");\n}\n", true},
 		{"ifdef inside failed statement", "void f() {\n foo(a\n#ifdef X\n , b);\n#else\n );\n#endif\n}\n", true},
 	}
 	for _, tt := range clean {
@@ -301,7 +318,9 @@ func TestNeverPanics(t *testing.T) {
 		"void f() { a ? b", "void f() { catch", "void f() { new", "void f() { x->", "operator",
 		"int operator", "#define X\nX", "#if 1\n", "void f() { for (;;", "void f() { do x(); while",
 		"void f() { switch (x) { case 1: } }", "void f() { x = &g(1); y = (*x)(2); }", "private", "x(", "f() {}}}}", "'", "\"", "/*",
-		"void f() { goto ; }", "void f() { rlimits (1; 2) x; }", "void f() { try { } catch (...) { } }",
+		"void f() { goto ; }", "void f() { if (x)", "void f() { if (x) y(); else", "void f() { while (1)",
+		"void f() { do", "void f() { for (;;)", "void f() { case 1:", "void f() { lab:", "int x,", "int f(int a,",
+		"inherit \"/x\"", "void f() { return", "void f() { x = a ? b :", "void f() { ({", "void f() { ([ a :", "void f() { rlimits (1; 2) x; }", "void f() { try { } catch (...) { } }",
 		strings.Repeat("(", 2000), strings.Repeat("{", 500), "void f() {" + strings.Repeat("if (x) ", 300) + ";}",
 	}
 	for _, s := range seeds {

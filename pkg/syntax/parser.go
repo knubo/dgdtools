@@ -52,6 +52,8 @@ type parser struct {
 	abort  bool
 	resume int
 
+	resumes map[int]bool // tokens where parsing resumed after a skip
+
 	fnName  string // enclosing function, for messages
 	fnBrace int    // its opening brace token
 }
@@ -78,6 +80,101 @@ func (p *parser) idx() int { return p.idxAt(0) }
 func (p *parser) idxAt(d int) int {
 	if j := p.i + d; j >= 0 && j < len(p.sig) {
 		return p.sig[j]
+	}
+	return len(p.toks) - 1
+}
+
+// markResume records where parsing resumed after skipping a construct
+// that failed or was opaque. The resynchronization point is a guess, so an
+// error in the very next construct is not trusted: it is either a
+// consequence of the first, or of a macro.
+func (p *parser) markResume() {
+	if p.resumes == nil {
+		p.resumes = map[int]bool{}
+	}
+	p.resumes[p.idx()] = true
+}
+
+// sync skips to the end of the construct that began at cursor position
+// start and failed at the current position. It accounts for the brackets
+// the construct had open when it failed, then stops after the ';' that
+// ends it, after a block that ends it, or before the '}' that closes the
+// enclosing block (at top level a stray '}' is consumed).
+func (p *parser) sync(start int, top bool) (eof bool) {
+	// One entry per unclosed bracket: true = a block '{'. braces
+	// parallels it: true = any '{' (block or "({" array literal).
+	var open, braces []bool
+	push := func(j int) {
+		k := p.toks[p.sig[j]].Kind
+		block := k == token.LBrace && !(j > 0 && p.toks[p.sig[j-1]].Kind == token.LParen)
+		open = append(open, block)
+		braces = append(braces, k == token.LBrace)
+	}
+	pop := func(n int) {
+		open, braces = open[:n], braces[:n]
+	}
+	for j := start; j < p.i && j < len(p.sig); j++ {
+		switch p.toks[p.sig[j]].Kind {
+		case token.LParen, token.LBracket, token.LBrace:
+			push(j)
+		case token.RParen, token.RBracket, token.RBrace:
+			if len(open) > 0 {
+				pop(len(open) - 1)
+			}
+		}
+	}
+	for {
+		switch p.kind() {
+		case token.EOF:
+			return true
+		case token.LParen, token.LBracket, token.LBrace:
+			push(p.i)
+		case token.RParen, token.RBracket:
+			if n := len(open); n > 0 && !braces[n-1] {
+				pop(n - 1)
+			}
+		case token.RBrace:
+			// Find the brace this closes, discarding parens left open
+			// above it.
+			j := len(open) - 1
+			for j >= 0 && !braces[j] {
+				j--
+			}
+			if j < 0 {
+				if top {
+					p.next()
+				}
+				return false // closes the enclosing block
+			}
+			block := open[j]
+			pop(j)
+			if block && !anyBlock(open) {
+				p.next()
+				return false // the construct's own block just closed
+			}
+		case token.Semicolon:
+			if !anyBlock(open) {
+				p.next()
+				return false
+			}
+		}
+		p.next()
+	}
+}
+
+func anyBlock(open []bool) bool {
+	for _, b := range open {
+		if b {
+			return true
+		}
+	}
+	return false
+}
+
+// tokAt maps a cursor position to a token index, clamping at EOF.
+func (p *parser) tokAt(i int) int {
+	if i >= 0 && i < len(p.sig) {
+		return p.sig[i]
 	}
 	return len(p.toks) - 1
 }
@@ -273,58 +370,28 @@ func (p *parser) parseDeclRecover() (d Decl) {
 		if _, ok := r.(stmtBail); !ok {
 			panic(r)
 		}
-		opaque := p.opaque
+		opaque := p.opaque && len(p.errs) == nerr
 		p.opaque = false
-		eof := p.syncTop()
+		eof := p.sync(start, true)
 		last := p.prevIdx()
 		if p.i <= start {
 			p.i = start + 1
-			last = p.sig[start]
+			last = p.tokAt(start)
 		}
+		p.markResume()
 		if !p.abort {
 			for _, e := range p.errs[nerr:] {
-				e.RegionFirst, e.RegionLast = p.sig[start], maxInt(last, e.Tok)
+				// The region is what was read before the failure, not
+				// what was skipped after it.
+				e.RegionFirst, e.RegionLast = p.tokAt(start), e.Tok
 				e.Severe = true
 			}
 		}
 		_ = eof
 		p.file.Partial = true
-		d = &BadDecl{span: span{p.sig[start], last}, Opaque: opaque}
+		d = &BadDecl{span: span{p.tokAt(start), last}, Opaque: opaque}
 	}()
 	return p.parseDecl()
-}
-
-// syncTop skips to the end of a broken top-level construct: past the next
-// ';' or balanced '{...}' at depth 0.
-func (p *parser) syncTop() (eof bool) {
-	depth := 0
-	for {
-		switch p.kind() {
-		case token.EOF:
-			return true
-		case token.LParen, token.LBracket:
-			depth++
-		case token.RParen, token.RBracket:
-			if depth > 0 {
-				depth--
-			}
-		case token.Semicolon:
-			if depth == 0 {
-				p.next()
-				return false
-			}
-		case token.LBrace:
-			p.skipBalanced()
-			if p.kind() == token.RParen { // "({ ... })": keep going
-				continue
-			}
-			return false
-		case token.RBrace:
-			p.next()
-			return false
-		}
-		p.next()
-	}
 }
 
 // skipBalanced skips a bracketed group starting at the cursor. It stops at
@@ -398,9 +465,17 @@ func (p *parser) parseType() *TypeSpec {
 	t := &TypeSpec{Kind: p.kind()}
 	t.First = p.next()
 	t.Last = t.First
-	if t.Kind == token.KwObject && p.kind() == token.StringLit {
-		t.Path = p.parsePrimary()
-		_, t.Last = t.Path.Span()
+	if t.Kind == token.KwObject {
+		switch {
+		case p.kind() == token.StringLit:
+			t.Path = p.parsePrimary()
+			_, t.Last = t.Path.Span()
+		case p.kind() == token.Ident && (p.kindAt(1) == token.Ident ||
+			(p.kindAt(1) == token.Star && (p.kindAt(2) == token.Ident || p.kindAt(2) == token.Star))):
+			// object PATH_MACRO name: a typed object whose path is a macro.
+			t.Path = p.ident()
+			_, t.Last = t.Path.Span()
+		}
 	}
 	return t
 }
@@ -522,13 +597,16 @@ func (p *parser) opaqueDecl(start int) Decl {
 		p.next()
 	}
 	p.file.Partial = true
+	p.markResume()
 	return &BadDecl{span: span{start, p.prevIdx()}, Opaque: true}
 }
 
 func (p *parser) parseInherit(si, start int, specs []Spec) Decl {
 	d := &InheritDecl{span: span{start, start}, Private: hasSpec(specs, token.KwPrivate)}
 	p.next() // inherit
-	if p.kind() == token.Ident {
+	// A label is a plain identifier; a macro name expands and cannot be
+	// one.
+	if p.kind() == token.Ident && p.macroAt(0) == nil {
 		switch p.kindAt(1) {
 		case token.StringLit, token.KwObject, token.Ident, token.LParen:
 			d.Label = p.ident()
@@ -537,7 +615,23 @@ func (p *parser) parseInherit(si, start int, specs []Spec) Decl {
 	if p.kind() == token.KwObject {
 		p.next()
 	}
+	pathStart := p.idx()
 	d.Path = p.parseBinary(9) // string concatenation: '+' level and tighter
+	// The path must be a string constant after preprocessing. With every
+	// include resolved, an identifier that is not a macro cannot be one.
+	// (Recorded without abandoning the declaration: the inherit is real,
+	// only unresolvable.)
+	if !p.partial && p.spec == 0 {
+		for t := pathStart; t <= p.prevIdx(); t++ {
+			if p.toks[t].Kind == token.Ident && p.view.Lookup(p.text(t)) == nil {
+				p.errs = append(p.errs, &Error{
+					Msg: fmt.Sprintf("inherit path must be a string constant, but '%s' is not a defined macro (missing #include?)", p.text(t)),
+					Tok: t, Related: -1, RegionFirst: start, RegionLast: p.prevIdx(),
+				})
+				break
+			}
+		}
+	}
 	d.Last = p.endDecl(si)
 	return d
 }
@@ -722,54 +816,23 @@ func (p *parser) parseStmt() (s Stmt) {
 		}
 		opaque := p.opaque && len(p.errs) == nerr
 		p.opaque = false
-		eof := p.syncStmt()
+		eof := p.sync(start, false)
 		if p.i <= start {
 			p.i = start + 1
 		}
+		p.markResume()
 		last := p.prevIdx()
 		if !p.abort {
 			for _, e := range p.errs[nerr:] {
-				e.RegionFirst, e.RegionLast = p.sig[start], maxInt(last, e.Tok)
+				e.RegionFirst, e.RegionLast = p.tokAt(start), e.Tok
 				if eof {
 					e.Severe = true
 				}
 			}
 		}
-		s = &BadStmt{span: span{p.sig[start], last}, Opaque: opaque}
+		s = &BadStmt{span: span{p.tokAt(start), last}, Opaque: opaque}
 	}()
 	return p.stmt()
-}
-
-// syncStmt skips to the end of a broken statement: past the next ';' at
-// the statement's own depth, or up to the '}' closing the enclosing block.
-func (p *parser) syncStmt() (eof bool) {
-	depth := 0
-	for {
-		switch p.kind() {
-		case token.EOF:
-			return true
-		case token.LParen, token.LBracket:
-			depth++
-		case token.RParen, token.RBracket:
-			if depth > 0 {
-				depth--
-			}
-		case token.LBrace:
-			p.skipBalanced()
-			if depth == 0 && p.kind() != token.RParen {
-				return false
-			}
-			continue
-		case token.RBrace:
-			return false
-		case token.Semicolon:
-			if depth == 0 {
-				p.next()
-				return false
-			}
-		}
-		p.next()
-	}
 }
 
 func canStartStmt(k token.Kind) bool {
@@ -800,7 +863,7 @@ func (p *parser) missingSemi(start int) {
 		(canStartStmt(p.kind()) && p.newlineBetween(prev, cur)) {
 		p.errs = append(p.errs, &Error{
 			Msg: "missing ';' before " + p.describe(cur), Tok: prev, AtPrevEnd: true,
-			Related: -1, RegionFirst: p.sig[start], RegionLast: cur,
+			Related: -1, RegionFirst: p.tokAt(start), RegionLast: prev,
 		})
 		return
 	}
@@ -1234,6 +1297,9 @@ func (p *parser) parseUnary() Expr {
 			(p.kindAt(2) == token.RParen || p.kindAt(2) == token.Star)) {
 			lp := p.next()
 			t := p.parseType()
+			if t.Kind == token.KwObject && t.Path == nil && p.kind() == token.Ident && p.kindAt(1) == token.RParen {
+				t.Path = p.ident() // (object PATH_MACRO) x
+			}
 			t.Stars = p.parseStars()
 			p.expectClose(token.RParen, lp)
 			x := p.parseUnary()
@@ -1277,6 +1343,9 @@ func (p *parser) parsePostfixOps() Expr {
 			a := &ArrowExpr{X: x}
 			if p.kind() != token.Ident {
 				p.unexpected("function name after '->'")
+			}
+			if p.kindAt(1) != token.LParen && p.macroAt(0) != nil {
+				p.bailOpaque() // ob->QN with #define QN query_name()
 			}
 			a.Name = p.ident()
 			if p.kind() != token.LParen {

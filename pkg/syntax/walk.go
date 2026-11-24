@@ -193,6 +193,7 @@ func (p *parser) finish() {
 			errs = append(errs, &Error{
 				Kind: ErrLex, Msg: d.Message, Tok: i, Related: -1,
 				RegionFirst: i, RegionLast: i,
+				Tainted: p.file.Sel.Guessed(i) || p.inMacroArgs(i) || p.lineSplice(i),
 			})
 		}
 	}
@@ -254,6 +255,18 @@ func (p *parser) tainted(e *Error, declared map[string]bool) bool {
 	if hi >= len(p.toks) {
 		hi = len(p.toks) - 1
 	}
+	if p.resumes[e.RegionFirst] {
+		return true // first construct after a skip: consequence or macro
+	}
+	if p.file.Sel.Guessed(e.Tok) {
+		return true // in a conditional branch we could not decide
+	}
+	for _, t := range []int{e.Tok, p.prevSig(e.Tok)} {
+		// A keyword that is also a macro name: the preprocessor wins.
+		if t >= 0 && p.toks[t].Kind.IsKeyword() && p.view.Lookup(p.text(t)) != nil {
+			return true
+		}
+	}
 	var prev, cur int
 	if e.AtPrevEnd {
 		prev, cur = e.Tok, p.nextSig(e.Tok)
@@ -301,6 +314,50 @@ func (p *parser) tainted(e *Error, declared map[string]bool) bool {
 	}
 	k := p.toks[cur].Kind
 	return k == token.Ident || isSpecKw(k) || pp.IsTypeKeyword(k)
+}
+
+// lineSplice reports whether the illegal token is a backslash at the end
+// of a line: a line continuation, which the preprocessor removes.
+func (p *parser) lineSplice(tok int) bool {
+	if p.text(tok) != "\\" || tok+1 >= len(p.toks) {
+		return false
+	}
+	return p.toks[tok+1].Kind == token.Newline
+}
+
+// inMacroArgs reports whether tok lies inside the argument list of a
+// function-like macro (or, in a partial view, of an unseen ALL_CAPS
+// name). Macro arguments are raw text to the preprocessor: `TR(don't)`
+// is fine if TR stringizes its argument.
+func (p *parser) inMacroArgs(tok int) bool {
+	j := sort.SearchInts(p.sig, tok) - 1
+	depth := 0
+	for ; j > 0; j-- {
+		switch p.toks[p.sig[j]].Kind {
+		case token.RParen:
+			depth++
+		case token.LParen:
+			if depth > 0 {
+				depth--
+				continue
+			}
+			callee := p.sig[j-1]
+			if p.toks[callee].Kind != token.Ident {
+				continue
+			}
+			name := p.text(callee)
+			if m := p.view.Lookup(name); m != nil {
+				if m.FuncLike {
+					return true
+				}
+			} else if p.partial && isAllCaps(name) {
+				return true
+			}
+		case token.Semicolon, token.LBrace, token.RBrace:
+			return false
+		}
+	}
+	return false
 }
 
 // calleeOf returns the identifier naming the call whose ')' is tok, or -1.
