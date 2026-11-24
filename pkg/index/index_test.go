@@ -390,9 +390,11 @@ func TestLookupCallable(t *testing.T) {
 	assert.Equal(t, LookupFoundInUser, state("/std/mod", "deep_cb", true), "an indirect inheritor")
 	lk = s.LookupCallable(bg, "/std/mod", "nowhere", true)
 	assert.Equal(t, LookupMissing, lk.State)
-	assert.Contains(t, lk.Note, "2 inheritors")
-	assert.Equal(t, LookupMissing, state("/obj/alone", "nowhere", true))
-	assert.Empty(t, s.LookupCallable(bg, "/obj/alone", "nowhere", true).Note)
+	assert.Equal(t, SearchedUsers, lk.Searched)
+	assert.Equal(t, 2, lk.Users)
+	lk = s.LookupCallable(bg, "/obj/alone", "nowhere", true)
+	assert.Equal(t, Lookup{State: LookupMissing, Searched: SearchedUsers}, lk, "nobody inherits it")
+	assert.Equal(t, SearchedChain, s.LookupCallable(bg, "/obj/alone", "nowhere", false).Searched)
 
 	// Code in the auto object's chain runs as every object.
 	assert.Equal(t, LookupUnknown, state("/sys/auto", "nowhere", true))
@@ -833,7 +835,7 @@ func TestStubsAndCheckout(t *testing.T) {
 
 	lk := s.LookupCallable(bg, "/std/room", "hidden", false)
 	assert.Equal(t, LookupMissing, lk.State)
-	assert.Contains(t, lk.Note, "public functions only")
+	assert.Equal(t, SearchedStub, lk.Searched)
 
 	// The scan covers the checkout only.
 	users, ok := s.UsersOf(bg, "/players/ann/hall")
@@ -841,7 +843,7 @@ func TestStubsAndCheckout(t *testing.T) {
 	assert.Equal(t, []string{"/players/ann/sub/closet"}, users)
 	lk = s.LookupCallable(bg, "/players/ann/sub/closet", "nowhere", true)
 	assert.Equal(t, LookupMissing, lk.State)
-	assert.Contains(t, lk.Note, "inheritors elsewhere in the lib cannot be seen")
+	assert.Equal(t, SearchedCheckout, lk.Searched)
 }
 
 func TestRealFileWinsOverStub(t *testing.T) {

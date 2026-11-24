@@ -2,7 +2,6 @@ package index
 
 import (
 	"context"
-	"fmt"
 	"slices"
 )
 
@@ -198,8 +197,30 @@ const (
 type Lookup struct {
 	State LookupState
 	Fn    ChainFunc // valid when State == LookupFound
-	Note  string    // extra context for LookupMissing
+	// Searched says how far a LookupMissing answer reaches, and Users
+	// how many inheritors were searched (SearchedUsers).
+	Searched Searched
+	Users    int
 }
+
+// Searched says where a function that is LookupMissing was looked for.
+type Searched uint8
+
+const (
+	// SearchedChain: the object's own inherit chain, which is all there
+	// is to it.
+	SearchedChain Searched = iota
+	// SearchedStub: the object is known from a profile's stub, which
+	// lists public functions only: the function may be private there.
+	SearchedStub
+	// SearchedUsers: the chain and every object that inherits or
+	// includes the file.
+	SearchedUsers
+	// SearchedCheckout: the chain and the checkout, which has no
+	// inheritors of the file; inheritors elsewhere in the lib cannot be
+	// seen.
+	SearchedCheckout
+)
 
 // maxUserChains bounds the fallback search through inheritors' chains.
 const maxUserChains = 20
@@ -237,7 +258,7 @@ func (s *Snapshot) lookupCallable(ctx context.Context, target, fn string, self b
 	if !self {
 		// A profile stub lists an object's public interface only.
 		if u := s.Unit(target); u != nil && u.Stub {
-			return Lookup{State: LookupMissing, Note: " or is private there (a profile lists public functions only)"}
+			return Lookup{State: LookupMissing, Searched: SearchedStub}
 		}
 		return Lookup{State: LookupMissing}
 	}
@@ -253,9 +274,9 @@ func (s *Snapshot) lookupCallable(ctx context.Context, target, fn string, self b
 	if len(users) == 0 {
 		if s.partial {
 			// Only the checkout could be searched for inheritors.
-			return Lookup{State: LookupMissing, Note: " (nor in this checkout; inheritors elsewhere in the lib cannot be seen)"}
+			return Lookup{State: LookupMissing, Searched: SearchedCheckout}
 		}
-		return Lookup{State: LookupMissing}
+		return Lookup{State: LookupMissing, Searched: SearchedUsers}
 	}
 	for _, u := range users {
 		if unit := s.Unit(u); unit != nil {
@@ -278,8 +299,7 @@ func (s *Snapshot) lookupCallable(ctx context.Context, target, fn string, self b
 			return Lookup{State: LookupFoundInUser}
 		}
 	}
-	return Lookup{State: LookupMissing,
-		Note: fmt.Sprintf(" (nor in any of its %d inheritors)", len(users))}
+	return Lookup{State: LookupMissing, Searched: SearchedUsers, Users: len(users)}
 }
 
 // ProvidedByUsers reports whether any inheritor/includer of libPath

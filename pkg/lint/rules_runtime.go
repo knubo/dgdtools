@@ -1,6 +1,7 @@
 package lint
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/mmcdole/dgdtools/pkg/diag"
@@ -32,10 +33,22 @@ var ruleCallableNotFound = &Rule{
 	Run: func(p *Pass) {
 		for i, c := range p.calls().strings {
 			lk, desc := p.lookup(i)
-			if lk.State == index.LookupMissing {
-				p.Report(c.Start, c.End, "function '%s' is not defined in %s%s (called via %s)",
-					c.Func, desc, lk.Note, c.Registrar)
+			if lk.State != index.LookupMissing {
+				continue
 			}
+			where := ""
+			switch lk.Searched {
+			case index.SearchedStub:
+				where = " or is private there (a profile lists public functions only)"
+			case index.SearchedCheckout:
+				where = " (nor in this checkout; inheritors elsewhere in the lib cannot be seen)"
+			case index.SearchedUsers:
+				if lk.Users > 0 {
+					where = fmt.Sprintf(" (nor in any of its %d inheritors)", lk.Users)
+				}
+			}
+			p.Report(c.Start, c.End, "function '%s' is not defined in %s%s (called via %s)",
+				c.Func, desc, where, c.Registrar)
 		}
 	},
 }
