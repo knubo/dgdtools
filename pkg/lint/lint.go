@@ -28,13 +28,13 @@ import (
 	"sync/atomic"
 
 	"github.com/mmcdole/dgdtools/internal/par"
+	"github.com/mmcdole/dgdtools/pkg/calls"
 	"github.com/mmcdole/dgdtools/pkg/config"
 	"github.com/mmcdole/dgdtools/pkg/diag"
 	"github.com/mmcdole/dgdtools/pkg/fileset"
 	"github.com/mmcdole/dgdtools/pkg/format"
 	"github.com/mmcdole/dgdtools/pkg/index"
 	"github.com/mmcdole/dgdtools/pkg/pp"
-	"github.com/mmcdole/dgdtools/pkg/profile"
 	"github.com/mmcdole/dgdtools/pkg/syntax"
 	"github.com/mmcdole/dgdtools/pkg/token"
 	"github.com/mmcdole/dgdtools/pkg/vfs"
@@ -81,6 +81,7 @@ type Pass struct {
 	Format format.Options
 
 	shared   *fileShared
+	registry *calls.Registry
 	rule     *Rule
 	severity diag.Severity
 	out      *[]*diag.Diagnostic
@@ -252,6 +253,7 @@ type Linter struct {
 	override []layer            // the project's lint.overrides
 	scopes   sync.Map           // *config.Scope -> *scopeLayers
 	format   format.Options     // the project's part of the formatter's options
+	registry *calls.Registry
 
 	baselineOnce sync.Once
 	baseline     *Baseline
@@ -300,14 +302,8 @@ func New(prj *config.Project, fsys vfs.FS) (*Linter, error) {
 		}
 		l.override = append(l.override, layer{fileset.NewMatcher(o.Paths), o.Rules})
 	}
-	lay := index.Layout{Tree: prj.Tree()}
-	if prj.Profile != nil {
-		// Stubs answer for whatever is not on disk; real files win.
-		stubs := profile.NewFS(fsys, prj.Profile)
-		fsys = stubs
-		lay.Stubs, lay.Covered, lay.Holes = stubs.Location(), prj.Profile.Covered, prj.Profile.Holes
-	}
-	l.index = index.New(cfg, lay, fsys)
+	l.registry = calls.NewRegistry(cfg.Conventions)
+	l.index = index.Open(prj, fsys)
 	return l, nil
 }
 
@@ -746,7 +742,7 @@ func (l *Linter) lintFile(ctx context.Context, s *index.Snapshot, file string, o
 			Ctx: ctx, File: parsed.Tok, Tree: parsed.Tree, Env: parsed.Env,
 			Unit: u, Index: query, LibPath: u.LibPath,
 			Config: l.project.Config, Settings: a.settings, Format: l.format.With(set.Format),
-			shared: shared, rule: r, severity: a.severity, out: &out,
+			shared: shared, registry: l.registry, rule: r, severity: a.severity, out: &out,
 		}
 		r.Run(pass)
 		limit := opt.MaxPerFile

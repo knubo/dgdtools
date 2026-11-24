@@ -8,7 +8,9 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/mmcdole/dgdtools/pkg/config"
 	"github.com/mmcdole/dgdtools/pkg/profile"
+	"github.com/mmcdole/dgdtools/pkg/profilebuild"
 )
 
 const profileUsage = `usage: dgdtools profile build [flags]
@@ -44,11 +46,11 @@ func profileCmd(ctx context.Context, args []string, _ io.Reader, stdout, stderr 
 	}
 	switch {
 	case len(pos) == 1 && pos[0] == "build":
-		l, err := newLinter(p, &project, nil, "", "")
+		prj, err := config.Discover(p.fsys, nil, project.discover(p))
 		if err != nil {
 			return fail(err)
 		}
-		prof, err := l.BuildProfile(ctx)
+		prof, err := profilebuild.Build(ctx, prj, p.fsys)
 		if err != nil {
 			return fail(err)
 		}
@@ -57,7 +59,7 @@ func profileCmd(ctx context.Context, args []string, _ io.Reader, stdout, stderr 
 			return fail(err)
 		}
 		if output == "" {
-			output = filepath.Join(l.Project().Config.Dir, profile.FileName)
+			output = filepath.Join(prj.Config.Dir, profile.FileName)
 		}
 		if err := os.WriteFile(output, data, 0o644); err != nil {
 			return fail(err)

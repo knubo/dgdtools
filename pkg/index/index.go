@@ -45,6 +45,7 @@ import (
 	"github.com/mmcdole/dgdtools/pkg/diag"
 	"github.com/mmcdole/dgdtools/pkg/fileset"
 	"github.com/mmcdole/dgdtools/pkg/pp"
+	"github.com/mmcdole/dgdtools/pkg/profile"
 	"github.com/mmcdole/dgdtools/pkg/token"
 	"github.com/mmcdole/dgdtools/pkg/vfs"
 )
@@ -135,6 +136,19 @@ type Index struct {
 	todo   map[string]struct{}
 	// scanning admits one scan at a time.
 	scanning chan struct{}
+}
+
+// Open creates the index of a project: over its lib on disk, and, when
+// the project has a profile, over the profile's stubs for whatever is not
+// on disk.
+func Open(prj *config.Project, fsys vfs.FS) *Index {
+	lay := Layout{Tree: prj.Tree()}
+	if p := prj.Profile; p != nil {
+		stubs := profile.NewFS(fsys, p)
+		fsys = stubs
+		lay.Stubs, lay.Covered, lay.Holes = stubs.Location(), p.Covered, p.Holes
+	}
+	return New(prj.Config, lay, fsys)
 }
 
 // New creates an index over a lib.

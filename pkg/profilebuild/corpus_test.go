@@ -1,10 +1,9 @@
 //go:build corpus
 
-package lint_test
+package profilebuild_test
 
 import (
 	"context"
-	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -17,6 +16,7 @@ import (
 	"github.com/mmcdole/dgdtools/pkg/config"
 	"github.com/mmcdole/dgdtools/pkg/lint"
 	"github.com/mmcdole/dgdtools/pkg/profile"
+	"github.com/mmcdole/dgdtools/pkg/profilebuild"
 	"github.com/mmcdole/dgdtools/pkg/vfs"
 )
 
@@ -49,7 +49,7 @@ func TestCorpusPartialCheckout(t *testing.T) {
 	require.NoError(t, err)
 	fl, err := lint.New(full, fsys)
 	require.NoError(t, err)
-	built, err := fl.BuildProfile(ctx)
+	built, err := profilebuild.Build(ctx, full, fsys)
 	require.NoError(t, err)
 	data, err := built.Marshal()
 	require.NoError(t, err)
@@ -154,5 +154,4 @@ func TestCorpusPartialCheckout(t *testing.T) {
 	if float64(nExtraOther) > 0.001*float64(nPart)+1 {
 		t.Errorf("%d findings appear only in the partial run (beyond syntax errors behind an unprovable include)", nExtraOther)
 	}
-	_ = fmt.Sprint
 }

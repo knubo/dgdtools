@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/mmcdole/dgdtools/pkg/calls"
 	"github.com/mmcdole/dgdtools/pkg/diag"
 	"github.com/mmcdole/dgdtools/pkg/index"
 	"github.com/mmcdole/dgdtools/pkg/syntax"
@@ -31,7 +32,7 @@ var ruleCallableNotFound = &Rule{
 		"inherit or #include, the function is also looked for in those users.",
 	Default: true, Severity: diag.Error, CrossFile: true,
 	Run: func(p *Pass) {
-		for i, c := range p.calls().strings {
+		for i, c := range p.calls().Named {
 			lk, desc := p.lookup(i)
 			if lk.State != index.LookupMissing {
 				continue
@@ -48,7 +49,7 @@ var ruleCallableNotFound = &Rule{
 				}
 			}
 			p.Report(c.Start, c.End, "function '%s' is not defined in %s%s (called via %s)",
-				c.Func, desc, where, c.Registrar)
+				c.Func, desc, where, c.Via)
 		}
 	},
 }
@@ -60,15 +61,15 @@ var ruleStaticCrossObj = &Rule{
 		"functions only from the same object. The call silently returns nil.",
 	Default: true, Severity: diag.Error, CrossFile: true,
 	Run: func(p *Pass) {
-		for i, c := range p.calls().strings {
-			if c.Kind != crossObject {
+		for i, c := range p.calls().Named {
+			if c.Kind != calls.CrossObject {
 				continue
 			}
 			lk, _ := p.lookup(i)
 			if lk.State != index.LookupFound {
 				continue
 			}
-			same := c.Target == targetSelf || c.TargetPath == p.LibPath
+			same := c.Target == calls.TargetSelf || c.TargetPath == p.LibPath
 			var d *diag.Diagnostic
 			switch {
 			case lk.Fn.Private:
@@ -93,12 +94,12 @@ var ruleUndefinedPrototype = &Rule{
 		"inheritor or includer of the file provides the definition.",
 	Default: true, Severity: diag.Error, CrossFile: true,
 	Run: func(p *Pass) {
-		for i, c := range p.calls().strings {
+		for i, c := range p.calls().Named {
 			lk, _ := p.lookup(i)
 			if lk.State != index.LookupFound || !lk.Fn.PrototypeOnly {
 				continue
 			}
-			if c.Target == targetSelf && p.Index.ProvidedByUsers(p.Ctx, c.Func) {
+			if c.Target == calls.TargetSelf && p.Index.ProvidedByUsers(p.Ctx, c.Func) {
 				continue
 			}
 			d := p.Report(c.Start, c.End, "'%s' in %s is declared but never defined — calling it is a runtime error",
@@ -110,7 +111,7 @@ var ruleUndefinedPrototype = &Rule{
 		if ch.Partial {
 			return // the definition may live where we cannot see
 		}
-		for _, dc := range p.calls().direct {
+		for _, dc := range p.calls().Direct {
 			if dc.Call.Scoped {
 				continue
 			}
@@ -141,14 +142,14 @@ var ruleTargetObjectMissing = &Rule{
 			return p.Index.Covers(lib) && !p.Index.IsVirtual(lib) && !p.Index.ObjectExists(lib)
 		}
 		cf := p.calls()
-		for _, ref := range cf.paths {
+		for _, ref := range cf.Paths {
 			if missing(ref.Path) {
 				p.Report(ref.Start, ref.End, "object %s does not exist (via %s)", ref.Path, ref.Via)
 			}
 		}
-		for _, c := range cf.strings {
-			if c.Target == targetPath && missing(c.TargetPath) {
-				p.Report(c.Start, c.End, "object %s does not exist (called via %s)", c.TargetPath, c.Registrar)
+		for _, c := range cf.Named {
+			if c.Target == calls.TargetPath && missing(c.TargetPath) {
+				p.Report(c.Start, c.End, "object %s does not exist (called via %s)", c.TargetPath, c.Via)
 			}
 		}
 		for _, ref := range p.Unit.Inherits {
@@ -167,7 +168,7 @@ var ruleCallbackArity = &Rule{
 		"runtime error.",
 	Default: true, Severity: diag.Warning, CrossFile: true,
 	Run: func(p *Pass) {
-		for i, c := range p.calls().strings {
+		for i, c := range p.calls().Named {
 			if c.NArgs < 0 {
 				continue
 			}

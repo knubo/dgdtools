@@ -10,7 +10,6 @@ import (
 
 	"github.com/mmcdole/dgdtools/pkg/config"
 	"github.com/mmcdole/dgdtools/pkg/lint"
-	"github.com/mmcdole/dgdtools/pkg/profile"
 	"github.com/mmcdole/dgdtools/pkg/syntax"
 	"github.com/mmcdole/dgdtools/pkg/vfs"
 )
@@ -176,62 +175,6 @@ func TestRunParsesEachFileOnce(t *testing.T) {
 	assert.Equal(t, 1, cfs.reads("/lib/sys/forced.h"))
 	assert.LessOrEqual(t, cfs.reads("/lib/std/base.c"), 2, "at most once as somebody's parent and once for its own tree")
 	assert.LessOrEqual(t, cfs.reads("/lib/std/mod.c"), 3, "and once more for a file that had to wait for the scan")
-}
-
-// Declarations that come from a profile are located by a stub URI, never
-// by a path that looks like a file on disk.
-func TestStubLocations(t *testing.T) {
-	m := wholeLib()
-	full, err := config.Discover(m, []string{"/mud/lib"}, config.DiscoverOptions{})
-	require.NoError(t, err)
-	fl, err := lint.New(full, m)
-	require.NoError(t, err)
-	p, err := fl.BuildProfile(context.Background())
-	require.NoError(t, err)
-	data, err := p.Marshal()
-	require.NoError(t, err)
-
-	alone := vfs.Mem{
-		"/home/ann/players/ann/dgdtools.yml": "profile: ../../mini.profile\n",
-		"/home/ann/mini.profile":             string(data),
-		"/home/ann/players/ann/x.c":          "inherit \"/std/room\";\nvoid f() { \"/std/room\"->room_static(); }\n",
-	}
-	prj, err := config.Discover(alone, []string{"/home/ann/players/ann"}, config.DiscoverOptions{})
-	require.NoError(t, err)
-	assert.Empty(t, prj.Root, "a partial checkout has no lib root on disk")
-	assert.True(t, prj.HasLib())
-	l, err := lint.New(prj, alone)
-	require.NoError(t, err)
-
-	doc, err := l.Lint(context.Background(), "/home/ann/players/ann/x.c", lint.Options{})
-	require.NoError(t, err)
-	require.Len(t, doc.Diagnostics, 1)
-	d := doc.Diagnostics[0]
-	assert.Equal(t, "static-crossobj", d.Rule)
-	require.Len(t, d.Related, 1)
-	assert.Equal(t, "dgdtools-profile://mini/std/room.c", d.Related[0].Path)
-	assert.Equal(t, 5, d.Related[0].Line)
-
-	name, libFile, ok := profile.SplitLocation(d.Related[0].Path)
-	require.True(t, ok)
-	assert.Equal(t, "mini", name)
-	assert.Equal(t, p.Files[libFile], prj.Profile.Files["/std/room.c"], "the location names the stub")
-	_, _, ok = profile.SplitLocation("/home/ann/players/ann/x.c")
-	assert.False(t, ok)
-
-	// The stub is readable where the index reads it, and nowhere else.
-	stubs := profile.NewFS(alone, prj.Profile)
-	assert.Equal(t, profile.Location("mini"), stubs.Location())
-	src, err := stubs.ReadFile("dgdtools-profile://mini/std/room.c")
-	require.NoError(t, err)
-	assert.Equal(t, p.Files["/std/room.c"], string(src))
-	assert.True(t, stubs.Exists("dgdtools-profile://mini/std"))
-	assert.True(t, stubs.IsDir("dgdtools-profile://mini/std"))
-	assert.False(t, stubs.IsDir("dgdtools-profile://mini/std/room.c"))
-	assert.False(t, stubs.Exists("dgdtools-profile://mini/std/none.c"))
-	assert.False(t, stubs.Exists("dgdtools-profile://other/std/room.c"))
-	assert.False(t, stubs.Exists("/std/room.c"))
-	assert.True(t, stubs.Exists("/home/ann/players/ann/x.c"))
 }
 
 // An override's globs apply to a header named on the command line by its

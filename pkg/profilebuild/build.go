@@ -1,4 +1,6 @@
-package lint
+// Package profilebuild makes a profile (pkg/profile) out of a whole lib:
+// it selects the lib's shared files and renders each as a stub.
+package profilebuild
 
 import (
 	"context"
@@ -11,27 +13,29 @@ import (
 	"sync"
 
 	"github.com/mmcdole/dgdtools/internal/par"
+	"github.com/mmcdole/dgdtools/pkg/calls"
 	"github.com/mmcdole/dgdtools/pkg/config"
-	"github.com/mmcdole/dgdtools/pkg/diag"
 	"github.com/mmcdole/dgdtools/pkg/fileset"
 	"github.com/mmcdole/dgdtools/pkg/index"
 	"github.com/mmcdole/dgdtools/pkg/pp"
 	"github.com/mmcdole/dgdtools/pkg/profile"
 	"github.com/mmcdole/dgdtools/pkg/syntax"
 	"github.com/mmcdole/dgdtools/pkg/token"
+	"github.com/mmcdole/dgdtools/pkg/vfs"
 )
 
-// BuildProfile captures the lib this linter sees as a profile: the
-// driver facts and conventions from the configuration, and a stub for
-// every shared file. Shared files are those matching
-// profile_build.share (config.DefaultShare when empty), everything under
-// the include dirs, the force-included header, the auto objects, and
-// whatever those inherit or include, minus profile_build.omit.
+// Build captures the project's lib as a profile: the driver facts and
+// conventions from the configuration, and a stub for every shared file.
+// Shared files are those referenced from at least
+// profile_build.share_min_owners owners, those matching
+// profile_build.share, everything under the include dirs, the
+// force-included header, the auto objects, and whatever those inherit or
+// include, minus profile_build.omit.
 //
 // It needs the whole lib: a profile cannot be built from a partial
 // checkout.
-func (l *Linter) BuildProfile(ctx context.Context) (*profile.Profile, error) {
-	prj, cfg, ix := l.project, l.project.Config, l.index.Snapshot()
+func Build(ctx context.Context, prj *config.Project, fsys vfs.FS) (*profile.Profile, error) {
+	cfg, ix := prj.Config, index.Open(prj, fsys).Snapshot()
 	if prj.Root == "" {
 		return nil, fmt.Errorf("profile build needs the whole lib (a dgdtools.yml with root: at the lib)")
 	}
@@ -97,14 +101,14 @@ func (l *Linter) BuildProfile(ctx context.Context) (*profile.Profile, error) {
 			return // outside the lib: nothing to say about it
 		}
 		rel = filepath.ToSlash(rel)
-		if queued[fsPath] || omit.Match(rel) || !l.fs.Exists(fsPath) || l.fs.IsDir(fsPath) {
+		if queued[fsPath] || omit.Match(rel) || !fsys.Exists(fsPath) || fsys.IsDir(fsPath) {
 			return
 		}
 		queued[fsPath] = true
 		queue = append(queue, fsPath)
 	}
 	covered := map[string]bool{}
-	err := l.fs.WalkDir(prj.Root, func(fp string, de fs.DirEntry, err error) error {
+	err := fsys.WalkDir(prj.Root, func(fp string, de fs.DirEntry, err error) error {
 		if err != nil {
 			return nil
 		}
@@ -134,14 +138,14 @@ func (l *Linter) BuildProfile(ctx context.Context) (*profile.Profile, error) {
 		return nil, err
 	}
 	if minOwners > 0 {
-		for _, fp := range l.sharedByUse(ctx, ix, minOwners, pb.Checkouts) {
+		for _, fp := range sharedByUse(ctx, ix, calls.NewRegistry(cfg.Conventions), prj.Root, minOwners, pb.Checkouts) {
 			add(fp)
 		}
 	}
 	// A directory is covered when a share glob takes all of it.
 	for _, g := range share {
 		if dir, ok := strings.CutSuffix(strings.Trim(g, "/"), "/**"); ok && !strings.ContainsAny(dir, "*?") {
-			if l.fs.IsDir(filepath.Join(prj.Root, filepath.FromSlash(dir))) && !omit.MatchDir(dir) {
+			if fsys.IsDir(filepath.Join(prj.Root, filepath.FromSlash(dir))) && !omit.MatchDir(dir) {
 				covered["/"+dir+"/"] = true
 			}
 		}
@@ -199,8 +203,7 @@ func (l *Linter) BuildProfile(ctx context.Context) (*profile.Profile, error) {
 // #include, or a constant call/clone/find target. An owner is a
 // per-wizard tree matching one of the checkout patterns, or else a
 // top-level directory.
-func (l *Linter) sharedByUse(ctx context.Context, ix *index.Snapshot, minOwners int, checkouts []string) []string {
-	root := l.project.Root
+func sharedByUse(ctx context.Context, ix *index.Snapshot, reg *calls.Registry, root string, minOwners int, checkouts []string) []string {
 	owner := func(lib string) string {
 		segs := strings.Split(strings.Trim(lib, "/"), "/")
 		for _, pat := range checkouts {
@@ -234,22 +237,24 @@ func (l *Linter) sharedByUse(ctx context.Context, ix *index.Snapshot, minOwners 
 				refs = append(refs, ix.ObjectFile(inh.Path))
 			}
 		}
-		var out []*diag.Diagnostic
-		pass := &Pass{Ctx: ctx, File: parsed.Tok, Tree: parsed.Tree, Env: parsed.Env, Unit: u,
-			Index: ix.Query(u, true), LibPath: u.LibPath, Config: l.project.Config,
-			shared: &fileShared{}, out: &out}
-		cf := pass.calls()
-		for _, c := range cf.strings {
-			if c.Target == targetPath {
+		cf := calls.Extract(calls.File{
+			Tree: parsed.Tree, Env: parsed.Env, LibPath: u.LibPath,
+			ObjectPath: func(written string) string { return ix.ObjectPath(written, u.LibPath) },
+		}, reg)
+		for _, c := range cf.Named {
+			if c.Target == calls.TargetPath {
 				refs = append(refs, ix.ObjectFile(c.TargetPath))
 			}
 		}
-		for _, r := range cf.paths {
+		for _, r := range cf.Paths {
 			refs = append(refs, ix.ObjectFile(r.Path))
 		}
 		me := owner(u.LibPath)
 		mu.Lock()
 		for _, r := range refs {
+			if r == "" {
+				continue
+			}
 			r = filepath.Clean(r)
 			if owners[r] == nil {
 				owners[r] = map[string]bool{}

@@ -169,3 +169,21 @@ func TestExampleConfigLoads(t *testing.T) {
 	assert.Equal(t, "off", c.Lint.Overrides[0].Rules["lifecycle-chain"].Severity)
 	assert.Contains(t, c.Exclude, "**/attic/**")
 }
+
+func TestInferCheckout(t *testing.T) {
+	pats := []string{"players/*", "d/*"}
+	dir, lib, ok := InferCheckout("/home/me/mud/players/drake/rooms/east", pats)
+	assert.True(t, ok)
+	assert.Equal(t, "/home/me/mud/players/drake", dir)
+	assert.Equal(t, "/players/drake", lib)
+	_, lib, ok = InferCheckout("/srv/d/Wild", pats)
+	assert.True(t, ok)
+	assert.Equal(t, "/d/Wild", lib)
+	// players/* is tried first, so a stray /d/ higher up does not win.
+	_, lib, _ = InferCheckout("/d/home/players/drake", pats)
+	assert.Equal(t, "/players/drake", lib)
+	_, _, ok = InferCheckout("/home/me/drake", pats)
+	assert.False(t, ok)
+	_, _, ok = InferCheckout("/home/me/players", pats)
+	assert.False(t, ok)
+}

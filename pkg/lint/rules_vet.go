@@ -139,7 +139,7 @@ var ruleSscanfFormat = &Rule{
 		for name, idx := range p.Config.Conventions.FormatRegistry {
 			registry[name] = idx
 		}
-		for _, dc := range p.calls().direct {
+		for _, dc := range p.calls().Direct {
 			c := dc.Call
 			fmtIdx, ok := registry[c.Fun.Name]
 			if !ok || c.Scoped || c.Spread || fmtIdx >= len(c.Args) {

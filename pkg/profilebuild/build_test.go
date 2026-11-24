@@ -1,4 +1,4 @@
-package lint_test
+package profilebuild_test
 
 import (
 	"context"
@@ -16,6 +16,7 @@ import (
 	"github.com/mmcdole/dgdtools/pkg/index"
 	"github.com/mmcdole/dgdtools/pkg/lint"
 	"github.com/mmcdole/dgdtools/pkg/profile"
+	"github.com/mmcdole/dgdtools/pkg/profilebuild"
 	"github.com/mmcdole/dgdtools/pkg/vfs"
 )
 
@@ -92,9 +93,9 @@ func TestProfileBuildAndPartialCheckout(t *testing.T) {
 	m := wholeLib()
 	full, err := config.Discover(m, []string{"/mud/lib/players/ann"}, config.DiscoverOptions{})
 	require.NoError(t, err)
-	l, err := lint.New(full, m)
+	p, err := profilebuild.Build(context.Background(), full, m)
 	require.NoError(t, err)
-	p, err := l.BuildProfile(context.Background())
+	l, err := lint.New(full, m)
 	require.NoError(t, err)
 
 	// --- what a profile contains
@@ -244,24 +245,6 @@ func TestProfileBuildAndPartialCheckout(t *testing.T) {
 	assert.Contains(t, now, "hall.c:17 callable-not-found", "and the rest of the lib is visible again")
 }
 
-func TestInferCheckout(t *testing.T) {
-	pats := []string{"players/*", "d/*"}
-	dir, lib, ok := config.InferCheckout("/home/me/mud/players/drake/rooms/east", pats)
-	assert.True(t, ok)
-	assert.Equal(t, "/home/me/mud/players/drake", dir)
-	assert.Equal(t, "/players/drake", lib)
-	_, lib, ok = config.InferCheckout("/srv/d/Wild", pats)
-	assert.True(t, ok)
-	assert.Equal(t, "/d/Wild", lib)
-	// players/* is tried first, so a stray /d/ higher up does not win.
-	_, lib, _ = config.InferCheckout("/d/home/players/drake", pats)
-	assert.Equal(t, "/players/drake", lib)
-	_, _, ok = config.InferCheckout("/home/me/drake", pats)
-	assert.False(t, ok)
-	_, _, ok = config.InferCheckout("/home/me/players", pats)
-	assert.False(t, ok)
-}
-
 // A profile named in a config is found next to the config, then in
 // $DGDTOOLS_PROFILE_PATH, then in the user config directory; nothing is
 // built in.
@@ -269,9 +252,7 @@ func TestProfileResolution(t *testing.T) {
 	m := wholeLib()
 	full, err := config.Discover(m, []string{"/mud/lib"}, config.DiscoverOptions{})
 	require.NoError(t, err)
-	l, err := lint.New(full, m)
-	require.NoError(t, err)
-	p, err := l.BuildProfile(context.Background())
+	p, err := profilebuild.Build(context.Background(), full, m)
 	require.NoError(t, err)
 	data, err := p.Marshal()
 	require.NoError(t, err)
@@ -335,4 +316,58 @@ func TestProfileResolution(t *testing.T) {
 	prj, err = config.Discover(wiz, []string{"/home/zed/players/zed/room.c"}, config.DiscoverOptions{Profile: "mini", WorkDir: "/home/zed", ProfileDirs: dirs})
 	require.NoError(t, err)
 	assert.Equal(t, "/players/zed", prj.CheckoutLib)
+}
+
+// Declarations that come from a profile are located by a stub URI, never
+// by a path that looks like a file on disk.
+func TestStubLocations(t *testing.T) {
+	m := wholeLib()
+	full, err := config.Discover(m, []string{"/mud/lib"}, config.DiscoverOptions{})
+	require.NoError(t, err)
+	p, err := profilebuild.Build(context.Background(), full, m)
+	require.NoError(t, err)
+	data, err := p.Marshal()
+	require.NoError(t, err)
+
+	alone := vfs.Mem{
+		"/home/ann/players/ann/dgdtools.yml": "profile: ../../mini.profile\n",
+		"/home/ann/mini.profile":             string(data),
+		"/home/ann/players/ann/x.c":          "inherit \"/std/room\";\nvoid f() { \"/std/room\"->room_static(); }\n",
+	}
+	prj, err := config.Discover(alone, []string{"/home/ann/players/ann"}, config.DiscoverOptions{})
+	require.NoError(t, err)
+	assert.Empty(t, prj.Root, "a partial checkout has no lib root on disk")
+	assert.True(t, prj.HasLib())
+	l, err := lint.New(prj, alone)
+	require.NoError(t, err)
+
+	doc, err := l.Lint(context.Background(), "/home/ann/players/ann/x.c", lint.Options{})
+	require.NoError(t, err)
+	require.Len(t, doc.Diagnostics, 1)
+	d := doc.Diagnostics[0]
+	assert.Equal(t, "static-crossobj", d.Rule)
+	require.Len(t, d.Related, 1)
+	assert.Equal(t, "dgdtools-profile://mini/std/room.c", d.Related[0].Path)
+	assert.Equal(t, 5, d.Related[0].Line)
+
+	name, libFile, ok := profile.SplitLocation(d.Related[0].Path)
+	require.True(t, ok)
+	assert.Equal(t, "mini", name)
+	assert.Equal(t, p.Files[libFile], prj.Profile.Files["/std/room.c"], "the location names the stub")
+	_, _, ok = profile.SplitLocation("/home/ann/players/ann/x.c")
+	assert.False(t, ok)
+
+	// The stub is readable where the index reads it, and nowhere else.
+	stubs := profile.NewFS(alone, prj.Profile)
+	assert.Equal(t, profile.Location("mini"), stubs.Location())
+	src, err := stubs.ReadFile("dgdtools-profile://mini/std/room.c")
+	require.NoError(t, err)
+	assert.Equal(t, p.Files["/std/room.c"], string(src))
+	assert.True(t, stubs.Exists("dgdtools-profile://mini/std"))
+	assert.True(t, stubs.IsDir("dgdtools-profile://mini/std"))
+	assert.False(t, stubs.IsDir("dgdtools-profile://mini/std/room.c"))
+	assert.False(t, stubs.Exists("dgdtools-profile://mini/std/none.c"))
+	assert.False(t, stubs.Exists("dgdtools-profile://other/std/room.c"))
+	assert.False(t, stubs.Exists("/std/room.c"))
+	assert.True(t, stubs.Exists("/home/ann/players/ann/x.c"))
 }
