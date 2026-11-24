@@ -356,3 +356,20 @@ func TestWorkspace(t *testing.T) {
 	assert.Equal(t, "/other/dgdtools.yml", one.ConfigPath)
 	assert.Same(t, one, project("/loose/y.c"))
 }
+
+// What a profile or the driver's configuration contributes is checked
+// like what the file says, and the error names where it came from.
+func TestContributedValuesAreValidated(t *testing.T) {
+	m := vfs.Mem{
+		"/p/dgdtools.yml": "profile: bad.profile\n",
+		"/p/bad.profile":  "dgdtools-profile 1\n{\"name\":\"bad\",\"dialect\":{\"driver\":\"dgd\"},\"relative_object_paths\":\"sideways\",\"conventions\":{}}\n",
+		"/p/a.c":          "",
+		"/q/dgdtools.yml": "profile_build: {driver_config: mud.dgd}\n",
+		"/q/mud.dgd":      "typechecking = 7;\n",
+		"/q/a.c":          "",
+	}
+	_, err := Discover(m, []string{"/p/a.c"}, DiscoverOptions{})
+	assert.ErrorContains(t, err, `/p/bad.profile: relative_object_paths: unknown value "sideways"`)
+	_, err = Discover(m, []string{"/q/a.c"}, DiscoverOptions{})
+	assert.ErrorContains(t, err, "/q/mud.dgd: dialect.typechecking: 7 is not a typechecking level")
+}

@@ -234,6 +234,10 @@ func resolve(fs vfs.FS, opt DiscoverOptions, found, base string) (*Project, erro
 		}
 		prj.Profile = p
 		applyProfile(cfg, p)
+		// What the profile says is checked like what the file says.
+		if err := cfg.Validate(); err != nil {
+			return nil, fmt.Errorf("%s: %w", p.Path, err)
+		}
 	} else if dc := cfg.ProfileBuild.DriverConfig; dc != "" {
 		// A whole lib with its build inputs at hand needs no profile.
 		if !filepath.IsAbs(dc) {
@@ -244,6 +248,9 @@ func resolve(fs vfs.FS, opt DiscoverOptions, found, base string) (*Project, erro
 			return nil, fmt.Errorf("profile_build.driver_config: %w", err)
 		}
 		d.Apply(cfg)
+		if err := cfg.Validate(); err != nil {
+			return nil, fmt.Errorf("%s: %w", dc, err)
+		}
 	}
 
 	libPath := opt.LibPath

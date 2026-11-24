@@ -887,3 +887,15 @@ func TestConventionsComeFromTheConfiguration(t *testing.T) {
 	prj.Config.Lint.Rules = map[string]config.RuleSettings{"lifecycle-chain": {Options: map[string]any{"names": []string{"create", "setup"}}}}
 	assert.Equal(t, []string{"lifecycle-chain child.c:2", "lifecycle-chain child.c:3"}, find(prj, m, "child.c"), "the rule's own list wins")
 }
+
+// The example configurations name only rules and options that exist.
+func TestExampleConfigsAreValid(t *testing.T) {
+	for _, file := range []string{"../../dgdtools.example.yml", "../../examples/viking/dgdtools.yml"} {
+		path, err := filepath.Abs(file)
+		require.NoError(t, err)
+		cfg, err := config.Load(vfs.OS{}, path)
+		require.NoError(t, err, file)
+		_, err = lint.New(&config.Project{Config: cfg}, vfs.Mem{})
+		assert.NoError(t, err, file)
+	}
+}
