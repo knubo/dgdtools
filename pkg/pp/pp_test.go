@@ -228,6 +228,15 @@ gone
 	sel = env.Scan(f, func(Include) { env.Complete = false })
 	assert.Equal(t, "late values no ", sigText(f, sel))
 	assert.Equal(t, "latevaluesno", guessedText(f, sel))
+
+	// And the same text as a header: whoever includes it may define the
+	// name first. What it does see defined still decides.
+	env = NewEnv(nil, nil)
+	env.Add(base)
+	env.Complete, env.Header = true, true
+	sel = env.Scan(f, func(Include) { env.Add(inc) })
+	assert.Equal(t, "early late values no ", sigText(f, sel))
+	assert.Equal(t, "earlyno", guessedText(f, sel))
 }
 
 func TestScanUnsure(t *testing.T) {

@@ -3,7 +3,7 @@
 Status: plan only. Nothing here is implemented. It builds on the library
 described in `dgdlint-rewrite.md` (sections 6 and 10): `pkg/lint`
 (`Linter.Lint`, `Invalidate`, `Scan`, `Generation`), `pkg/vfs`
-(`Overlay`), `pkg/index` (generations, chains, macro views, declarations
+(`Overlay`), `pkg/index` (generations, chains, `#define` environments, declarations
 with types and positions), `pkg/profile`, `pkg/format`, `pkg/config`
 (`Discover`).
 
@@ -205,8 +205,8 @@ knows the code base.
 |---|---|---|---|---|
 | 1 | Skeleton: initialize/shutdown, projects, incremental sync, `publishDiagnostics` with code, `codeDescription`, related information, tags (`Unnecessary` for unreachable-code) | `Linter.Lint`, `Invalidate`, `Scan`, `diag` | `PositionMapper`; `diag.ByteCol` | 5 |
 | 2 | `codeAction`: quick fixes from `Diagnostic.Fixes`; "suppress with `dgdlint:disable-next-line RULE`" and "…for this file" generated per diagnostic; "explain rule" as a command | fixes as text edits (already data) | a helper that renders a suppression comment in the file's comment style and indentation | 2 |
-| 3 | `formatting` (whole document) via dgdfmt; `rangeFormatting` deferred | `pkg/format` with its token-equality gate; a failed gate returns no edits and a log line | minimal-diff edit computation (line-based) so cursors and folds survive | 2 |
-| 4 | `definition`: `#include` targets, `inherit` paths, function calls (direct, `::`, `label::`, `->` with a known receiver, string callbacks in registrars), macros | `ResolveInclude`, `ObjectPath`, `Chain`, `LookupCallable`, macro view (`pp.Macro.Path/Off`) | `syntax.PathAt(file, offset)` (innermost node chain at a position); a stub target is already located by its virtual document URI (`dgdlint-profile://NAME/std/room.c`, see `profile.Location`), which the server answers with the stub's text | 4 |
+| 3 | `formatting` (whole document) via dgdfmt; `rangeFormatting` deferred | `format.Format(file, format.OptionsFromConfig(cfg))`: a function of the buffer and the project's options, with its token-equality gate; a failed gate returns no edits and a log line | minimal-diff edit computation (line-based) so cursors and folds survive | 2 |
+| 4 | `definition`: `#include` targets, `inherit` paths, function calls (direct, `::`, `label::`, `->` with a known receiver, string callbacks in registrars), macros | `ResolveInclude`, `ObjectPath`, `Chain`, `LookupCallable`, the file's `pp.Env` (`pp.Macro.Path/Off`) | `syntax.PathAt(file, offset)` (innermost node chain at a position); a stub target is already located by its virtual document URI (`dgdlint-profile://NAME/std/room.c`, see `profile.Location`), which the server answers with the stub's text | 4 |
 | 5 | `hover` and `signatureHelp` | `ChainFunc.Decl/Type/DefinedIn`, `index.Params`, macro body and class, variable types | active-parameter computation from the argument list around the cursor; kfun table for built-ins (new data file) | 3 |
 | 6 | `documentSymbol`, `workspace/symbol` | `syntax.File.Decls`; units' symbol tables (whole-lib scan, cached) | fuzzy matcher | 2 |
 | 7 | `completion`: functions callable here (own chain, auto object, kfuns), `->` members for a known receiver, macros in view, `#include` and inherit paths, locals | chain + view + profile | local scopes (block-level symbol tables in `pkg/syntax`); tolerant parse at the cursor (the parser already recovers; completion context comes from tokens left of the cursor) | 5 |
@@ -222,7 +222,8 @@ that are also on the linter's own roadmap: local scopes and a kfun table.
 Library additions, all testable without a server: `syntax.PathAt`,
 `diag.ByteCol`, block scopes, kfun table (name, parameters, return type),
 reverse reference index. `Linter.Lint(ctx, path, opts)` already returns
-the parsed tree, tokens, macro view and index unit with the diagnostics.
+the parsed tree, tokens, `#define` environment and index unit with the
+diagnostics.
 
 ## 9. Syntax highlighting: two layers
 

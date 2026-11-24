@@ -33,20 +33,27 @@ else is new.
 
 ```
 pkg/vfs      file access: OS, in-memory overlay (unsaved editor buffers)
-pkg/token    lossless token model            (unchanged)
-pkg/lexer    byte-lossless lexer             (one fix: bare CR in strings)
-pkg/pp       directives: #define tables, macro classes, #include targets,
-             conditional-branch selection
+pkg/token    lossless token model; the one table of keywords, specifiers,
+             types and operator precedence
+pkg/lexer    byte-lossless lexer
+pkg/pp       the preprocessor model: the ordered #define environment of
+             a translation unit, macro classes, conditional-branch
+             selection, the constant evaluator
 pkg/syntax   AST + hand-written error-tolerant recursive-descent parser
 pkg/config   dgdtools.yml, project discovery, DGD driver-config reader
+pkg/fileset  where a lib is on disk: path mapping, globs, the walk
 pkg/index    lazy cross-file index over syntax trees: symbols, inherit
-             chains, macro views; three-valued lookups; invalidation
+             chains, #define environments; three-valued lookups;
+             invalidation
 pkg/lint     the embeddable linter: rules, suppressions, baseline,
              diagnostics with ranges/related locations/fix edits
+pkg/format   the formatter: a layout plan from the syntax tree, a
+             token-stream printer, the token-equality gate (section 8)
+pkg/tokcmp   significant-token comparison of two files
 pkg/report   output writers: human, JSON, SARIF 2.1.0, GitHub annotations
 cmd/dgdlint  thin CLI over pkg/lint + pkg/report
-
-pkg/structure, pkg/format, pkg/tokcmp, cmd/dgdfmt, cmd/dgdcmp: unchanged.
+cmd/dgdfmt   thin CLI over pkg/format + pkg/config
+cmd/dgdcmp   thin CLI over pkg/tokcmp
 ```
 
 ### 2.1 Why a hand-written recursive-descent parser
@@ -69,9 +76,17 @@ Erlang's `epp_dodger`, not post-preprocessor text like clang-tidy.
 Diagnostics and fixes must map to bytes the author wrote, and a real
 preprocessor would need location mapping through expansions.
 
-`pkg/pp` builds, per file, a layered **macro view**: the file's own
-`#define`s, every resolved `#include` (recursively), and the driver's
-force-included header. Each macro gets a class derived from its body:
+`pkg/pp` is the one model of the preprocessor. A `pp.Env` is the
+`#define` environment of a translation unit in the order the driver's
+preprocessor builds it: the names defined before the first line
+(`__DGD__` and the other predefined names, plus `defines:`), the tables
+of the force-included header, and then the file's own directives, with
+the table of each `#include` (recursively) taking effect where the
+directive stands. `Env.Scan` reads a file's directives into it once; it
+is the only reader of `#define`. Every consumer of a file works from the
+same `Env`: the parser asks it what a name is (`Lookup`), the rules read
+macro bodies from it, and the constant evaluator reads values from it.
+Each macro gets a class derived from its body:
 
 | Class | Example | Parser treatment |
 |---|---|---|
@@ -88,23 +103,50 @@ followed by `#define X` is a plain redefinition and wins over included
 definitions; two different definitions with no `#undef` make the name a
 fragment.
 
-A macro view is **complete** only when every `#include` reachable from the
-file resolved. Otherwise it is *partial* (missing header, zero-config run,
-file outside the root) and the parser both assumes more (an unknown
+An environment is **complete** only when every `#include` reachable from
+the file resolved. Otherwise it is *partial* (missing header, zero-config
+run, file outside the root) and the parser both assumes more (an unknown
 identifier before a type keyword is taken as a specifier macro, `status
 x;` as a declaration) and reports less (section 5).
 
 **Conditionals.** One configuration is linted, as clang-tidy does, and
-every consumer sees the same one. A condition is *decided* when that is
-certain: `#if 0`/`#if 1`; `#ifdef`/`#ifndef`/`#if [!]defined(X)`/`#if X`
-of a name that is predefined (`__DGD__`, plus `defines:`) or `#define`d
-earlier in the same file; and a leading `#ifndef X`/`#define X` include
-guard. Anything else takes the first branch **and that branch is marked
+every consumer sees the same one: `Env.Scan` selects the branches while
+it reads the directives, so a condition is evaluated in the environment
+as it stands at that line. A condition is *decided* when its value is
+certain there:
+
+- its names are defined before the first line, by the force-included
+  header, by a header included above it, or earlier in the file, and the
+  one evaluator (integer arithmetic, comparison, logic, `defined`, macros
+  that name macros) gives the expression a value;
+- or a name is defined nowhere and the environment is complete: then it
+  is not defined. This holds for an object's source only. A header is
+  not compiled by itself, and whoever includes it may define the name
+  first, so a header decides nothing from absence;
+- or it is a leading `#ifndef X`/`#define X` include guard.
+
+Anything else takes the first branch **and that branch is marked
 guessed**: it is parsed, so the tree stays whole, but syntax- and
 runtime-group rules report nothing inside it, because whether the driver
-compiles that code at all is unknown. (Resolving conditions through
-included headers, the remaining step to a full preprocessor environment,
-is deferred; see section 10.)
+compiles that code at all is unknown. A name that a file defines or
+undefines inside such a branch (either arm) is recorded as *unsure* in
+that file's table, and decides no condition further down or in the files
+that include it.
+
+A header's own table is built once per generation, from the header alone
+(the predefined names and its own earlier directives), and shared by
+every file that includes it; that is what keeps a hundred thousand files
+from re-reading the same headers. The price is that a condition inside a
+header that depends on its includer stays a guess.
+
+The same evaluator gives the string constants the index needs their
+value: inherit paths and call targets written with literals, `+`,
+adjacent literals and object-like macros (`Env.EvalString`).
+
+On the Viking lib this decides most conditionals: findings withheld
+inside guessed branches fell from 1,025 to 106 (all rules on, driver
+config), and the syntax-group rules flag 104 more files, every one of
+which the driver also rejects (section 9).
 
 ### 2.3 Error tolerance
 
@@ -189,7 +231,7 @@ need the lib root (the directory that is `/` to the driver).
 4. **Explicit overrides:** `--config FILE`; `--root DIR`; `--no-config`.
 5. **Zero-config is useful, not noisy.** With no config and no `--root`,
    dgdlint runs in *file-local mode*: file-local rules run with a partial
-   macro view, cross-file rules do not run, and one note on stderr says
+   `#define` environment, cross-file rules do not run, and one note on stderr says
    so. The real pre-fix castle.c is caught in this mode.
 6. **The driver config is the compile database, and it is a build
    input.** DGD's own config file already states `include_dirs`,
@@ -335,7 +377,7 @@ res, _ := l.Run(ctx, lint.Request{Paths: paths})   // many files
 for _, d := range res.Diagnostics { ... }          // ranges, code, related, fixes
 
 doc, _ := l.Lint(ctx, path, lint.Options{})        // one document:
-doc.Diagnostics; doc.Tree; doc.File; doc.View      // findings + what they came from
+doc.Diagnostics; doc.Tree; doc.File; doc.Env       // findings + what they came from
 
 fs.Set(path, unsavedBytes)                 // editor change
 affected := l.Invalidate(path)             // files whose findings may differ
@@ -434,7 +476,7 @@ project:
 | `textDocument/publishDiagnostics` | `Linter.Lint` for the changed document, debounced, with the previous lint cancelled through its context. `Invalidate` returns the dependents; those that are open are linted again. `Diagnostic.code` = rule code, `codeDescription` = the `explain` text, `relatedInformation` = `Related`, positions via `diag.UTF16Col`. |
 | `workspace/didChangeWatchedFiles` | `Invalidate` for disk changes; a config change rebuilds the `Linter`. |
 | `textDocument/codeAction` | `Fixes` on the diagnostics in range (quick-fix edits), plus generated "suppress with `dgdlint:disable-next-line`" actions. |
-| `textDocument/definition` | the index: resolve the identifier under the cursor through `Snapshot.Chain` (functions and variables; `::` and `label::` calls), `->` calls with a known receiver through `LookupCallable`, `inherit`/`#include` paths through `ObjectPath`/`ResolveInclude`, macros through the macro view. `ChainFunc`, `ChainVar` and `pp.Macro` carry the defining file and position; a definition in a profile stub is at `dgdlint-profile://NAME/std/room.c`. |
+| `textDocument/definition` | the index: resolve the identifier under the cursor through `Snapshot.Chain` (functions and variables; `::` and `label::` calls), `->` calls with a known receiver through `LookupCallable`, `inherit`/`#include` paths through `ObjectPath`/`ResolveInclude`, macros through the file's `pp.Env`. `ChainFunc`, `ChainVar` and `pp.Macro` carry the defining file and position; a definition in a profile stub is at `dgdlint-profile://NAME/std/room.c`. |
 | `textDocument/hover` | the same lookups: specifiers and argument range of a function, the object that provides it, a macro's body and class. |
 | `textDocument/documentSymbol`, `workspace/symbol` | `syntax.File.Decls`; the units' symbol tables. |
 | `textDocument/formatting` | `pkg/format`, already a pure function. |
@@ -480,14 +522,62 @@ error".
 
 ## 8. dgdfmt
 
-dgdfmt keeps using `pkg/structure` and is not moved onto the parser: the
-formatter must work on files that do not parse, its safety comes from the
-token-equality gate rather than from structure, and nothing here requires
-changing it. Its tests and gate are untouched and pass. The one shared
-change is in the lexer: a bare carriage return inside a string literal is
-string content (DGD accepts it) rather than an unterminated string; the
-lexer stays byte-lossless and the lexer/format/tokcmp tests pass
-unchanged.
+The formatter is a trivia-only rewriter with a gate: it writes every
+significant token's bytes unchanged, synthesizes the whitespace between
+them, and returns a result only if the output re-lexes to the same token
+stream (`pkg/tokcmp`) and formatting it again changes nothing. That
+design is right for a formatter that must also work on files that do not
+parse, and it is kept. What it lays tokens out *by* is the syntax tree.
+
+**Plan.** `pkg/format` reads the file as every other tool does
+(`pp.Env.Scan`, `syntax.Parse`) and records two things per token: the
+indentation level of the statement or declaration it belongs to, and its
+role. Levels come from statement structure, so the body of a braceless
+`if`/`else`/`for`/`while`/`do` is one level in, `else if` is a chain,
+case labels stand with their `switch`, and any line that does not begin a
+statement continues one. Roles are what a token stream cannot tell:
+binary or unary `+ - * &`, prefix or postfix `++ --`, the `?` and `:` of
+a conditional expression, the braces of a block, a `switch` or an array
+literal, which `{` and `else` join the line before them, and where a
+function's header ends.
+
+**Printer.** One pass over the token stream writes each token with the
+separator and indentation the plan gives. Inside a statement the printer
+tracks only the brackets open in it (parentheses, `({`, `([`), for the
+indentation of the lines that continue it.
+
+**Every branch.** A formatter lays out all the text of a file, not one
+configuration of it. The file is parsed as `pp` selects it, then again
+with other arms of its conditionals selected (`Env.ScanArms`), until
+every token has been read in some arm; a token is planned by the first
+round that reads it. The printer starts each arm from the state the
+conditional began with, so braces opened in both arms of an `#if`/`#else`
+count once, and continues after `#endif` from the arm `pp` selected.
+
+**Where the parser gives up.** A statement or declaration the parser
+could not read is marked as not understood. There the printer falls back
+to what the neighbouring tokens suggest (the previous token decides unary
+or binary, braces are counted for indentation, relative to the level of
+the region) and moves no line break, since the parser's recovery looks at
+line breaks and the result must be a fixed point. The statement read
+right after a skipped construct parsed, and is laid out by its shape
+(`BadStmt.Resumed`), though the rules never see it.
+
+**One file, one result.** A file is formatted from its own text and the
+project's options (`format.OptionsFromConfig`: indent, line endings,
+blank lines, header style, predefined names and configured macro
+classes). No other file is read: the parser runs with a partial
+environment, so macros from headers are met with the same tolerance as
+in a checkout with nothing else in it, and the result is the same in an
+editor buffer, in a wizard's folder and in the whole lib. `dgdfmt` finds
+each file's project the way `dgdlint` does (the nearest `dgdtools.yml`
+at or above it), which gives the dialect (the config's or its
+profile's); the `unformatted` rule calls the same function with the same
+options.
+
+Measured on the Viking lib (182,126 `.c`/`.h` files): 180,850 formatted,
+1,276 refused because they do not tokenize, no gate failure, and a second
+pass over the formatted tree changes nothing.
 
 ## 9. Verification and results
 
@@ -625,7 +715,7 @@ Most wizards do not have the mud. They download `/players/<name>/` or
 `/d/<Domain>/`, write their area, and upload it. Everything their code
 leans on (the headers behind `#include <mudlib.h>`, `/std/room`, the
 daemons) is somewhere they cannot see. Without it a linter can only run
-file-local rules, and even those with a partial macro view.
+file-local rules, and even those with a partial `#define` environment.
 
 Every mature tool solves this the same way: ship *declarations* of the
 platform separately from the user's code. TypeScript has `lib.d.ts` and
@@ -773,7 +863,7 @@ fewest wizard files (55 under `/players`, 189 under `/d`, against 845 and
   unknown and silent. An `#include` is provably missing only if every
   place the driver would look is covered.
 - If the checkout's place in the lib cannot be determined, the profile's
-  headers still give complete macro views (so the syntax rules are
+  headers still give complete `#define` environments (so the syntax rules are
   exact), but nothing is claimed between the wizard's own files, and one
   note asks for `lib_path`.
 
@@ -890,10 +980,10 @@ Implemented: everything in sections 2–7 except the items below.
 
 Deferred, in rough priority order:
 
-1. **Conditions decided through includes.** `#ifdef X` where X comes from
-   a header is currently a guess (and its branch is not judged). A small
-   define-tracking environment across the include closure would decide
-   most of them and recover recall inside `#if` blocks.
+1. **Conditions inside headers that depend on the includer.** A header's
+   table is built from the header alone and shared (2.2); such a
+   condition is a guess. Deciding it means reading the header once per
+   distinct environment it is included in.
 2. **Name resolution** ("undefined function", "undeclared variable",
    direct-call arity, redeclaration): the next 2,500 files the driver
    rejects. Needs the kfun table, scopes, and inherited variables.
@@ -903,8 +993,11 @@ Deferred, in rough priority order:
 4. **`--fix`** (see 4.1) and more fixes than `adjacent-strings`.
 5. **Linting headers** (`.h` files with code) and `.c` fragments in the
    context of their includers.
-6. **dgdfmt on the tree** for indentation of braceless bodies, with the
-   brace stack as the fallback in error regions.
+6. **dgdfmt in code the parser cannot read from the file alone**
+   (`ob->QN` with `QN` a macro from a header, and the like): such a
+   statement keeps its line breaks. Giving the formatter the project's
+   headers would lay it out too, at the price of a result that depends
+   on other files.
 7. **`dgdlint lsp`** (6.1), plus `dgdlint init` to write a starter config.
 8. **Type rules** on the declarations the index now keeps. Candidates,
    by the driver errors they would catch (file counts from the oracle):
