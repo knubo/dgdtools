@@ -1,0 +1,90 @@
+dgdtools-profile 1
+{
+ "format": 1,
+ "name": "mylib",
+ "dialect": {
+  "language": "lpc",
+  "driver": "dgd",
+  "version": "1.7",
+  "slash_slash": true,
+  "closures": false,
+  "typechecking": 1,
+  "predefined": [
+   "__DGD__"
+  ]
+ },
+ "include_dirs": [
+  "/include"
+ ],
+ "include_file": "/include/std.h",
+ "auto_objects": [
+  "/sys/auto"
+ ],
+ "create": "_F_create",
+ "relative_object_paths": "file",
+ "covered": [
+  "/include/",
+  "/std/"
+ ],
+ "holes": [
+  "std/secret/**"
+ ],
+ "checkouts": [
+  "usr/*"
+ ],
+ "conventions": {
+  "specifier_macros": [
+   "public"
+  ],
+  "macros": {
+   "FOREACH": "statement"
+  },
+  "defines": [
+   "__FEATURE__"
+  ],
+  "call_registry": {
+   "add_action": [
+    {
+     "function": 0
+    }
+   ],
+   "bind": [
+    {
+     "function": 1,
+     "object": 0,
+     "args": 2
+    },
+    {
+     "function": 0
+    }
+   ]
+  },
+  "object_registry": {
+   "load": 0
+  },
+  "format_registry": {
+   "scan": 1
+  },
+  "autosave_markers": [
+   "set_save"
+  ],
+  "virtual_paths": [
+   "virtual/**"
+  ]
+ }
+}
+=== /include/std.h
+#define status int
+#define I_ROOM "/std/room"
+=== /std/base.c
+int query(int a) {}
+=== /std/room.c
+inherit "/std/base";
+static void create() {}
+void add_exit(string to, string dir) {}
+=== /std/sep/=== odd.c
+void f() {}
+=== /std/unreadable.c
+#pragma dgdtools partial
+=== /sys/auto.c
+static string object_name() {}

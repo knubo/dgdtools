@@ -154,10 +154,6 @@ func TestProfileBuildAndPartialCheckout(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, p.Manifest, loaded.Manifest)
 	assert.Equal(t, p.Files, loaded.Files)
-	_, err = profile.Parse([]byte("dgdtools-profile 99\n{}\n"))
-	assert.ErrorContains(t, err, "format 99")
-	_, err = profile.Parse([]byte("dgdtools-profile 1\n{\"dialect\":{\"driver\":\"fluffos\"}}\n"))
-	assert.ErrorContains(t, err, "only the dgd dialect")
 
 	// --- whole lib vs. the wizard's folder alone with the profile
 	want := findings(t, full, m, "/mud/lib/players/ann")
@@ -260,9 +256,6 @@ func TestProfileResolution(t *testing.T) {
 
 	// What a front end reads from its environment and hands over.
 	dirs := profile.UserDirs("/opt/a"+string(os.PathListSeparator)+"/opt/b", "/home/zed/Library/Application Support", "/home/zed")
-	assert.Equal(t, []string{"/opt/a", "/opt/b", "/home/zed/Library/Application Support/dgdtools/profiles", "/home/zed/.config/dgdtools/profiles"}, dirs)
-	assert.Equal(t, []string{"/home/zed/.config/dgdtools/profiles"}, profile.UserDirs("", "/home/zed/.config", "/home/zed"))
-	assert.Empty(t, profile.UserDirs("", "", ""))
 	opt := config.DiscoverOptions{ProfileDirs: dirs}
 
 	room := "#include <std.h>\ninherit I_ROOM;\nstatic void create() {\n ::create();\n this_object()->no_such_function_anywhere();\n}\n"
@@ -301,16 +294,6 @@ func TestProfileResolution(t *testing.T) {
 	got := findings(t, prj, wiz, "/home/zed/players/zed/room.c")
 	require.Len(t, got, 1, "%v", got)
 	assert.Contains(t, got[0], "room.c:5 callable-not-found function 'no_such_function_anywhere'")
-
-	// The library API the CLI and a language server share.
-	path, err := profile.Resolve(wiz, "mini", "/somewhere/else", dirs)
-	require.NoError(t, err)
-	assert.Equal(t, "/opt/b/mini.profile", path)
-	path, err = profile.Resolve(wiz, "../../../../opt/b/mini.profile", "/home/zed/players/zed", nil)
-	require.NoError(t, err)
-	assert.Equal(t, "/opt/b/mini.profile", path)
-	_, err = profile.Resolve(wiz, "/nowhere/x.profile", "/", nil)
-	assert.ErrorContains(t, err, "does not exist")
 
 	// By flag, with no config file at all.
 	delete(wiz, "/home/zed/players/zed/dgdtools.yml")
@@ -355,20 +338,4 @@ func TestStubLocations(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, "mini", name)
 	assert.Equal(t, p.Files[libFile], prj.Profile.Files["/std/room.c"], "the location names the stub")
-	_, _, ok = profile.SplitLocation("/home/ann/players/ann/x.c")
-	assert.False(t, ok)
-
-	// The stub is readable where the index reads it, and nowhere else.
-	stubs := profile.NewFS(alone, prj.Profile)
-	assert.Equal(t, profile.Location("mini"), stubs.Location())
-	src, err := stubs.ReadFile("dgdtools-profile://mini/std/room.c")
-	require.NoError(t, err)
-	assert.Equal(t, p.Files["/std/room.c"], string(src))
-	assert.True(t, stubs.Exists("dgdtools-profile://mini/std"))
-	assert.True(t, stubs.IsDir("dgdtools-profile://mini/std"))
-	assert.False(t, stubs.IsDir("dgdtools-profile://mini/std/room.c"))
-	assert.False(t, stubs.Exists("dgdtools-profile://mini/std/none.c"))
-	assert.False(t, stubs.Exists("dgdtools-profile://other/std/room.c"))
-	assert.False(t, stubs.Exists("/std/room.c"))
-	assert.True(t, stubs.Exists("/home/ann/players/ann/x.c"))
 }
