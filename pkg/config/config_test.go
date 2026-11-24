@@ -6,6 +6,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/mmcdole/dgdtools/pkg/profile"
 	"github.com/mmcdole/dgdtools/pkg/vfs"
 )
 
@@ -16,6 +17,7 @@ include_file	= "/dgd/include/Std.h";	/* standard include file */
 include_dirs	= ({ "/dgd/include",
 		     "/std/include" }); /* directories to search */
 auto_object	= "/dgd/lib/object";	/* auto inherited object */
+create		= "_F_create";		/* name of create function */
 modules = ([ "/x/ext.so" : "" ]);
 `
 
@@ -40,6 +42,7 @@ func TestDiscoverWalksUpFromThePath(t *testing.T) {
 	assert.Equal(t, []string{"/dgd/include", "/std/include"}, prj.Config.IncludeDirs)
 	assert.Equal(t, "/dgd/include/Std.h", prj.Config.IncludeFile)
 	assert.Equal(t, []string{"/dgd/lib/object"}, prj.Config.AutoObjects)
+	assert.Equal(t, "_F_create", prj.Config.Create)
 	require.NotNil(t, prj.Config.Dialect.Typechecking)
 	assert.Equal(t, 1, *prj.Config.Dialect.Typechecking)
 
@@ -83,7 +86,7 @@ func TestDiscoverWalksUpFromThePath(t *testing.T) {
 
 func TestExplicitKeysBeatDriverConfig(t *testing.T) {
 	m := vfs.Mem{
-		"/mud/dgdtools.yml": "profile_build:\n  driver_config: mud.dgd\ninclude_dirs: [/mine]\ndialect: {typechecking: 2}\n",
+		"/mud/dgdtools.yml": "profile_build:\n  driver_config: mud.dgd\ninclude_dirs: [/mine]\ncreate: init\ndialect: {typechecking: 2}\n",
 		"/mud/mud.dgd":      driverCfg,
 		"/mud/a.c":          "",
 	}
@@ -91,6 +94,7 @@ func TestExplicitKeysBeatDriverConfig(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, []string{"/mine"}, prj.Config.IncludeDirs)
 	assert.Equal(t, 2, *prj.Config.Dialect.Typechecking)
+	assert.Equal(t, "init", prj.Config.Create)
 	assert.Equal(t, "/dgd/include/Std.h", prj.Config.IncludeFile)
 }
 
@@ -100,7 +104,7 @@ func TestExtendsAndRuleSettings(t *testing.T) {
 exclude: ["attic/**"]
 conventions:
   specifier_macros: [public]
-  call_registry: {add_action: 0}
+  call_registry: {add_action: {function: 0}}
 lint:
   rules:
     syntax: error
@@ -111,7 +115,7 @@ lint:
 		"/proj/dgdtools.yml": `extends: ../shared/base.yml
 exclude: ["**/old/**"]
 conventions:
-  call_registry: {store_fp: 0}
+  call_registry: {store_fp: [{object: 0, function: 1}, {function: 0}]}
   macros: { FOREACH: statement }
   defines: [__FEATURE__]
 lint:
@@ -129,7 +133,11 @@ lint:
 	assert.Equal(t, "/shared/lib", c.AbsRoot())
 	// Lists replace, maps merge.
 	assert.Equal(t, []string{"**/old/**"}, c.Exclude)
-	assert.Equal(t, map[string]int{"add_action": 0, "store_fp": 0}, c.Conventions.CallRegistry)
+	zero := 0
+	assert.Equal(t, map[string]profile.CallForms{
+		"add_action": {{Function: 0}},
+		"store_fp":   {{Object: &zero, Function: 1}, {Function: 0}},
+	}, c.Conventions.CallRegistry)
 	// Scalar and mapping rule settings.
 	assert.Equal(t, "error", c.Lint.Rules["syntax"].Severity)
 	assert.Equal(t, "info", c.Lint.Rules["E001"].Severity)
@@ -155,19 +163,60 @@ lint:
 	assert.ErrorContains(t, err, "cycle")
 }
 
-// The documented example must stay loadable and name only real settings.
-func TestExampleConfigLoads(t *testing.T) {
+// The documented examples must stay loadable and name only real settings.
+func TestExampleConfigsLoad(t *testing.T) {
 	c, err := Load(vfs.OS{}, "../../dgdtools.example.yml")
 	require.NoError(t, err)
-	assert.Equal(t, "etc/config.viking", c.ProfileBuild.DriverConfig)
-	assert.Contains(t, c.ProfileBuild.Share, "std/**")
+	assert.Equal(t, "mud.dgd", c.ProfileBuild.DriverConfig)
 	assert.Equal(t, "root", c.RelativeObjectPaths)
-	assert.Equal(t, []string{"public"}, c.Conventions.SpecifierMacros)
+	assert.Empty(t, c.Conventions.SpecifierMacros)
 	assert.Equal(t, Format{IndentSpace, 4, LineEndingsPreserve}, c.Format)
 	assert.Equal(t, "warning", c.Lint.Rules["raw-inherit-path"].Severity)
 	require.Len(t, c.Lint.Overrides, 1)
 	assert.Equal(t, "off", c.Lint.Overrides[0].Rules["lifecycle-chain"].Severity)
-	assert.Contains(t, c.Exclude, "**/attic/**")
+
+	c, err = Load(vfs.OS{}, "../../examples/viking/dgdtools.yml")
+	require.NoError(t, err)
+	assert.Equal(t, "etc/config.viking", c.ProfileBuild.DriverConfig)
+	assert.Contains(t, c.ProfileBuild.Share, "std/**")
+	assert.Equal(t, []string{"public"}, c.Conventions.SpecifierMacros)
+	zero := 0
+	assert.Equal(t, map[string]profile.CallForms{
+		"add_action": {{Function: 0}},
+		"store_fp":   {{Object: &zero, Function: 1}, {Function: 0}},
+	}, c.Conventions.CallRegistry)
+	assert.Equal(t, []string{"create"}, c.Lint.Rules["lifecycle-chain"].Names)
+	assert.Contains(t, c.Exclude, "attic/**")
+}
+
+// What a call registry entry may say.
+func TestCallRegistry(t *testing.T) {
+	load := func(entry string) (*Config, error) {
+		return Load(vfs.Mem{"/p/dgdtools.yml": "conventions:\n  call_registry:\n    f: " + entry + "\n"}, "/p/dgdtools.yml")
+	}
+	one, two := 1, 2
+	c, err := load("{function: 0}")
+	require.NoError(t, err)
+	assert.Equal(t, profile.CallForms{{Function: 0}}, c.Conventions.CallRegistry["f"])
+	c, err = load("[{object: 1, function: 0, args: 2}, {function: 1}]")
+	require.NoError(t, err)
+	assert.Equal(t, profile.CallForms{{Object: &one, Function: 0, Args: &two}, {Function: 1}}, c.Conventions.CallRegistry["f"])
+
+	for entry, want := range map[string]string{
+		"0":                         "{function: N}",
+		"{object: 0}":               "needs function",
+		"{function: 0, obj: 1}":     `unknown key "obj"`,
+		"{function: -1}":            "0-based argument index",
+		"{function: first}":         "0-based argument index",
+		"[]":                        "at least one form",
+		"[{function: 0}, 1]":        "{function: N}",
+		"{function: 0, args: 1.5}":  "0-based argument index",
+		"{function: 0, object: no}": "0-based argument index",
+	} {
+		_, err := load(entry)
+		assert.ErrorContains(t, err, want, entry)
+		assert.ErrorContains(t, err, "line 3", entry)
+	}
 }
 
 func TestInferCheckout(t *testing.T) {

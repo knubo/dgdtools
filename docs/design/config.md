@@ -47,15 +47,18 @@ errors.
 ```yaml
 # Project keys: what the project is. Root config only.
 root: lib                  # the directory that is "/" to the driver (default: this file's directory)
-profile: viking            # the mudlib profile, for a partial checkout
-lib_path: /players/drake   # where a partial checkout sits in the lib
+profile: mylib             # the mudlib profile, for a partial checkout
+lib_path: /usr/name        # where a partial checkout sits in the lib
 exclude: ["attic/**"]
 dialect: {slash_slash: true, closures: false, typechecking: 2}
 include_dirs: ["/include"] # what the driver's config says
 include_file: /include/std.h
 auto_objects: [/kernel/lib/auto]
-conventions:               # the lib's habits: macros, registries
+create: _F_create
+relative_object_paths: file
+conventions:               # the lib's habits: macros, registries; no defaults
   specifier_macros: [public]
+  call_registry: {subscribe: {function: 1}}
 profile_build: {driver_config: etc/mud.dgd}
 
 # Settings: how files are formatted and linted. Any scope.

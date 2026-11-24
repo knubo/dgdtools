@@ -2,6 +2,7 @@ package lint
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/mmcdole/dgdtools/pkg/calls"
@@ -196,32 +197,40 @@ var ruleCallbackArity = &Rule{
 
 var ruleLifecycleChain = &Rule{
 	Code: "R006", Name: "lifecycle-chain", Group: GroupRuntime,
-	Doc: "lifecycle function (default: create) does not call the inherited implementations",
-	Explain: "A create() that overrides an inherited create() without calling " +
-		"::create() leaves the parent uninitialized. With several defining " +
+	Doc: "lifecycle function (the create function) does not call the inherited implementations",
+	Explain: "A create function that overrides an inherited one without calling " +
+		"it (::create()) leaves the parent uninitialized. With several defining " +
 		"parents, label each inherit and chain each one. Proof-based: files with " +
 		"no explicit inherit, parents without the function, and unresolved " +
-		"parents are skipped. Configure the function names with " +
-		"rules.lifecycle-chain.names.",
+		"parents are skipped. The function is the one the driver calls in a new " +
+		"object: the driver config's create parameter (the project key create), " +
+		"and \"create\" when that is not known. A lib whose auto object receives " +
+		"that call and passes it on under another name, or that has more such " +
+		"functions, lists them in rules.lifecycle-chain.names.",
 	Default: true, Severity: diag.Warning, CrossFile: true,
 	Run: func(p *Pass) {
 		names := p.Settings.Names
 		if len(names) == 0 {
-			names = []string{"create"}
+			names = []string{defaultCreate}
+			if p.Config.Create != "" {
+				names[0] = p.Config.Create
+			}
 		}
 		for _, d := range p.Tree.Decls {
 			fn, ok := d.(*syntax.FuncDecl)
 			if !ok || fn.Body == nil || fn.Name == nil {
 				continue
 			}
-			for _, n := range names {
-				if n == fn.Name.Name {
-					checkLifecycleChain(p, fn)
-				}
+			if slices.Contains(names, fn.Name.Name) {
+				checkLifecycleChain(p, fn)
 			}
 		}
 	},
 }
+
+// defaultCreate is the create function assumed when neither the driver's
+// configuration nor the project says: the name LPC libs use by custom.
+const defaultCreate = "create"
 
 type lifecycleParent struct {
 	labels []string

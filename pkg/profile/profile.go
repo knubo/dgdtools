@@ -35,6 +35,8 @@ import (
 	"sort"
 	"strings"
 
+	"gopkg.in/yaml.v3"
+
 	"github.com/mmcdole/dgdtools/pkg/vfs"
 )
 
@@ -60,27 +62,93 @@ type Dialect struct {
 }
 
 // Conventions are the lib's own habits that the tools need to be told.
-// The same keys are the `conventions:` section of dgdtools.yml.
+// The same keys are the `conventions:` section of dgdtools.yml. Nothing
+// here has a default: a lib that does not say has none.
 type Conventions struct {
-	// SpecifierMacros are empty-macro visibility markers ("public").
+	// SpecifierMacros are names that stand where a class specifier does
+	// and expand to nothing (a lib's `#define public`), for files read
+	// without the header that defines them.
 	SpecifierMacros []string `json:"specifier_macros,omitempty" yaml:"specifier_macros"`
 	// Macros overrides the class the parser derives for a macro:
 	// type | specifier | statement | expression | opaque.
 	Macros map[string]string `json:"macros,omitempty" yaml:"macros"`
 	// Defines are names treated as defined when choosing #ifdef branches.
 	Defines []string `json:"defines,omitempty" yaml:"defines"`
-	// CallRegistry maps function names to the argument index (0-based)
-	// holding a callback function name targeting this_object().
-	CallRegistry map[string]int `json:"call_registry,omitempty" yaml:"call_registry"`
+	// CallRegistry lists the lib's functions that take the name of a
+	// function to call later, with where their arguments say which.
+	CallRegistry map[string]CallForms `json:"call_registry,omitempty" yaml:"call_registry"`
 	// ObjectRegistry maps path-taking functions to the argument index.
 	ObjectRegistry map[string]int `json:"object_registry,omitempty" yaml:"object_registry"`
 	// FormatRegistry maps scanf-style functions to their format argument.
 	FormatRegistry map[string]int `json:"format_registry,omitempty" yaml:"format_registry"`
-	// AutosaveMarkers are function or macro names whose presence marks an
-	// object as persisting via save_object/restore_object.
+	// AutosaveMarkers are function or macro names whose mention marks an
+	// object as one that saves itself with save_object.
 	AutosaveMarkers []string `json:"autosave_markers,omitempty" yaml:"autosave_markers"`
 	// VirtualPaths are lib-path globs served by virtual-object daemons.
 	VirtualPaths []string `json:"virtual_paths,omitempty" yaml:"virtual_paths"`
+}
+
+// CallForm is one way of calling a function that takes the name of a
+// function to call later: which argument (0-based) is what. The driver's
+// own two are call_other, {object: 0, function: 1, args: 2}, and
+// call_out, {function: 0, args: 2}.
+type CallForm struct {
+	// Function is the argument that names the function, as a string.
+	Function int `json:"function" yaml:"function"`
+	// Object is the argument that says which object the function is
+	// called in. With one, the call is a call_other: static and private
+	// functions are out of reach. Without, the function is called in
+	// this_object(), where static functions can be reached.
+	Object *int `json:"object,omitempty" yaml:"object"`
+	// Args is the first of the arguments that are passed on to the
+	// function, the rest of the call's arguments being the function's.
+	// Without it, how many arguments the function gets is not known.
+	Args *int `json:"args,omitempty" yaml:"args"`
+}
+
+// CallForms are the forms a function can be called in. A call is read by
+// the first form it fits: one whose function argument is a string
+// constant that names a function. In YAML one form may be written without
+// the list.
+type CallForms []CallForm
+
+func (f *CallForms) UnmarshalYAML(n *yaml.Node) error {
+	nodes := []*yaml.Node{n}
+	if n.Kind == yaml.SequenceNode {
+		nodes = n.Content
+		if len(nodes) == 0 {
+			return fmt.Errorf("line %d: a call registry entry needs at least one form: {function: N}", n.Line)
+		}
+	}
+	*f = nil
+	for _, m := range nodes {
+		if m.Kind != yaml.MappingNode {
+			return fmt.Errorf("line %d: a call registry entry is {function: N} with optional object: and args:, or a list of those; N is a 0-based argument index", m.Line)
+		}
+		form, hasFunction := CallForm{}, false
+		for i := 0; i+1 < len(m.Content); i += 2 {
+			key, val := m.Content[i], m.Content[i+1]
+			var idx int
+			if err := val.Decode(&idx); err != nil || val.Tag != "!!int" || idx < 0 {
+				return fmt.Errorf("line %d: %s: want a 0-based argument index", val.Line, key.Value)
+			}
+			switch key.Value {
+			case "function":
+				form.Function, hasFunction = idx, true
+			case "object":
+				form.Object = &idx
+			case "args":
+				form.Args = &idx
+			default:
+				return fmt.Errorf("line %d: unknown key %q in a call registry entry (want function, object, args)", key.Line, key.Value)
+			}
+		}
+		if !hasFunction {
+			return fmt.Errorf("line %d: a call registry entry needs function: the argument that names the function", m.Line)
+		}
+		*f = append(*f, form)
+	}
+	return nil
 }
 
 // Manifest is the non-source part of a profile.
@@ -92,6 +160,7 @@ type Manifest struct {
 	IncludeDirs         []string `json:"include_dirs,omitempty"`
 	IncludeFile         string   `json:"include_file,omitempty"`
 	AutoObjects         []string `json:"auto_objects,omitempty"`
+	Create              string   `json:"create,omitempty"`
 	RelativeObjectPaths string   `json:"relative_object_paths,omitempty"`
 
 	// Covered are lib directory prefixes ("/std/") the profile captures
@@ -290,8 +359,8 @@ const Scheme = "dgdtools-profile"
 
 // Location returns the location prefix of a profile's stubs. A stub is
 // not a file on disk and is not named like one: the stub for lib file
-// "/std/room.c" of profile "viking" is at
-// "dgdtools-profile://viking/std/room.c". That is the path FS answers
+// "/std/room.c" of profile "mylib" is at
+// "dgdtools-profile://mylib/std/room.c". That is the path FS answers
 // for, the path diagnostics name when a declaration comes from a stub,
 // and the URI of the read-only document an editor shows for it.
 func Location(name string) string { return Scheme + "://" + name }

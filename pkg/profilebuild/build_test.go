@@ -31,9 +31,9 @@ profile_build:
   omit: ["secure/private/**"]
   checkouts: ["players/*", "d/*"]
 conventions:
-  call_registry: {add_action: 0}
+  call_registry: {add_action: {function: 0}}
 `,
-		"/mud/etc/mud.dgd":                "include_file = \"/sys/forced.h\";\ninclude_dirs = ({ \"/std/include\" });\nauto_object = \"/sys/auto\";\ntypechecking = 1;\n",
+		"/mud/etc/mud.dgd":                "include_file = \"/sys/forced.h\";\ninclude_dirs = ({ \"/std/include\" });\nauto_object = \"/sys/auto\";\ncreate = \"create\";\ntypechecking = 1;\n",
 		"/mud/lib/sys/forced.h":           "#define TRUE 1\n#define public\n",
 		"/mud/lib/sys/auto.c":             "static string object_name() { return \"x\"; }\nvoid secret_impl() { int body; body = 42; }\n",
 		"/mud/lib/std/include/std.h":      "#ifndef STD_H\n#define STD_H\n#include <paths.h>\n#define status int\n#define MAX(a, b) ((a) > (b) ? (a) : (b))\n#endif\n",
@@ -105,7 +105,8 @@ func TestProfileBuildAndPartialCheckout(t *testing.T) {
 	assert.Equal(t, 1, *p.Dialect.Typechecking)
 	assert.Equal(t, []string{"/std/include"}, p.IncludeDirs)
 	assert.Equal(t, "/sys/forced.h", p.IncludeFile)
-	assert.Equal(t, map[string]int{"add_action": 0}, p.Conventions.CallRegistry)
+	assert.Equal(t, "create", p.Create)
+	assert.Equal(t, map[string]profile.CallForms{"add_action": {{Function: 0}}}, p.Conventions.CallRegistry)
 	assert.Equal(t, []string{"/secure/", "/std/", "/std/include/"}, p.Covered)
 	var files []string
 	for f := range p.Files {

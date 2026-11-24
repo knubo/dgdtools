@@ -261,16 +261,14 @@ func resolve(fs vfs.FS, opt DiscoverOptions, found, base string) (*Project, erro
 		prj.mount(base, libPath)
 	case prj.Profile != nil && !prj.wholeLib(fs):
 		// A profile and something that is not the whole lib: a partial
-		// checkout. Where it sits is read off its path when the lib's
-		// per-wizard layout shows there (…/players/<name>/…).
+		// checkout. Where it sits is read off its path when one of the
+		// profile's checkout patterns shows there.
 		if dir, lib, ok := InferCheckout(base, prj.Profile.Checkouts); ok {
 			prj.mount(dir, lib)
 		} else {
 			prj.Partial = true
 			prj.Root = ""
-			prj.Notes = append(prj.Notes, diag.Note{Kind: diag.NoteUnplacedCheckout, Path: base, Message: fmt.Sprintf(
-				"cannot tell where %s sits in the lib (no %s in its path): add `lib_path: /players/<you>` to dgdtools.yml to check references between your own files",
-				base, strings.Join(prj.Profile.Checkouts, " or "))})
+			prj.Notes = append(prj.Notes, diag.Note{Kind: diag.NoteUnplacedCheckout, Path: base, Message: unplaced(base, prj.Profile.Checkouts)})
 		}
 	}
 	if prj.Profile != nil {
@@ -284,6 +282,16 @@ func resolve(fs vfs.FS, opt DiscoverOptions, found, base string) (*Project, erro
 		return nil, fmt.Errorf("lib root %s is not a directory", prj.Root)
 	}
 	return prj, nil
+}
+
+// unplaced says that a checkout's place in the lib is not known, and how
+// to tell.
+func unplaced(dir string, checkouts []string) string {
+	why := ""
+	if len(checkouts) > 0 {
+		why = " (no " + strings.Join(checkouts, " or ") + " in its path)"
+	}
+	return fmt.Sprintf("cannot tell where %s sits in the lib%s: set `lib_path:` in dgdtools.yml to the lib path of that directory to check references between its own files", dir, why)
 }
 
 // Workspace finds the project of each path it is asked about, for tools
@@ -382,8 +390,8 @@ func (prj *Project) wholeLib(fs vfs.FS) bool {
 }
 
 // InferCheckout recognizes a per-wizard tree in dir's path: with pattern
-// "players/*", /home/me/mud/players/drake/rooms is the checkout
-// /home/me/mud/players/drake at lib path /players/drake. Patterns are
+// "players/*", /home/me/mud/players/ann/rooms is the checkout
+// /home/me/mud/players/ann at lib path /players/ann. Patterns are
 // tried in order; within one, the outermost match wins.
 func InferCheckout(dir string, patterns []string) (checkoutDir, lib string, ok bool) {
 	segs := strings.Split(filepath.ToSlash(dir), "/")
@@ -418,6 +426,9 @@ func applyProfile(cfg *Config, p *profile.Profile) {
 	if len(cfg.AutoObjects) == 0 {
 		cfg.AutoObjects = p.AutoObjects
 	}
+	if cfg.Create == "" {
+		cfg.Create = p.Create
+	}
 	if cfg.RelativeObjectPaths == "" {
 		cfg.RelativeObjectPaths = p.RelativeObjectPaths
 	}
@@ -441,35 +452,30 @@ func applyProfile(cfg *Config, p *profile.Profile) {
 	}
 	own.Defines = append(append([]string{}, c.Defines...), own.Defines...)
 	own.Defines = append(own.Defines, p.Dialect.Predefined...)
-	mergeInt := func(dst *map[string]int, src map[string]int) {
-		for k, v := range src {
-			if *dst == nil {
-				*dst = map[string]int{}
-			}
-			if _, set := (*dst)[k]; !set {
-				(*dst)[k] = v
-			}
+	merge(&own.CallRegistry, c.CallRegistry)
+	merge(&own.ObjectRegistry, c.ObjectRegistry)
+	merge(&own.FormatRegistry, c.FormatRegistry)
+	merge(&own.Macros, c.Macros)
+}
+
+// merge adds the entries of src that dst does not have.
+func merge[V any](dst *map[string]V, src map[string]V) {
+	for k, v := range src {
+		if *dst == nil {
+			*dst = map[string]V{}
 		}
-	}
-	mergeInt(&own.CallRegistry, c.CallRegistry)
-	mergeInt(&own.ObjectRegistry, c.ObjectRegistry)
-	mergeInt(&own.FormatRegistry, c.FormatRegistry)
-	for k, v := range c.Macros {
-		if own.Macros == nil {
-			own.Macros = map[string]string{}
-		}
-		if _, set := own.Macros[k]; !set {
-			own.Macros[k] = v
+		if _, set := (*dst)[k]; !set {
+			(*dst)[k] = v
 		}
 	}
 }
 
 // DriverConfig holds the values the tools need from a DGD driver config.
 type DriverConfig struct {
-	Directory    string
 	IncludeFile  string
 	IncludeDirs  []string
 	AutoObject   string
+	Create       string
 	Typechecking *int
 }
 
@@ -510,12 +516,12 @@ func ReadDriverConfig(fs vfs.FS, path string) (*DriverConfig, error) {
 			continue
 		}
 		switch name {
-		case "directory":
-			dc.Directory = str(vals[0])
 		case "include_file":
 			dc.IncludeFile = str(vals[0])
 		case "auto_object":
 			dc.AutoObject = str(vals[0])
+		case "create":
+			dc.Create = str(vals[0])
 		case "typechecking":
 			if n, err := strconv.Atoi(string(f.Text(vals[0]))); err == nil {
 				dc.Typechecking = &n
@@ -542,6 +548,9 @@ func (dc *DriverConfig) Apply(cfg *Config) {
 	}
 	if len(cfg.AutoObjects) == 0 && dc.AutoObject != "" {
 		cfg.AutoObjects = []string{dc.AutoObject}
+	}
+	if cfg.Create == "" {
+		cfg.Create = dc.Create
 	}
 	if cfg.Dialect.Typechecking == nil {
 		cfg.Dialect.Typechecking = dc.Typechecking

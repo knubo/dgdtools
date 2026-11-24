@@ -1,6 +1,7 @@
 package lint
 
 import (
+	"slices"
 	"strings"
 
 	"github.com/mmcdole/dgdtools/pkg/diag"
@@ -281,8 +282,9 @@ func hasAnyPrefix(s string, prefixes []string) bool {
 var ruleMissingVisibility = &Rule{
 	Code: "C002", Name: "missing-visibility", Group: GroupConvention,
 	Doc: "function with no visibility specifier",
-	Explain: "Flags functions declared without private, static, nomask or a " +
-		"specifier macro such as public.",
+	Explain: "Flags functions declared without private, static, nomask or one " +
+		"of the lib's specifier macros (conventions.specifier_macros, or an empty " +
+		"macro the file's headers define).",
 	Default: false, Severity: diag.Warning,
 	Run: func(p *Pass) {
 		p.Tree.Funcs(func(fn *syntax.FuncDecl) bool {
@@ -313,14 +315,16 @@ var ruleUnformatted = &Rule{
 
 var ruleStaticAutosaveVar = &Rule{
 	Code: "C004", Name: "static-autosave-var", Group: GroupConvention,
-	Doc: "static global in an auto-saving object; excluded from save_object",
+	Doc: "static global in an object that saves itself; excluded from save_object",
 	Explain: "Static variables are not saved by save_object. Off by default: " +
 		"static is also the deliberate idiom for runtime-only state, so this is a " +
-		"review aid for specifier changes, not a standing audit. An object is " +
-		"auto-saving when it mentions one of lint.autosave_markers.",
-	Default: false, Severity: diag.Warning, CrossFile: true,
+		"review aid for specifier changes, not a standing audit. An object saves " +
+		"itself when its source mentions one of conventions.autosave_markers (the " +
+		"lib's function or macro that turns saving on); without markers the rule " +
+		"reports nothing.",
+	Default: false, Severity: diag.Warning,
 	Run: func(p *Pass) {
-		if !p.Unit.AutoSave {
+		if !mentions(p, p.Config.Conventions.AutosaveMarkers) {
 			return
 		}
 		for _, d := range p.Tree.Decls {
@@ -333,6 +337,25 @@ var ruleStaticAutosaveVar = &Rule{
 			}
 		}
 	},
+}
+
+// mentions reports whether one of names stands as an identifier in the
+// file's compiled code.
+func mentions(p *Pass, names []string) bool {
+	if len(names) == 0 {
+		return false
+	}
+	for _, i := range p.Tree.Sel.Sig {
+		t := p.File.Tokens[i]
+		if t.Kind != token.Ident {
+			continue
+		}
+		text := p.File.Text(t)
+		if slices.ContainsFunc(names, func(n string) bool { return n == string(text) }) {
+			return true
+		}
+	}
+	return false
 }
 
 var ruleUnresolvedInherit = &Rule{

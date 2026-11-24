@@ -94,7 +94,6 @@ type lib struct {
 	holes    *fileset.Matcher
 	defined  map[string]bool
 	override map[string]pp.Class
-	markers  map[string]bool
 }
 
 // Index is the lib's index across generations. It hands out the current
@@ -162,14 +161,6 @@ func New(cfg *config.Config, lay Layout, fsys vfs.FS) *Index {
 		holes:    fileset.NewMatcher(lay.Holes),
 		defined:  cfg.Predefined(),
 		override: cfg.MacroClasses(),
-		markers:  map[string]bool{},
-	}
-	markers := cfg.Conventions.AutosaveMarkers
-	if len(markers) == 0 {
-		markers = []string{"set_auto_save"}
-	}
-	for _, m := range markers {
-		l.markers[m] = true
 	}
 
 	l.complete = lay.Root != ""

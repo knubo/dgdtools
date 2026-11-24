@@ -104,7 +104,6 @@ type Unit struct {
 	// UnknownIncludes counts includes that could not be resolved but are
 	// not provably missing (the lib is incomplete).
 	UnknownIncludes int
-	AutoSave        bool
 	// Deps are the files this unit was built from: itself, then every
 	// file it #includes directly or indirectly, then the force-included
 	// header and what that includes.

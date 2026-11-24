@@ -20,6 +20,7 @@ archives:
     files:
       - README.md
       - dgdtools.example.yml
+      - examples/viking/dgdtools.yml
 
 checksum:
   name_template: checksums.txt

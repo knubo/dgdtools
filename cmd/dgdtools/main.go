@@ -158,7 +158,7 @@ func (f *projectFlags) register(fs *flag.FlagSet) {
 	fs.BoolVar(&f.noConfig, "no-config", false, "read no configuration file (dgdtools.yml, user-level, .editorconfig)")
 	fs.StringVar(&f.root, "root", "", "lib root `dir` (the driver's \"/\"); overrides the config")
 	fs.StringVar(&f.profile, "profile", "", "mudlib profile: a `name` (see `dgdtools profile show`) or a profile file")
-	fs.StringVar(&f.libPath, "lib-path", "", "where this checkout sits in the lib, e.g. /players/you (a `path`)")
+	fs.StringVar(&f.libPath, "lib-path", "", "the lib `path` of the directory this checkout is, when it is not the whole lib")
 }
 
 // discover returns the options project discovery runs with.

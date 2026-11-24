@@ -81,15 +81,10 @@ func Build(ctx context.Context, prj *config.Project, fsys vfs.FS) (*profile.Prof
 		SlashSlash: d.SlashSlash, Closures: d.Closures,
 		Typechecking: cfg.Dialect.Typechecking, Predefined: pp.Predefined,
 	}
-	p.IncludeDirs, p.IncludeFile, p.AutoObjects = cfg.IncludeDirs, cfg.IncludeFile, cfg.AutoObjects
+	p.IncludeDirs, p.IncludeFile, p.AutoObjects, p.Create = cfg.IncludeDirs, cfg.IncludeFile, cfg.AutoObjects, cfg.Create
 	p.RelativeObjectPaths = cfg.RelativeObjectPaths
 	p.Checkouts = pb.Checkouts
-	p.Conventions = profile.Conventions{
-		SpecifierMacros: cfg.Conventions.SpecifierMacros, Macros: cfg.Conventions.Macros, Defines: cfg.Conventions.Defines,
-		CallRegistry: cfg.Conventions.CallRegistry, ObjectRegistry: cfg.Conventions.ObjectRegistry,
-		FormatRegistry: cfg.Conventions.FormatRegistry, AutosaveMarkers: cfg.Conventions.AutosaveMarkers,
-		VirtualPaths: cfg.Conventions.VirtualPaths,
-	}
+	p.Conventions = cfg.Conventions
 
 	// Seeds: shared files and include dirs, by walking the lib once.
 	var queue []string

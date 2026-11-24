@@ -75,31 +75,29 @@ type Facts struct {
 	Direct []Direct
 }
 
-// registrar is a function that takes the name of a function to call.
-type registrar struct {
-	arg        int
-	kind       Kind
-	targetArg0 bool
-}
-
 // Registry knows which functions take a function name or an object path:
 // the driver's own and those of the lib's conventions. It is immutable.
 type Registry struct {
-	named   map[string]registrar
+	named   map[string]profile.CallForms
 	objects map[string]int
 }
 
 // NewRegistry returns the registry of a lib with the given conventions.
+// The driver's functions are in every registry: call_other and call_out,
+// and the functions that take an object path, compile_object, find_object
+// and clone_object. An entry of the conventions with one of those names
+// replaces it.
 func NewRegistry(conv profile.Conventions) *Registry {
+	zero, two := 0, 2
 	r := &Registry{
-		named: map[string]registrar{
-			"call_other": {arg: 1, kind: CrossObject, targetArg0: true},
-			"call_out":   {arg: 0, kind: SelfCallback},
+		named: map[string]profile.CallForms{
+			"call_other": {{Object: &zero, Function: 1, Args: &two}},
+			"call_out":   {{Function: 0, Args: &two}},
 		},
 		objects: map[string]int{"clone_object": 0, "compile_object": 0, "find_object": 0},
 	}
-	for name, arg := range conv.CallRegistry {
-		r.named[name] = registrar{arg: arg, kind: SelfCallback}
+	for name, forms := range conv.CallRegistry {
+		r.named[name] = forms
 	}
 	for name, arg := range conv.ObjectRegistry {
 		r.objects[name] = arg
@@ -170,50 +168,30 @@ func Extract(f File, reg *Registry) *Facts {
 						})
 					}
 				}
-				r, ok := reg.named[name]
-				if !ok || r.arg >= len(n.Args) {
-					return true
-				}
-				fnArg := n.Args[r.arg]
-				fname, ok := strLit(fnArg)
-				if !ok {
-					return true
-				}
-				c := Named{
-					Func: fname, Via: name, Kind: r.kind,
-					Target: TargetSelf, NArgs: -1,
-					Start: t.Off(fnArg), End: t.End(fnArg),
-				}
-				if r.targetArg0 {
-					c.Target, c.TargetPath = f.target(n.Args[0])
-				}
-				// call_other(obj, "fn", rest...) and call_out("fn", delay,
-				// rest...) hand exactly the rest to the callee.
-				if name == "call_other" || name == "call_out" {
-					if n.Spread {
-						c.NArgs = -1
-					} else if len(n.Args) >= 2 {
-						c.NArgs = len(n.Args) - 2
-					} else {
-						c.NArgs = 0
+				// The first form the call fits says what it is.
+				for _, form := range reg.named[name] {
+					if form.Function >= len(n.Args) || (form.Object != nil && *form.Object >= len(n.Args)) {
+						continue
 					}
-				}
-				if !token.IsIdent(fname) {
-					// Two-argument registrar form: fp("/obj/path", "fn")
-					// binds fn on another object.
-					if strings.Contains(fname, "/") && r.arg+1 < len(n.Args) {
-						if fn2, ok := strLit(n.Args[r.arg+1]); ok && token.IsIdent(fn2) {
-							cf.Named = append(cf.Named, Named{
-								Func: fn2, Via: name, Kind: CrossObject,
-								Target: TargetPath, NArgs: -1,
-								TargetPath: f.ObjectPath(fname),
-								Start:      t.Off(n.Args[r.arg+1]), End: t.End(n.Args[r.arg+1]),
-							})
-						}
+					fnArg := n.Args[form.Function]
+					fname, ok := strLit(fnArg)
+					if !ok || !token.IsIdent(fname) {
+						continue
 					}
-					return true
+					c := Named{
+						Func: fname, Via: name, Kind: SelfCallback, Target: TargetSelf, NArgs: -1,
+						Start: t.Off(fnArg), End: t.End(fnArg),
+					}
+					if form.Object != nil {
+						c.Kind = CrossObject
+						c.Target, c.TargetPath = f.target(n.Args[*form.Object])
+					}
+					if form.Args != nil && !n.Spread {
+						c.NArgs = max(len(n.Args)-*form.Args, 0)
+					}
+					cf.Named = append(cf.Named, c)
+					break
 				}
-				cf.Named = append(cf.Named, c)
 			}
 			return true
 		})

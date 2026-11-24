@@ -271,13 +271,53 @@ line are designed in [config.md](config.md). What the linter adds:
 - **Project keys and settings.** What the linter resolves references
   against is the project: `root`, `profile`, `lib_path`, `exclude`,
   `dialect` (with `typechecking`), `include_dirs`, `include_file`,
-  `auto_objects`, `relative_object_paths` (`root`, the DGD semantics and
-  the default, or `file`) and `conventions` (`specifier_macros`,
+  `auto_objects`, `create`, `relative_object_paths` and `conventions`
+  (`specifier_macros`,
   `macros: {NAME: type|specifier|statement|expression|opaque}`,
   `defines`, the call/object/format registries, `autosave_markers`,
   `virtual_paths`). They are top-level keys, the same ones a profile's
   manifest has, and there is one set per run. How a file is linted is
   `lint:`, and that can differ per directory.
+- **Nothing about one lib is in the code.** The tool knows the driver:
+  its keywords, its predefined macros, `call_other`, `call_out`,
+  `compile_object`, `find_object`, `clone_object`, `sscanf`,
+  `this_object`, and the parameters of its config file. Everything else
+  is a convention and has no default: which names are empty specifier
+  macros (`public` is some lib's `#define`, not a keyword), what marks
+  an object that saves itself, which of the lib's functions take a
+  function name. The function a new object is initialized by is the
+  driver config's `create` parameter; `lifecycle-chain` checks that one,
+  falls back to the customary `create` when the parameter is not known,
+  and takes other names as its option (a lib whose auto object receives
+  the driver's call under one name and passes it on under another says
+  so there).
+- **The call registry declares call shapes.** An entry of
+  `conventions.call_registry` is one or more forms
+  `{function: N, object: M, args: K}`: the argument that names the
+  function, optionally the argument that says in which object (without
+  it the function is called in `this_object()`, where static functions
+  can be reached; with it the call is a `call_other`), and optionally
+  the first of the arguments passed on to the function (without it the
+  argument count is not known and `callback-arity` is silent). A call is
+  read by the first form it fits: one whose function argument is a
+  string constant that names a function. The driver's two are entries of
+  the same table, `call_other: {object: 0, function: 1, args: 2}` and
+  `call_out: {function: 0, args: 2}`; no call shape is guessed from what
+  a string looks like.
+- **`relative_object_paths` stays a key because DGD leaves it to the
+  lib.** The driver does not resolve an object path itself: for
+  `inherit "x"` it calls the driver object's `inherit_program(from,
+  path, priv)`, for `call_other("x", …)` its `call_object(path)`
+  (`comp/compile.cpp`, `kfun/builtin.cpp`), and the lib's LPC code
+  returns the object. What a path without a leading slash means is
+  therefore a property of the lib: the driver's own functions
+  (`compile_object`, `find_object`) take it from the root, since
+  `Path::resolve` drops the leading slash and `"std/room"` is the same
+  name as `"/std/room"`; the kernel library resolves it against the
+  directory of the object that says it; and when no `inherit_program`
+  answers, the driver's fallback is also the inheriting file's directory
+  (`Path::from`). `root` is the default; `file` is the other. No third
+  meaning was found, and a value other than those two is an error.
 - **Rule selection:** every rule has a stable kebab-case **name**, a short
   stable **code** (`E…` driver-rejected, `R…` runtime failure, `S…`
   suspicious, `C…` convention), a group, a default severity and a default
@@ -774,8 +814,9 @@ A profile is a manifest plus stub files (`pkg/profile`):
 
 - **Manifest (JSON):** the dialect (`language: lpc`, `driver: dgd`,
   version, `//` comments, closures, typechecking level, predefined
-  macros); the driver's include dirs, force-included header and auto
-  object; how relative object paths resolve; the lib's conventions
+  macros); the driver's include dirs, force-included header, auto
+  object and create function; how relative object paths resolve; the
+  lib's conventions
   (call/object/format registries, autosave markers, virtual paths,
   specifier macros, macro class overrides); `covered` (directories the
   profile captures completely); `holes` (globs deliberately left out);

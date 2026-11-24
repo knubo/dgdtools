@@ -1,0 +1,60 @@
+# The dgdtools.yml of VikingMUD, a DGD mudlib: a real configuration, with
+# everything that is particular to one lib where it belongs. It sits next
+# to the lib (lib/) and the driver's configuration (etc/config.viking).
+#
+# A wizard with only their own directory has a dgdtools.yml there that
+# says `profile: viking`, and the profile built from this file.
+
+root: lib
+
+exclude:
+  - "attic/**"               # retired code kept for reference
+  - "**/old/**"
+  - "**/OLD/**"
+  - "**/.old/**"
+  - "**/*.pre*"              # foo.preWizname.c-style parked copies
+  - "**/*.retired"
+  - "**/var/**"              # generated runtime data (maps, save state)
+
+dialect:
+  slash_slash: true
+  closures: false
+
+conventions:
+  # /dgd/include/Std.h has `#define public`.
+  specifier_macros: [public]
+
+  call_registry:
+    add_action: { function: 0 }          # add_action("fn", "verb")
+    store_fp:                            # a function pointer:
+      - { object: 0, function: 1 }       #   store_fp(obj, "fn")
+      - { function: 0 }                  #   store_fp("fn"), in this_object()
+
+  # An object that calls set_auto_save() or uses the store daemon is
+  # written to disk by save_object.
+  autosave_markers: [set_auto_save, D_STORE]
+
+profile_build:
+  name: viking
+  # include_dirs, include_file, auto_object, create and typechecking.
+  driver_config: etc/config.viking
+  share: ["std/**", "obj/**", "room/**", "secure/**", "dgd/**"]
+  checkouts: ["players/*", "d/*"]
+
+format:
+  indent_style: space
+  indent_width: 4
+  line_endings: preserve
+
+lint:
+  rules:
+    # Not on; when asked for, about the parts of the lib that have path
+    # macros.
+    raw-inherit-path: { deny: ["/std/", "/obj/"] }
+    # The driver's create function is __create, which the auto object
+    # receives and passes on as create().
+    lifecycle-chain: { names: [create] }
+  overrides:
+    - paths: ["legacy/**"]
+      rules: { lifecycle-chain: off }
+  fail_on: error

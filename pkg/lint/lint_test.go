@@ -13,6 +13,7 @@ import (
 	"github.com/mmcdole/dgdtools/pkg/config"
 	"github.com/mmcdole/dgdtools/pkg/diag"
 	"github.com/mmcdole/dgdtools/pkg/lint"
+	"github.com/mmcdole/dgdtools/pkg/profile"
 	"github.com/mmcdole/dgdtools/pkg/vfs"
 )
 
@@ -25,7 +26,12 @@ func minilibProject(t *testing.T) *config.Project {
 	cfg.IncludeDirs = []string{"/include", "/dgd/include"}
 	cfg.IncludeFile = "/dgd/include/Std.h"
 	cfg.AutoObjects = []string{"/dgd/lib/object"}
-	cfg.Conventions.CallRegistry = map[string]int{"register_handler": 0, "store_fp": 0}
+	object := 0
+	cfg.Conventions.CallRegistry = map[string]profile.CallForms{
+		"register_handler": {{Function: 0}},
+		"store_fp":         {{Object: &object, Function: 1}, {Function: 0}},
+	}
+	cfg.Conventions.AutosaveMarkers = []string{"set_auto_save"}
 	cfg.Conventions.VirtualPaths = []string{"virtual/**"}
 	return &config.Project{Config: cfg, Root: root}
 }
@@ -739,4 +745,38 @@ func TestRuleTableIsStable(t *testing.T) {
 	// Mutating a returned table does not affect the next one.
 	lint.Rules()[0].Default = false
 	assert.True(t, lint.Rules()[0].Default)
+}
+
+// Nothing about one lib is built in: what marks a saving object, what is
+// a specifier macro and which function the driver calls in a new object
+// come from the configuration.
+func TestConventionsComeFromTheConfiguration(t *testing.T) {
+	files := map[string]string{
+		"std/base.c":  "void create() { }\nvoid setup() { }\n",
+		"obj/save.c":  "static int n;\nvoid f() { set_auto_save(1); }\n",
+		"obj/spec.c":  "visible int g() { return 1; }\n",
+		"obj/child.c": "inherit \"/std/base\";\nvoid create() { }\nvoid setup() { }\n",
+	}
+	find := func(prj *config.Project, m vfs.Mem, file string) []string {
+		return keys(run(t, prj, m, lint.Request{
+			Paths:   []string{"/lib/obj/" + file},
+			Options: lint.Options{Enable: []string{"static-autosave-var"}},
+		}).Diagnostics)
+	}
+
+	prj, m := memProject(files)
+	assert.Empty(t, find(prj, m, "save.c"), "no markers: no object is known to save itself")
+	assert.Equal(t, []string{"syntax-error spec.c:1"}, find(prj, m, "spec.c"))
+	assert.Equal(t, []string{"lifecycle-chain child.c:2"}, find(prj, m, "child.c"), "create, by custom, when the driver's is not known")
+
+	prj, m = memProject(files)
+	prj.Config.Conventions.AutosaveMarkers = []string{"set_auto_save"}
+	prj.Config.Conventions.SpecifierMacros = []string{"visible"}
+	prj.Config.Create = "setup"
+	assert.Equal(t, []string{"static-autosave-var save.c:1"}, find(prj, m, "save.c"))
+	assert.Empty(t, find(prj, m, "spec.c"))
+	assert.Equal(t, []string{"lifecycle-chain child.c:3"}, find(prj, m, "child.c"), "the driver's create function")
+
+	prj.Config.Lint.Rules = map[string]config.RuleSettings{"lifecycle-chain": {Names: []string{"create", "setup"}}}
+	assert.Equal(t, []string{"lifecycle-chain child.c:2", "lifecycle-chain child.c:3"}, find(prj, m, "child.c"), "the rule's own list wins")
 }

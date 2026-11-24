@@ -57,7 +57,7 @@ type Config struct {
 	// objects.
 	Profile string `yaml:"profile"`
 	// LibPath says where this checkout sits in the lib when it is not
-	// the whole lib: the lib path of Root, e.g. "/players/drake".
+	// the whole lib: the lib path of Root, e.g. "/users/name".
 	LibPath string `yaml:"lib_path"`
 	// Exclude are globs (lib-relative) of files directory walks skip.
 	Exclude []string `yaml:"exclude"`
@@ -70,6 +70,9 @@ type Config struct {
 	IncludeFile string `yaml:"include_file"`
 	// AutoObjects are lib paths implicitly inherited by every object.
 	AutoObjects []string `yaml:"auto_objects"`
+	// Create is the function the driver calls in an object when it is
+	// made (the driver config's create).
+	Create string `yaml:"create"`
 	// RelativeObjectPaths says what an object path without a leading
 	// slash is relative to: "root" (the default; DGD resolves object
 	// names from the lib root, so "std/room" is /std/room) or "file"
@@ -119,7 +122,7 @@ type ProfileBuild struct {
 	// Name of the profile (default: the lib root's directory name).
 	Name string `yaml:"name"`
 	// DriverConfig is the DGD driver's config file: include_dirs,
-	// include_file, auto_object and typechecking are read from it.
+	// include_file, auto_object, create and typechecking are read from it.
 	DriverConfig string `yaml:"driver_config"`
 	// ShareMinOwners selects shared code by use: a file referenced (by
 	// inherit, #include, or as a call/clone/find target) from at least
@@ -316,6 +319,7 @@ func (c *Config) validate() error {
 		{"include_dirs", len(c.IncludeDirs) > 0},
 		{"include_file", c.IncludeFile != ""},
 		{"auto_objects", len(c.AutoObjects) > 0},
+		{"create", c.Create != ""},
 		{"relative_object_paths", c.RelativeObjectPaths != ""},
 		{"conventions", !reflect.DeepEqual(c.Conventions, profile.Conventions{})},
 		{"profile_build", !reflect.DeepEqual(c.ProfileBuild, ProfileBuild{})},
@@ -406,15 +410,11 @@ func (c *Config) Predefined() map[string]bool {
 }
 
 // MacroClasses returns the macro classes the configuration gives:
-// conventions.specifier_macros (default: public) are empty macros,
-// conventions.macros names a class.
+// conventions.specifier_macros are empty macros, conventions.macros
+// names a class.
 func (c *Config) MacroClasses() map[string]pp.Class {
 	m := map[string]pp.Class{}
-	specifiers := c.Conventions.SpecifierMacros
-	if len(specifiers) == 0 {
-		specifiers = []string{"public"}
-	}
-	for _, s := range specifiers {
+	for _, s := range c.Conventions.SpecifierMacros {
 		m[s] = pp.ClassEmpty
 	}
 	for name, cls := range c.Conventions.Macros {

@@ -424,13 +424,6 @@ func (s *Snapshot) facts(a *analysis) *Unit {
 			u.Partial = true
 		}
 	}
-
-	for _, i := range a.sel.Sig {
-		if t := f.Tokens[i]; t.Kind == token.Ident && s.markers[string(f.Text(t))] {
-			u.AutoSave = true
-			break
-		}
-	}
 	return u
 }
 

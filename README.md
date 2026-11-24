@@ -79,15 +79,17 @@ exclude:                     # glob patterns, ** crosses directories
 dialect:
   slash_slash: true          # // comments (driver SLASHSLASH build flag)
   closures: false            # `function` keyword (driver CLOSURES flag)
-conventions:
-  # Functions whose string argument names a callback on this_object();
-  # call_other and call_out are built in. Value = 0-based argument index.
-  call_registry: { store_fp: 0, add_action: 0 }
-  autosave_markers: [set_auto_save, D_STORE]
+conventions:                 # the lib's own habits; none is built in
+  # The lib's functions that take the name of a function to call later,
+  # and which argument (0-based) is what. The driver's call_other and
+  # call_out are built in.
+  call_registry:
+    add_action: { function: 0 }            # add_action("do_pull", "pull")
+    bind: [{ object: 0, function: 1 }, { function: 0 }]   # bind(ob, "fn"), bind("fn")
 profile_build:               # what `dgdtools profile build` captures
   name: mymud
-  driver_config: etc/mud.dgd # include_dirs, include_file, auto_object,
-                             # typechecking are read from the driver's config
+  driver_config: etc/mud.dgd # include_dirs, include_file, auto_object, create
+                             # and typechecking are read from the driver's config
   share: ["std/**", "obj/**", "secure/**"]   # code every wizard builds on
   checkouts: ["players/*", "d/*"]            # where wizards' own trees live
 
@@ -100,15 +102,15 @@ lint:
   rules:                     # name, code, or group -> off|info|warning|error
     unreachable-code: warning
     raw-inherit-path: { severity: warning, deny: ["/std/", "/obj/"] }
-    lifecycle-chain: { names: [create] }
   overrides:
     - paths: ["players/**"]
       rules: { runtime: off }
   fail_on: error             # exit 1 at this severity or above
 ```
 
-`dgdtools.example.yml` documents every key. Unknown keys and values are
-errors: a misspelled setting is reported, not ignored. `extends:
+`dgdtools.example.yml` documents every key, and
+`examples/viking/dgdtools.yml` is the configuration of a real mudlib.
+Unknown keys and values are errors: a misspelled setting is reported, not ignored. `extends:
 other.yml` starts from another file (scalars and lists replace, maps
 merge).
 
@@ -123,12 +125,12 @@ only settings can differ from one directory to the next.
 |---|---|
 | `root` | The directory that is `/` to the driver; relative to the config file, which is the default. |
 | `profile` | The mudlib profile to work against: a name, found as `NAME.profile` next to the config file, in a directory listed in `$DGDTOOLS_PROFILE_PATH`, or in the user config directory (`~/.config/dgdtools/profiles/`); or a path to a profile file. No profile is built in. It supplies the driver settings, the shared headers and the signatures of shared objects, so a wizard needs nothing else. Files on disk always win over the profile. |
-| `lib_path` | Where a partial checkout sits in the lib (`/players/drake`), when its path on disk does not already end in `players/<name>` or `d/<Domain>`. |
+| `lib_path` | The lib path of the directory a partial checkout is (`/players/ann`), when its path on disk does not show it (the profile lists the lib's checkout patterns, such as `players/*`). |
 | `exclude` | Globs, relative to the lib root, that directory walks skip. A file named on the command line is always taken. |
 | `dialect` | `slash_slash`, `closures`, and `typechecking` (the driver's level; the rules that depend on it are silent while it is unknown). |
-| `include_dirs`, `include_file`, `auto_objects` | What the driver's config says. Usually read from `profile_build.driver_config` or the profile; set here they override both. |
-| `relative_object_paths` | What `"std/room"` (no leading slash) is relative to: `root` (default; what DGD does) or `file`. |
-| `conventions` | The lib's own habits. `specifier_macros: [public]` (the default) and `macros: {FOREACH: statement}` say how to read macros that cannot be classified from their `#define` (`type`, `specifier`, `statement`, `expression`, `opaque`); `defines:` lists names to treat as defined in `#ifdef`. `call_registry`: functions whose string argument names a callback on `this_object()`, e.g. `add_action("do_pull", "pull")`. `object_registry`: functions whose string argument is an object path (`clone_object`, `compile_object`, `find_object` are built in). `format_registry`: scanf-style functions and the position of their format string (`sscanf` is built in). `autosave_markers`: names whose presence marks an object as persisting via `save_object`. `virtual_paths`: lib-path globs served by virtual-object daemons. |
+| `include_dirs`, `include_file`, `auto_objects`, `create` | What the driver's config says: the include search path, the header included into every file, the object every object inherits, and the function the driver calls in a new object. Usually read from `profile_build.driver_config` or the profile; set here they override both. |
+| `relative_object_paths` | What `"std/room"` (no leading slash) is relative to. DGD hands every `inherit` and every `call_other("path", …)` to the lib's driver object to resolve, so this is the lib's choice: `root` (the default, and what the driver's own functions such as `compile_object` do) or `file` (the directory of the file that says it, as in the kernel library). |
+| `conventions` | The lib's own habits; nothing here has a default. `specifier_macros: [public]` names empty macros that stand where a specifier does, and `macros: {FOREACH: statement}` says how to read a macro that cannot be classified from its `#define` (`type`, `specifier`, `statement`, `expression`, `opaque`); `defines:` lists names to treat as defined in `#ifdef`. `call_registry`: the lib's functions that take the name of a function to call later, each with the argument that names the `function`, optionally the argument that says in which `object` (without it: `this_object()`) and the first of the `args` passed on; a function called in several ways lists its forms. `object_registry`: functions whose string argument is an object path (`compile_object`, `find_object`, `clone_object` are built in). `format_registry`: scanf-style functions and the position of their format string (`sscanf` is built in). `autosave_markers`: names whose mention marks an object as one that saves itself with `save_object`. `virtual_paths`: lib-path globs served by virtual-object daemons. |
 | `profile_build` | For whoever has the whole lib: `driver_config` (the DGD driver config), `share` (globs of shared code), `omit` (never put in a profile), `checkouts` (per-wizard tree patterns), `name`. Used by `dgdtools profile build`, and directly when linting the whole lib. |
 
 ### Settings
@@ -379,7 +381,7 @@ guessed. A file outside the root gets the file-local rules only.
 | R003 | `undefined-prototype` | error | function declared but never defined in the chain, and called |
 | R004 | `target-object-missing` | error | literal object path (inherit, `clone_object`, call target) with no backing file |
 | R005 | `callback-arity` | warning | dispatched call passing an argument count the target cannot accept |
-| R006 | `lifecycle-chain` | warning | lifecycle function (default `create`) omits calls to inherited implementations |
+| R006 | `lifecycle-chain` | warning | lifecycle function (the driver's create function) omits calls to inherited implementations |
 | S001 | `assignment-in-condition` | warning | condition assigns a bare constant or an unparenthesized `&&`/`||` result |
 | S002 | `no-effect-statement` | warning | comparison used as a statement (`x == 1;`) |
 | S003 | `sscanf-format` | warning | more variables than `%`-conversions |
@@ -387,7 +389,7 @@ guessed. A file outside the root gets the file-local rules only.
 | C001 | `raw-inherit-path` | off | inherit using a literal path where the lib mandates macros |
 | C002 | `missing-visibility` | off | function with no visibility specifier |
 | C003 | `unformatted` | off | file that `dgdtools format` would change |
-| C004 | `static-autosave-var` | off | `static` global in an auto-saving object |
+| C004 | `static-autosave-var` | off | `static` global in an object that saves itself (`conventions.autosave_markers`) |
 | C005 | `unresolved-inherit` | off | inherit path the macro evaluator could not resolve (info) |
 | C006 | `unused-suppression` | off | a `dgdlint:` comment that suppresses nothing |
 
@@ -450,9 +452,16 @@ DGD rather than being duplicated as lint rules.
 
 ### Lifecycle chaining
 
+The lifecycle function is the one the driver calls in a new object: the
+driver config's `create` parameter (read from `profile_build.driver_config`
+or the profile, or set as the project key `create`), and `create` when that
+is not known. A lib whose auto object receives the driver's call and passes
+it on under another name, or that has more such functions, lists them:
+`lifecycle-chain: { names: [create, reset] }`.
+
 The rule is proof-based: files with no explicit inherit, parents without the
-configured lifecycle function, and unresolved parents with no known definition
-are skipped. With multiple defining parents, label and chain each one:
+lifecycle function, and unresolved parents with no known definition are
+skipped. With multiple defining parents, label and chain each one:
 
 ```c
 inherit room I_ROOM;
