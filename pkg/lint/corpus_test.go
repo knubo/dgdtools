@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/mmcdole/dgdtools/pkg/config"
+	"github.com/mmcdole/dgdtools/pkg/diag"
 	"github.com/mmcdole/dgdtools/pkg/lint"
 	"github.com/mmcdole/dgdtools/pkg/vfs"
 )
@@ -43,12 +44,12 @@ func TestCorpusLint(t *testing.T) {
 	require.NoError(t, err)
 	l, err := lint.New(prj, fsys)
 	require.NoError(t, err)
-	res, err := l.Run(context.Background(), lint.Request{Paths: paths, NoBaseline: true})
+	res, err := l.Run(context.Background(), lint.Request{Paths: paths, Options: lint.Options{NoBaseline: true}})
 	require.NoError(t, err)
 
 	for _, n := range res.Notes {
-		if strings.Contains(n, "internal error") {
-			t.Error(n)
+		if n.Kind == diag.NoteInternalError {
+			t.Error(n.Message)
 		}
 	}
 	byGroup := map[string]int{}

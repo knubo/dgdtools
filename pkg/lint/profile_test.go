@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/mmcdole/dgdtools/pkg/config"
+	"github.com/mmcdole/dgdtools/pkg/diag"
 	"github.com/mmcdole/dgdtools/pkg/index"
 	"github.com/mmcdole/dgdtools/pkg/lint"
 	"github.com/mmcdole/dgdtools/pkg/profile"
@@ -132,14 +133,14 @@ func TestProfileBuildAndPartialCheckout(t *testing.T) {
 	assert.Contains(t, p.Files["/std/include/std.h"], "#define MAX(a, b) ((a) > (b) ? (a) : (b))")
 
 	// --- declared types are index facts, from real files and stubs alike
-	fn := l.Index.Chain("/std/room").Funcs["flags"]
+	fn := l.Index().Snapshot().Chain("/std/room").Funcs["flags"]
 	assert.Equal(t, "nomask status *flags(object ob, varargs mixed rest...)", fn.Decl)
 	assert.Equal(t, "status *", fn.Type)
 	assert.Equal(t, "/std/base", fn.DefinedIn)
 	assert.Equal(t, []string{"object ob", "varargs mixed rest..."}, index.Params(fn.Decl))
-	assert.Equal(t, "", l.Index.Chain("/std/base").Funcs["legacy"].Type)
-	assert.Equal(t, "string *", l.Index.Unit("/std/base").Vars["names"].Type)
-	assert.Equal(t, "string", l.Index.Unit("/std/base").Vars["title"].Type)
+	assert.Equal(t, "", l.Index().Snapshot().Chain("/std/base").Funcs["legacy"].Type)
+	assert.Equal(t, "string *", l.Index().Snapshot().Unit("/std/base").Vars["names"].Type)
+	assert.Equal(t, "string", l.Index().Snapshot().Unit("/std/base").Vars["title"].Type)
 
 	// --- the file format: deterministic, round-trips
 	data, err := p.Marshal()
@@ -176,8 +177,8 @@ func TestProfileBuildAndPartialCheckout(t *testing.T) {
 	got := findings(t, part, alone) // no paths: the checkout
 	pl, err := lint.New(part, alone)
 	require.NoError(t, err)
-	assert.Equal(t, fn.Decl, pl.Index.Chain("/players/ann/hall").Funcs["flags"].Decl, "the same declaration, read from the stub")
-	assert.Equal(t, "status *", pl.Index.Chain("/players/ann/hall").Funcs["flags"].Type)
+	assert.Equal(t, fn.Decl, pl.Index().Snapshot().Chain("/players/ann/hall").Funcs["flags"].Decl, "the same declaration, read from the stub")
+	assert.Equal(t, "status *", pl.Index().Snapshot().Chain("/players/ann/hall").Funcs["flags"].Type)
 
 	// Everything that is about the wizard's own files or shared code is
 	// found identically; what points elsewhere in the lib is unknown.
@@ -225,7 +226,9 @@ func TestProfileBuildAndPartialCheckout(t *testing.T) {
 	prj, err = config.Discover(nolib, []string{"/work/stuff"}, config.DiscoverOptions{})
 	require.NoError(t, err)
 	assert.Empty(t, prj.CheckoutLib)
-	assert.Contains(t, strings.Join(prj.Notes, "\n"), "lib_path")
+	require.NotEmpty(t, prj.Notes)
+	assert.Equal(t, diag.NoteUnplacedCheckout, prj.Notes[0].Kind)
+	assert.Contains(t, prj.Notes[0].Message, "lib_path")
 	assert.Equal(t, []string{"hall.c:21 syntax-error missing ';' before 'ok'"}, findings(t, prj, nolib))
 
 	// --- real files win over stubs; a whole lib with a profile is whole
@@ -273,13 +276,12 @@ func TestProfileResolution(t *testing.T) {
 	data, err := p.Marshal()
 	require.NoError(t, err)
 
-	t.Setenv("HOME", "/home/zed")
-	t.Setenv("XDG_CONFIG_HOME", "")
-	t.Setenv(profile.PathEnv, "/opt/a"+string(os.PathListSeparator)+"/opt/b")
-	dirs := profile.SearchDirs("/home/zed/players/zed")
-	require.GreaterOrEqual(t, len(dirs), 4)
-	assert.Equal(t, []string{"/home/zed/players/zed", "/opt/a", "/opt/b"}, dirs[:3])
-	assert.Equal(t, "/home/zed/.config/dgdtools/profiles", dirs[len(dirs)-1])
+	// What a front end reads from its environment and hands over.
+	dirs := profile.UserDirs("/opt/a"+string(os.PathListSeparator)+"/opt/b", "/home/zed/Library/Application Support", "/home/zed")
+	assert.Equal(t, []string{"/opt/a", "/opt/b", "/home/zed/Library/Application Support/dgdtools/profiles", "/home/zed/.config/dgdtools/profiles"}, dirs)
+	assert.Equal(t, []string{"/home/zed/.config/dgdtools/profiles"}, profile.UserDirs("", "/home/zed/.config", "/home/zed"))
+	assert.Empty(t, profile.UserDirs("", "", ""))
+	opt := config.DiscoverOptions{ProfileDirs: dirs}
 
 	room := "#include <std.h>\ninherit I_ROOM;\nstatic void create() {\n ::create();\n this_object()->no_such_function_anywhere();\n}\n"
 	wiz := vfs.Mem{
@@ -287,7 +289,7 @@ func TestProfileResolution(t *testing.T) {
 		"/home/zed/players/zed/room.c":       room,
 	}
 	// Not installed anywhere: a clear error naming every place searched.
-	_, err = config.Discover(wiz, []string{"/home/zed/players/zed"}, config.DiscoverOptions{})
+	_, err = config.Discover(wiz, []string{"/home/zed/players/zed"}, opt)
 	require.Error(t, err)
 	for _, want := range []string{`profile "mini" not found`, "/home/zed/players/zed", "/opt/a", "/opt/b", "/home/zed/.config/dgdtools/profiles", profile.PathEnv} {
 		assert.Contains(t, err.Error(), want)
@@ -299,18 +301,18 @@ func TestProfileResolution(t *testing.T) {
 	otherData, err := other.Marshal()
 	require.NoError(t, err)
 	wiz["/home/zed/.config/dgdtools/profiles/mini.profile"] = string(otherData)
-	prj, err := config.Discover(wiz, []string{"/home/zed/players/zed"}, config.DiscoverOptions{})
+	prj, err := config.Discover(wiz, []string{"/home/zed/players/zed"}, opt)
 	require.NoError(t, err)
 	assert.Equal(t, "from-user-dir", prj.Profile.Name)
 	assert.Equal(t, "/home/zed/.config/dgdtools/profiles/mini.profile", prj.Profile.Path)
 
 	wiz["/opt/b/mini.profile"] = string(data)
-	prj, err = config.Discover(wiz, []string{"/home/zed/players/zed"}, config.DiscoverOptions{})
+	prj, err = config.Discover(wiz, []string{"/home/zed/players/zed"}, opt)
 	require.NoError(t, err)
 	assert.Equal(t, "/opt/b/mini.profile", prj.Profile.Path, "the environment path beats the user directory")
 
 	wiz["/home/zed/players/zed/mini.profile"] = string(data)
-	prj, err = config.Discover(wiz, []string{"/home/zed/players/zed/room.c"}, config.DiscoverOptions{})
+	prj, err = config.Discover(wiz, []string{"/home/zed/players/zed/room.c"}, opt)
 	require.NoError(t, err)
 	assert.Equal(t, "/home/zed/players/zed/mini.profile", prj.Profile.Path, "next to the config beats everything")
 	assert.Equal(t, "/players/zed", prj.CheckoutLib)
@@ -319,18 +321,18 @@ func TestProfileResolution(t *testing.T) {
 	assert.Contains(t, got[0], "room.c:5 callable-not-found function 'no_such_function_anywhere'")
 
 	// The library API the CLI and a language server share.
-	path, err := profile.Resolve(wiz, "mini", "/somewhere/else")
+	path, err := profile.Resolve(wiz, "mini", "/somewhere/else", dirs)
 	require.NoError(t, err)
 	assert.Equal(t, "/opt/b/mini.profile", path)
-	path, err = profile.Resolve(wiz, "../../../../opt/b/mini.profile", "/home/zed/players/zed")
+	path, err = profile.Resolve(wiz, "../../../../opt/b/mini.profile", "/home/zed/players/zed", nil)
 	require.NoError(t, err)
 	assert.Equal(t, "/opt/b/mini.profile", path)
-	_, err = profile.Resolve(wiz, "/nowhere/x.profile", ".")
+	_, err = profile.Resolve(wiz, "/nowhere/x.profile", "/", nil)
 	assert.ErrorContains(t, err, "does not exist")
 
 	// By flag, with no config file at all.
 	delete(wiz, "/home/zed/players/zed/dgdtools.yml")
-	prj, err = config.Discover(wiz, []string{"/home/zed/players/zed/room.c"}, config.DiscoverOptions{Profile: "mini"})
+	prj, err = config.Discover(wiz, []string{"/home/zed/players/zed/room.c"}, config.DiscoverOptions{Profile: "mini", WorkDir: "/home/zed", ProfileDirs: dirs})
 	require.NoError(t, err)
 	assert.Equal(t, "/players/zed", prj.CheckoutLib)
 }

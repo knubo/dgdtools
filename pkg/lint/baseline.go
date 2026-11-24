@@ -15,15 +15,20 @@ import (
 const BaselineFileName = "dgdlint-baseline.json"
 
 // Baseline is the set of known findings a project has agreed to live
-// with. A run subtracts them, so only new findings are reported.
+// with. A lint subtracts them, so only new findings are reported.
 //
 // An entry identifies a finding by file, rule, and a fingerprint of the
-// text of the source line it is on — not by line number — so edits
-// elsewhere in the file do not resurrect it. Count allows several
-// identical findings in one file.
+// text of the source line it is on (diag.Diagnostic.Fingerprint) — not by
+// line number — so edits elsewhere in the file do not resurrect it. Count
+// allows several identical findings in one file.
 type Baseline struct {
 	Version int             `json:"version"`
 	Entries []BaselineEntry `json:"entries"`
+
+	// dir is what entry paths are relative to: the baseline file's
+	// directory.
+	dir    string
+	counts map[baselineKey]int
 }
 
 type BaselineEntry struct {
@@ -40,7 +45,7 @@ type baselineKey struct{ path, rule, line string }
 // BaselinePath returns where the project's baseline lives, or "" when the
 // project has no config file to anchor it.
 func (l *Linter) BaselinePath() string {
-	cfg := l.Project.Config
+	cfg := l.project.Config
 	if cfg.Path == "" {
 		return ""
 	}
@@ -54,36 +59,39 @@ func (l *Linter) BaselinePath() string {
 	return filepath.Join(cfg.Dir, name)
 }
 
-// LoadBaseline reads the project's baseline; nil when there is none.
-func (l *Linter) LoadBaseline() (*Baseline, error) {
-	p := l.BaselinePath()
-	if p == "" || !l.FS.Exists(p) {
-		return nil, nil
-	}
-	data, err := l.FS.ReadFile(p)
-	if err != nil {
-		return nil, err
-	}
-	b := &Baseline{}
-	if err := json.Unmarshal(data, b); err != nil {
-		return nil, fmt.Errorf("%s: %w", p, err)
-	}
-	return b, nil
+// Baseline returns the project's baseline, nil when it has none. The file
+// is read once in the linter's life: a linter is rebuilt when its
+// baseline changes, as when its configuration does.
+func (l *Linter) Baseline() (*Baseline, error) {
+	l.baselineOnce.Do(func() {
+		p := l.BaselinePath()
+		if p == "" || !l.fs.Exists(p) {
+			return
+		}
+		data, err := l.fs.ReadFile(p)
+		if err != nil {
+			l.baselineErr = err
+			return
+		}
+		b := &Baseline{dir: filepath.Dir(p), counts: map[baselineKey]int{}}
+		if err := json.Unmarshal(data, b); err != nil {
+			l.baselineErr = fmt.Errorf("%s: %w", p, err)
+			return
+		}
+		for _, e := range b.Entries {
+			b.counts[baselineKey{e.Path, e.Rule, e.Line}] += e.Count
+		}
+		l.baseline = b
+	})
+	return l.baseline, l.baselineErr
 }
 
-func (l *Linter) baselineKey(d diag.Diagnostic, cache map[string][]byte) baselineKey {
+func (b *Baseline) key(d diag.Diagnostic) baselineKey {
 	rel := d.Path
-	if base := l.BaselinePath(); base != "" {
-		if r, err := filepath.Rel(filepath.Dir(base), d.Path); err == nil {
-			rel = r
-		}
+	if r, err := filepath.Rel(b.dir, d.Path); err == nil {
+		rel = r
 	}
-	src, ok := cache[d.Path]
-	if !ok {
-		src, _ = l.FS.ReadFile(d.Path)
-		cache[d.Path] = src
-	}
-	return baselineKey{filepath.ToSlash(rel), d.Rule, lineFingerprint(src, d.Start)}
+	return baselineKey{filepath.ToSlash(rel), d.Rule, d.Fingerprint}
 }
 
 // lineFingerprint hashes the whitespace-trimmed text of the line holding
@@ -104,20 +112,18 @@ func lineFingerprint(src []byte, off uint32) string {
 	return fmt.Sprintf("%016x", h.Sum64())
 }
 
-// Filter removes baselined findings from ds and reports how many were
-// removed.
-func (b *Baseline) Filter(l *Linter, ds []diag.Diagnostic) ([]diag.Diagnostic, int) {
-	left := make(map[baselineKey]int, len(b.Entries))
-	for _, e := range b.Entries {
-		left[baselineKey{e.Path, e.Rule, e.Line}] += e.Count
-	}
-	cache := map[string][]byte{}
+// Filter removes baselined findings from ds, which must hold all the
+// findings of the files it holds any of, and reports how many were
+// removed. It does not change the baseline and is safe for concurrent
+// use.
+func (b *Baseline) Filter(ds []diag.Diagnostic) ([]diag.Diagnostic, int) {
+	used := map[baselineKey]int{}
 	out := ds[:0]
 	removed := 0
 	for _, d := range ds {
-		k := l.baselineKey(d, cache)
-		if left[k] > 0 {
-			left[k]--
+		k := b.key(d)
+		if used[k] < b.counts[k] {
+			used[k]++
 			removed++
 			continue
 		}
@@ -126,12 +132,13 @@ func (b *Baseline) Filter(l *Linter, ds []diag.Diagnostic) ([]diag.Diagnostic, i
 	return out, removed
 }
 
-// NewBaseline builds a baseline from the findings of a run.
+// NewBaseline builds a baseline, to be written to BaselinePath, from the
+// findings of a run.
 func (l *Linter) NewBaseline(ds []diag.Diagnostic) *Baseline {
+	b := &Baseline{Version: 1, dir: filepath.Dir(l.BaselinePath())}
 	counts := map[baselineKey]*BaselineEntry{}
-	cache := map[string][]byte{}
 	for _, d := range ds {
-		k := l.baselineKey(d, cache)
+		k := b.key(d)
 		e := counts[k]
 		if e == nil {
 			e = &BaselineEntry{Path: k.path, Rule: k.rule, Line: k.line, Message: d.Message}
@@ -139,7 +146,6 @@ func (l *Linter) NewBaseline(ds []diag.Diagnostic) *Baseline {
 		}
 		e.Count++
 	}
-	b := &Baseline{Version: 1}
 	for _, e := range counts {
 		b.Entries = append(b.Entries, *e)
 	}

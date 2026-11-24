@@ -234,7 +234,11 @@ func (m Mem) WalkDir(root string, fn fs.WalkDirFunc) error {
 	}
 	sort.Strings(paths)
 	for _, p := range paths {
-		if err := fn(p, entry{name: filepath.Base(p)}, nil); err != nil && err != fs.SkipDir {
+		switch err := fn(p, entry{name: filepath.Base(p)}, nil); err {
+		case nil, fs.SkipDir:
+		case fs.SkipAll:
+			return nil
+		default:
 			return err
 		}
 	}

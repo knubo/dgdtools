@@ -43,7 +43,7 @@ func TestCorpusPartialCheckout(t *testing.T) {
 	}
 	ctx := context.Background()
 	fsys := vfs.OS{}
-	req := lint.Request{Select: []string{"syntax", "runtime", "suspicious"}, NoBaseline: true}
+	req := lint.Request{Options: lint.Options{Select: []string{"syntax", "runtime", "suspicious"}, NoBaseline: true}}
 
 	full, err := config.Discover(fsys, nil, config.DiscoverOptions{ConfigPath: cfgPath})
 	require.NoError(t, err)

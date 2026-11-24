@@ -39,6 +39,14 @@ func run(t *testing.T, prj *config.Project, fsys vfs.FS, req lint.Request) *lint
 	return res
 }
 
+func noteKinds(notes []diag.Note) []diag.NoteKind {
+	var out []diag.NoteKind
+	for _, n := range notes {
+		out = append(out, n.Kind)
+	}
+	return out
+}
+
 // keys renders findings as "rule file:line".
 func keys(ds []diag.Diagnostic) []string {
 	var out []string
@@ -49,7 +57,7 @@ func keys(ds []diag.Diagnostic) []string {
 }
 
 func TestMinilibSeededBugs(t *testing.T) {
-	res := run(t, minilibProject(t), vfs.OS{}, lint.Request{Enable: []string{"static-autosave-var"}})
+	res := run(t, minilibProject(t), vfs.OS{}, lint.Request{Options: lint.Options{Enable: []string{"static-autosave-var"}}})
 	got := keys(res.Diagnostics)
 
 	for _, want := range []string{
@@ -115,8 +123,7 @@ func TestMinilibSeededBugs(t *testing.T) {
 }
 
 func TestOptInRulesAndSuppression(t *testing.T) {
-	res := run(t, minilibProject(t), vfs.OS{}, lint.Request{
-		Enable: []string{"missing-visibility", "raw-inherit-path", "unresolved-inherit", "C006"}})
+	res := run(t, minilibProject(t), vfs.OS{}, lint.Request{Options: lint.Options{Enable: []string{"missing-visibility", "raw-inherit-path", "unresolved-inherit", "C006"}}})
 	got := keys(res.Diagnostics)
 	assert.Contains(t, got, "missing-visibility messy.c:13")
 	assert.Contains(t, got, "raw-inherit-path messy.c:1")
@@ -129,25 +136,25 @@ func TestOptInRulesAndSuppression(t *testing.T) {
 	assert.Equal(t, 1, res.Stats.Suppressed)
 
 	// With the rule off, the same comment suppresses nothing.
-	res = run(t, minilibProject(t), vfs.OS{}, lint.Request{Enable: []string{"unused-suppression"}})
+	res = run(t, minilibProject(t), vfs.OS{}, lint.Request{Options: lint.Options{Enable: []string{"unused-suppression"}}})
 	assert.Contains(t, keys(res.Diagnostics), "unused-suppression messy.c:20")
 }
 
 func TestRuleSelection(t *testing.T) {
 	prj := minilibProject(t)
 
-	res := run(t, prj, vfs.OS{}, lint.Request{Disable: []string{"static-crossobj"}})
+	res := run(t, prj, vfs.OS{}, lint.Request{Options: lint.Options{Disable: []string{"static-crossobj"}}})
 	for _, d := range res.Diagnostics {
 		assert.NotEqual(t, "static-crossobj", d.Rule)
 	}
 
 	// --select replaces the set; codes and groups work.
-	res = run(t, prj, vfs.OS{}, lint.Request{Select: []string{"R001"}})
+	res = run(t, prj, vfs.OS{}, lint.Request{Options: lint.Options{Select: []string{"R001"}}})
 	require.NotEmpty(t, res.Diagnostics)
 	for _, d := range res.Diagnostics {
 		assert.Equal(t, "callable-not-found", d.Rule)
 	}
-	res = run(t, prj, vfs.OS{}, lint.Request{Select: []string{"suspicious"}})
+	res = run(t, prj, vfs.OS{}, lint.Request{Options: lint.Options{Select: []string{"suspicious"}}})
 	for _, d := range res.Diagnostics {
 		assert.Contains(t, []string{"assignment-in-condition", "no-effect-statement", "sscanf-format", "unreachable-code"}, d.Rule)
 	}
@@ -174,7 +181,7 @@ func TestRuleSelection(t *testing.T) {
 	prj.Config.Lint.Overrides = []config.Override{{Paths: []string{"obj/**"},
 		Rules: map[string]config.RuleSettings{"callable-not-found": {Severity: "off"}}}}
 	prj.Config.Lint.PathRules = []config.PathRule{{Paths: []string{"daemons/**"}, Disable: []string{"static-autosave-var"}}}
-	res = run(t, prj, vfs.OS{}, lint.Request{Enable: []string{"static-autosave-var"}})
+	res = run(t, prj, vfs.OS{}, lint.Request{Options: lint.Options{Enable: []string{"static-autosave-var"}}})
 	for _, d := range res.Diagnostics {
 		assert.NotEqual(t, "callable-not-found", d.Rule)
 		assert.NotEqual(t, "static-autosave-var", d.Rule)
@@ -184,7 +191,7 @@ func TestRuleSelection(t *testing.T) {
 	prj = minilibProject(t)
 	l, err := lint.New(prj, vfs.OS{})
 	require.NoError(t, err)
-	_, err = l.Run(context.Background(), lint.Request{Enable: []string{"no-such-rule"}})
+	_, err = l.Run(context.Background(), lint.Request{Options: lint.Options{Enable: []string{"no-such-rule"}}})
 	assert.ErrorContains(t, err, "unknown rule")
 	prj.Config.Lint.Disable = []string{"nope"}
 	_, err = lint.New(prj, vfs.OS{})
@@ -340,7 +347,7 @@ func TestSyntaxRules(t *testing.T) {
 		// Typechecking unknown: the typeless rules are silent.
 		prj, m := memProject(map[string]string{"obj/t.c": src})
 		prj.Config.Lint.Typechecking = nil
-		res := run(t, prj, m, lint.Request{Paths: []string{"/lib/obj/t.c"}, Select: []string{"E009", "E010"}})
+		res := run(t, prj, m, lint.Request{Paths: []string{"/lib/obj/t.c"}, Options: lint.Options{Select: []string{"E009", "E010"}}})
 		for _, d := range res.Diagnostics {
 			assert.NotContains(t, d.Message, "bar")
 			assert.NotContains(t, d.Message, "parameter")
@@ -395,7 +402,7 @@ func TestAssignmentInCondition(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := lintMem(t, fn(tt.body), lint.Request{Select: []string{"assignment-in-condition"}}, nil)
+			got := lintMem(t, fn(tt.body), lint.Request{Options: lint.Options{Select: []string{"assignment-in-condition"}}}, nil)
 			require.Len(t, got, tt.want, "%v", got)
 			if tt.want > 0 {
 				assert.Contains(t, got[0], tt.message)
@@ -421,16 +428,16 @@ func TestNoFindingsFromResynchronizedCode(t *testing.T) {
 
 func TestSuspiciousRules(t *testing.T) {
 	got := lintMem(t, fn("x == f();\n x != 1;\n x < 2;\n x = 1;\n f();\n x == 1 ? a() : b();\n a() && b();"),
-		lint.Request{Select: []string{"no-effect-statement"}}, nil)
+		lint.Request{Options: lint.Options{Select: []string{"no-effect-statement"}}}, nil)
 	assert.Len(t, got, 3, "%v", got)
 
 	got = lintMem(t, fn("sscanf(s, \"%d %s\", a, b, c);\n sscanf(s, \"%d %*s %s\", a, b);\n sscanf(s, \"%d\");\n sscanf(s, fmt, a, b, c);\n ob->sscanf(s, \"\", a);"),
-		lint.Request{Select: []string{"sscanf-format"}}, nil)
+		lint.Request{Options: lint.Options{Select: []string{"sscanf-format"}}}, nil)
 	require.Len(t, got, 1, "%v", got)
 	assertFinding(t, got, "sscanf-format 2:11")
 
 	got = lintMem(t, "int g(int x) {\n switch (x) {\n case 1: return 1; break;\n case 2: return 2;\n default: break;\n }\n return 0;\n x = 1;\n}\n",
-		lint.Request{Select: []string{"unreachable-code"}}, nil)
+		lint.Request{Options: lint.Options{Select: []string{"unreachable-code"}}}, nil)
 	assertFinding(t, got, "unreachable-code 3:20")
 	assertFinding(t, got, "unreachable-code 8:2")
 	assert.Len(t, got, 2, "%v", got)
@@ -474,9 +481,9 @@ static void create() {
 
 	// lifecycle-chain sees ::create() through the tree, and stays silent
 	// when part of the body could not be parsed.
-	got = lintMem(t, "inherit \"/std/base\";\nstatic void create() { x = 1; }\n", lint.Request{Select: []string{"lifecycle-chain"}}, nil)
+	got = lintMem(t, "inherit \"/std/base\";\nstatic void create() { x = 1; }\n", lint.Request{Options: lint.Options{Select: []string{"lifecycle-chain"}}}, nil)
 	assert.Len(t, got, 1)
-	got = lintMem(t, "#define INIT ::create();\ninherit \"/std/base\";\nstatic void create() { INIT }\n", lint.Request{Select: []string{"lifecycle-chain"}}, nil)
+	got = lintMem(t, "#define INIT ::create();\ninherit \"/std/base\";\nstatic void create() { INIT }\n", lint.Request{Options: lint.Options{Select: []string{"lifecycle-chain"}}}, nil)
 	assert.Empty(t, got)
 }
 
@@ -525,7 +532,8 @@ func TestFileLocalModeWithoutRoot(t *testing.T) {
 	assert.Equal(t, "syntax-error", res.Diagnostics[0].Rule)
 	assert.Equal(t, 5, res.Diagnostics[0].Line)
 	require.NotEmpty(t, res.Notes)
-	assert.Contains(t, res.Notes[0], "file-local rules only")
+	assert.Equal(t, diag.NoteNoLib, res.Notes[0].Kind)
+	assert.Contains(t, res.Notes[0].Message, "file-local rules only")
 }
 
 func TestIncompleteLibDegradesToUnknown(t *testing.T) {
@@ -542,7 +550,7 @@ func TestIncompleteLibDegradesToUnknown(t *testing.T) {
 	got := keys(res.Diagnostics)
 	assert.Equal(t, []string{"syntax-error room.c:8"}, got, "only the provable finding survives")
 	require.NotEmpty(t, res.Notes)
-	assert.Contains(t, strings.Join(res.Notes, "\n"), "lib looks incomplete")
+	assert.Contains(t, noteKinds(res.Notes), diag.NoteIncompleteLib)
 	assert.Greater(t, res.Stats.UnknownIncludes, 0)
 }
 
@@ -551,7 +559,7 @@ func TestFileOutsideRoot(t *testing.T) {
 	m["/elsewhere/x.c"] = "inherit \"/std/nothere\";\nvoid f() { \"/std/gone\"->x(); y = 1 z = 2; }\n"
 	res := run(t, prj, m, lint.Request{Paths: []string{"/elsewhere/x.c"}})
 	assert.Equal(t, []string{"syntax-error x.c:2"}, keys(res.Diagnostics))
-	assert.Contains(t, strings.Join(res.Notes, "\n"), "outside the lib root")
+	assert.Contains(t, noteKinds(res.Notes), diag.NoteOutsideLib)
 }
 
 func TestExcludesAndExplicitFiles(t *testing.T) {
@@ -664,6 +672,9 @@ func TestBaseline(t *testing.T) {
 	assert.Contains(t, string(data), `"path": "obj/a.c"`)
 	m[l.BaselinePath()] = string(data)
 
+	// A linter reads its baseline once: a new baseline is a new linter.
+	l, err = lint.New(prj, m)
+	require.NoError(t, err)
 	res, err = l.Run(ctx, lint.Request{})
 	require.NoError(t, err)
 	assert.Empty(t, res.Diagnostics)
@@ -677,9 +688,26 @@ func TestBaseline(t *testing.T) {
 	require.Len(t, res.Diagnostics, 1)
 	assert.Equal(t, 6, res.Diagnostics[0].Line)
 
-	res, err = l.Run(ctx, lint.Request{NoBaseline: true})
+	res, err = l.Run(ctx, lint.Request{Options: lint.Options{NoBaseline: true}})
 	require.NoError(t, err)
 	assert.Len(t, res.Diagnostics, 2)
+	for _, d := range res.Diagnostics {
+		assert.NotEmpty(t, d.Fingerprint)
+	}
+
+	// The baseline applies to a single document as it does to a run.
+	doc, err := l.Lint(ctx, "/lib/obj/a.c", lint.Options{})
+	require.NoError(t, err)
+	require.Len(t, doc.Diagnostics, 1)
+	assert.Equal(t, 6, doc.Diagnostics[0].Line)
+
+	m[l.BaselinePath()] = "not json"
+	l, err = lint.New(prj, m)
+	require.NoError(t, err)
+	_, err = l.Run(ctx, lint.Request{})
+	assert.ErrorContains(t, err, "dgdlint-baseline.json")
+	_, err = l.Run(ctx, lint.Request{Options: lint.Options{NoBaseline: true}})
+	assert.NoError(t, err, "a broken baseline does not stop a run that ignores it")
 }
 
 func TestRuleTableIsStable(t *testing.T) {

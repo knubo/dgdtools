@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/mmcdole/dgdtools/pkg/config"
@@ -137,6 +138,21 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	if showConfig {
 		pos = pos[1:]
 	}
+	// The library takes absolute paths and is told where profiles may be
+	// installed; the working directory and the environment are read here.
+	wd, err := os.Getwd()
+	if err != nil {
+		return fail(err)
+	}
+	userConfig, _ := os.UserConfigDir()
+	home, _ := os.UserHomeDir()
+	profileDirs := profile.UserDirs(os.Getenv(profile.PathEnv), userConfig, home)
+	abs := func(p string) string {
+		if filepath.IsAbs(p) {
+			return filepath.Clean(p)
+		}
+		return filepath.Join(wd, p)
+	}
 	fsys := vfs.OS{}
 	profileCmd := ""
 	if len(pos) > 0 && pos[0] == "profile" {
@@ -146,12 +162,16 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		profileCmd, pos = pos[1], pos[2:]
 	}
 	if profileCmd == "show" {
-		return profileShow(stdout, stderr, fsys, o, pos)
+		return profileShow(stdout, stderr, fsys, o, pos, wd, profileDirs)
+	}
+	for i, p := range pos {
+		pos[i] = abs(p)
 	}
 
 	prj, err := config.Discover(fsys, pos, config.DiscoverOptions{
 		ConfigPath: o.configPath, Root: o.root, NoConfig: o.noConfig,
 		Profile: o.profile, LibPath: o.libPath,
+		WorkDir: wd, ProfileDirs: profileDirs,
 	})
 	if err != nil {
 		return fail(err)
@@ -163,14 +183,11 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		prj.Config.Lint.FailOn = o.failOn
 	}
 	if o.baseline != "" {
-		abs, err := filepath.Abs(o.baseline)
-		if err != nil {
-			return fail(err)
-		}
-		prj.Config.Lint.Baseline = abs
+		file := abs(o.baseline)
+		prj.Config.Lint.Baseline = file
 		if prj.Config.Path == "" {
-			prj.Config.Path = abs // anchor for relative baseline paths
-			prj.Config.Dir = filepath.Dir(abs)
+			prj.Config.Path = file // anchor for relative baseline paths
+			prj.Config.Dir = filepath.Dir(file)
 		}
 	}
 	l, err := lint.New(prj, fsys)
@@ -203,15 +220,14 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		return 0
 	}
 
-	req := lint.Request{
-		Paths:      pos,
+	req := lint.Request{Paths: pos, Options: lint.Options{
 		Select:     split(o.sel),
 		Enable:     split(o.enable),
 		Disable:    append(split(o.ignore), split(o.dis)...),
 		Local:      o.local,
 		NoBaseline: o.noBase || o.writeBaseline,
 		MaxPerFile: o.maxPerFile,
-	}
+	}}
 	res, err := l.Run(ctx, req)
 	if err != nil {
 		return fail(err)
@@ -310,16 +326,17 @@ func explain(stdout, stderr io.Writer, key string) int {
 }
 
 // profileShow summarizes a profile, or prints one of its stubs.
-func profileShow(stdout, stderr io.Writer, fsys vfs.FS, o options, args []string) int {
+func profileShow(stdout, stderr io.Writer, fsys vfs.FS, o options, args []string, wd string, profileDirs []string) int {
 	ref := o.profile
 	if ref == "" && len(args) > 0 {
 		ref, args = args[0], args[1:]
 	}
 	if ref == "" {
-		fmt.Fprintf(stdout, "`profile: NAME` is looked up as NAME.profile in:\n  %s\n", strings.Join(profile.SearchDirs("."), "\n  "))
+		fmt.Fprintf(stdout, "`profile: NAME` is looked up as NAME.profile in:\n  %s\n",
+			strings.Join(append([]string{wd}, profileDirs...), "\n  "))
 		return 0
 	}
-	p, err := profile.Load(fsys, ref, ".")
+	p, err := profile.Load(fsys, ref, wd, profileDirs)
 	if err != nil {
 		fmt.Fprintln(stderr, "dgdlint:", err)
 		return 2
@@ -359,7 +376,7 @@ func profileShow(stdout, stderr io.Writer, fsys vfs.FS, o options, args []string
 }
 
 func printConfig(w io.Writer, l *lint.Linter) {
-	prj := l.Project
+	prj := l.Project()
 	orNone := func(s string) string {
 		if s == "" {
 			return "(none)"
@@ -369,11 +386,11 @@ func printConfig(w io.Writer, l *lint.Linter) {
 	cfg := prj.Config
 	fmt.Fprintf(w, "config file:   %s\n", orNone(prj.ConfigPath))
 	fmt.Fprintf(w, "lib root:      %s\n", orNone(prj.Root))
-	if prj.Root == "" {
+	if !prj.HasLib() {
 		fmt.Fprintf(w, "mode:          file-local (cross-file rules need a lib root)\n")
 	} else if prj.Partial {
 		fmt.Fprintf(w, "mode:          partial checkout (what is not in the checkout or the profile is unknown)\n")
-	} else if l.Index.Complete {
+	} else if l.Index().Complete() {
 		fmt.Fprintf(w, "mode:          whole lib\n")
 	} else {
 		fmt.Fprintf(w, "mode:          whole lib, incomplete\n")
@@ -396,8 +413,8 @@ func printConfig(w io.Writer, l *lint.Linter) {
 	fmt.Fprintf(w, "typechecking:  %s\n", tc)
 	fmt.Fprintf(w, "baseline:      %s\n", orNone(l.BaselinePath()))
 	fmt.Fprintf(w, "fail on:       %s\n", lint.Threshold(cfg))
-	for _, n := range append(prj.Notes, l.Index.Notes...) {
-		fmt.Fprintf(w, "note: %s\n", n)
+	for _, n := range slices.Concat(prj.Notes, l.Index().Notes()) {
+		fmt.Fprintf(w, "note: %s\n", n.Message)
 	}
 	fmt.Fprintf(w, "rules:\n")
 	for _, r := range l.EffectiveRules("") {

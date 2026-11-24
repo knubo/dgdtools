@@ -13,26 +13,11 @@ import (
 // only what the index can prove.
 
 // definedAt builds the related location of a function definition.
-func definedAt(p *Pass, fn index.ChainFunc, msg string) []diag.Related {
+func definedAt(fn index.ChainFunc, msg string) []diag.Related {
 	if fn.Path == "" {
 		return nil
 	}
-	rel := diag.Related{Path: fn.Path, Start: fn.Off, End: fn.Off, Message: msg}
-	if fn.Path == p.File.Path {
-		pos := p.File.Pos(fn.Off)
-		rel.Line, rel.Col = pos.Line, pos.Col
-	} else if src, err := p.Index.FS.ReadFile(fn.Path); err == nil {
-		rel.Line, rel.Col = 1, 1
-		for i := 0; i < int(fn.Off) && i < len(src); i++ {
-			if src[i] == '\n' {
-				rel.Line++
-				rel.Col = 1
-			} else {
-				rel.Col++
-			}
-		}
-	}
-	return []diag.Related{rel}
+	return []diag.Related{{Path: fn.Path, Line: fn.Line, Col: fn.Col, Start: fn.Off, End: fn.Off, Message: msg}}
 }
 
 var ruleCallableNotFound = &Rule{
@@ -45,8 +30,8 @@ var ruleCallableNotFound = &Rule{
 		"inherit or #include, the function is also looked for in those users.",
 	Default: true, Severity: diag.Error, CrossFile: true,
 	Run: func(p *Pass) {
-		for _, c := range p.calls().strings {
-			lk, desc := p.lookup(c)
+		for i, c := range p.calls().strings {
+			lk, desc := p.lookup(i)
 			if lk.State == index.LookupMissing {
 				p.Report(c.Start, c.End, "function '%s' is not defined in %s%s (called via %s)",
 					c.Func, desc, lk.Note, c.Registrar)
@@ -62,11 +47,11 @@ var ruleStaticCrossObj = &Rule{
 		"functions only from the same object. The call silently returns nil.",
 	Default: true, Severity: diag.Error, CrossFile: true,
 	Run: func(p *Pass) {
-		for _, c := range p.calls().strings {
+		for i, c := range p.calls().strings {
 			if c.Kind != crossObject {
 				continue
 			}
-			lk, _ := p.lookup(c)
+			lk, _ := p.lookup(i)
 			if lk.State != index.LookupFound {
 				continue
 			}
@@ -81,7 +66,7 @@ var ruleStaticCrossObj = &Rule{
 					c.Func, lk.Fn.DefinedIn)
 			}
 			if d != nil {
-				d.Related = definedAt(p, lk.Fn, "defined here")
+				d.Related = definedAt(lk.Fn, "defined here")
 			}
 		}
 	},
@@ -95,17 +80,17 @@ var ruleUndefinedPrototype = &Rule{
 		"inheritor or includer of the file provides the definition.",
 	Default: true, Severity: diag.Error, CrossFile: true,
 	Run: func(p *Pass) {
-		for _, c := range p.calls().strings {
-			lk, _ := p.lookup(c)
+		for i, c := range p.calls().strings {
+			lk, _ := p.lookup(i)
 			if lk.State != index.LookupFound || !lk.Fn.PrototypeOnly {
 				continue
 			}
-			if c.Target == targetSelf && p.Index.ProvidedByUsers(p.Ctx, p.LibPath, c.Func) {
+			if c.Target == targetSelf && p.Index.ProvidedByUsers(p.Ctx, c.Func) {
 				continue
 			}
 			d := p.Report(c.Start, c.End, "'%s' in %s is declared but never defined — calling it is a runtime error",
 				c.Func, lk.Fn.DefinedIn)
-			d.Related = definedAt(p, lk.Fn, "prototype")
+			d.Related = definedAt(lk.Fn, "prototype")
 		}
 
 		ch := p.Index.Chain(p.LibPath)
@@ -121,10 +106,10 @@ var ruleUndefinedPrototype = &Rule{
 			if !ok || !fn.PrototypeOnly {
 				continue
 			}
-			if !p.Index.ProvidedByUsers(p.Ctx, p.LibPath, name) {
+			if !p.Index.ProvidedByUsers(p.Ctx, name) {
 				d := p.ReportNode(dc.Call.Fun, "'%s' is declared but never defined (prototype in %s) — calling it is a runtime error",
 					name, fn.DefinedIn)
-				d.Related = definedAt(p, fn, "prototype")
+				d.Related = definedAt(fn, "prototype")
 			}
 		}
 	},
@@ -169,11 +154,11 @@ var ruleCallbackArity = &Rule{
 		"runtime error.",
 	Default: true, Severity: diag.Warning, CrossFile: true,
 	Run: func(p *Pass) {
-		for _, c := range p.calls().strings {
+		for i, c := range p.calls().strings {
 			if c.NArgs < 0 {
 				continue
 			}
-			lk, _ := p.lookup(c)
+			lk, _ := p.lookup(i)
 			if lk.State != index.LookupFound || lk.Fn.PrototypeOnly {
 				continue
 			}
@@ -189,7 +174,7 @@ var ruleCallbackArity = &Rule{
 					c.Func, lk.Fn.DefinedIn, lk.Fn.MaxArgs, c.NArgs)
 			}
 			if d != nil {
-				d.Related = definedAt(p, lk.Fn, "defined here")
+				d.Related = definedAt(lk.Fn, "defined here")
 			}
 		}
 	},

@@ -36,7 +36,7 @@ type Config struct {
 	Root string `yaml:"root"`
 	// Profile names the mudlib profile to lint against: a name, looked
 	// up as NAME.profile next to this file, in $DGDTOOLS_PROFILE_PATH and
-	// in the user config directory (profile.SearchDirs), or a file path. A profile supplies what
+	// in the user config directory (profile.UserDirs), or a file path. A profile supplies what
 	// the checkout does not contain: the driver's settings, the shared
 	// headers, and the signatures of the shared objects.
 	Profile string `yaml:"profile"`
@@ -225,14 +225,11 @@ func LoadFS(fs vfs.FS, path string) (*Config, error) {
 }
 
 func loadInto(fs vfs.FS, path string, c *Config, seen map[string]bool) error {
-	abs, err := filepath.Abs(path)
-	if err != nil {
-		return err
-	}
-	if seen[abs] {
+	key := filepath.Clean(path)
+	if seen[key] {
 		return fmt.Errorf("%s: extends cycle", path)
 	}
-	seen[abs] = true
+	seen[key] = true
 	data, err := fs.ReadFile(path)
 	if err != nil {
 		return err
@@ -280,50 +277,41 @@ func loadInto(fs vfs.FS, path string, c *Config, seen map[string]bool) error {
 	return nil
 }
 
-// Find searches dir and its parents for a config file; returns Default()
-// when none exists.
+// Find searches dir (an absolute path) and its parents for a config file;
+// returns Default() when none exists.
 func Find(dir string) (*Config, error) {
-	p, err := FindPath(vfs.OS{}, dir)
-	if err != nil {
-		return nil, err
-	}
+	p := FindPath(vfs.OS{}, dir)
 	if p == "" {
 		return Default(), nil
 	}
 	return Load(p)
 }
 
-// FindPath returns the nearest config file at or above dir, or "".
-func FindPath(fs vfs.FS, dir string) (string, error) {
-	dir, err := filepath.Abs(dir)
-	if err != nil {
-		return "", err
-	}
+// FindPath returns the nearest config file at or above dir (an absolute
+// path), or "".
+func FindPath(fs vfs.FS, dir string) string {
 	for {
 		for _, name := range []string{FileName, AltFileName} {
 			p := filepath.Join(dir, name)
 			if fs.Exists(p) && !fs.IsDir(p) {
-				return p, nil
+				return p
 			}
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
-			return "", nil
+			return ""
 		}
 		dir = parent
 	}
 }
 
-// AbsRoot returns the lib root as an absolute filesystem path.
+// AbsRoot returns the lib root: Root as given when it is absolute, else
+// relative to the config file's directory.
 func (c *Config) AbsRoot() string {
 	if filepath.IsAbs(c.Root) {
 		return filepath.Clean(c.Root)
 	}
-	p, err := filepath.Abs(filepath.Join(c.Dir, c.Root))
-	if err != nil {
-		return filepath.Clean(filepath.Join(c.Dir, c.Root))
-	}
-	return p
+	return filepath.Join(c.Dir, c.Root)
 }
 
 // TokenDialect converts to the lexer dialect.

@@ -3,6 +3,7 @@ package index
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/mmcdole/dgdtools/pkg/lexer"
@@ -106,6 +107,7 @@ func Unquote(lit string) (string, bool) {
 // Chain is the flattened inherit view of one object.
 type Chain struct {
 	Funcs map[string]ChainFunc
+	Vars  map[string]ChainVar
 	// Partial: some inherit could not be resolved or loaded, or some
 	// program in the chain has an incomplete symbol table. A name absent
 	// from a partial chain is Unknown, not Missing.
@@ -113,42 +115,39 @@ type Chain struct {
 	Objects []string // lib paths in the chain, leaf last
 }
 
+// ChainFunc is a function as an object's chain provides it.
 type ChainFunc struct {
-	Static, Private  bool
-	PrototypeOnly    bool
-	MinArgs, MaxArgs int
-	Path             string // fs path of the defining file
-	Off              uint32
-	DefinedIn        string // lib path of the object that provides it
-	// Decl and Type are the declaration and return type as written (see
-	// FuncInfo).
-	Decl, Type string
+	FuncInfo
+	DefinedIn string // lib path of the object that provides it
+}
+
+// ChainVar is a global variable as an object's chain provides it.
+type ChainVar struct {
+	VarInfo
+	DefinedIn string // lib path of the object that declares it
 }
 
 // Chain returns the flattened chain for a lib path.
-func (ix *Index) Chain(libPath string) *Chain {
-	ch, _ := ix.chain(libPath, map[string]bool{})
+func (s *Snapshot) Chain(libPath string) *Chain {
+	ch, _ := s.chain(libPath, map[string]bool{})
 	return ch
 }
 
 // chain also reports whether an inheritance cycle was met below libPath;
 // results computed inside a cycle are not memoized.
-func (ix *Index) chain(libPath string, visiting map[string]bool) (*Chain, bool) {
-	ix.mu.Lock()
-	ch := ix.chains[libPath]
-	ix.mu.Unlock()
-	if ch != nil {
+func (s *Snapshot) chain(libPath string, visiting map[string]bool) (*Chain, bool) {
+	if ch, ok := s.chains.get(libPath); ok {
 		return ch, false
 	}
-	ch = &Chain{Funcs: map[string]ChainFunc{}}
+	ch := &Chain{Funcs: map[string]ChainFunc{}, Vars: map[string]ChainVar{}}
 	if visiting[libPath] {
 		ch.Partial = true // inheritance cycle; the driver rejects it
 		return ch, true
 	}
-	u := ix.Unit(libPath)
+	u := s.Unit(libPath)
 	if u == nil {
 		ch.Partial = true
-		return ix.storeChain(libPath, ch), false
+		return s.storeChain(libPath, ch), false
 	}
 	cyc := false
 	if u.Partial {
@@ -160,7 +159,7 @@ func (ix *Index) chain(libPath string, visiting map[string]bool) (*Chain, bool) 
 			ch.Partial = true
 			continue
 		}
-		sub, c := ix.chain(ref.Path, visiting)
+		sub, c := s.chain(ref.Path, visiting)
 		cyc = cyc || c
 		if sub.Partial {
 			ch.Partial = true
@@ -180,6 +179,12 @@ func (ix *Index) chain(libPath string, visiting map[string]bool) (*Chain, bool) 
 			}
 			ch.Funcs[name] = fn
 		}
+		for name, v := range sub.Vars {
+			if ref.Private {
+				v.Private = true
+			}
+			ch.Vars[name] = v
+		}
 		ch.Objects = append(ch.Objects, sub.Objects...)
 	}
 	delete(visiting, libPath)
@@ -189,141 +194,92 @@ func (ix *Index) chain(libPath string, visiting map[string]bool) (*Chain, bool) 
 				continue
 			}
 		}
-		ch.Funcs[name] = ChainFunc{
-			Static: fi.Static, Private: fi.Private, PrototypeOnly: fi.PrototypeOnly,
-			MinArgs: fi.MinArgs, MaxArgs: fi.MaxArgs,
-			Path: fi.Path, Off: fi.Off, DefinedIn: libPath,
-			Decl: fi.Decl, Type: fi.Type,
-		}
+		ch.Funcs[name] = ChainFunc{FuncInfo: fi, DefinedIn: libPath}
+	}
+	for name, vi := range u.Vars {
+		ch.Vars[name] = ChainVar{VarInfo: vi, DefinedIn: libPath}
 	}
 	ch.Objects = append(ch.Objects, libPath)
 	if cyc && len(visiting) > 0 {
 		return ch, true
 	}
-	return ix.storeChain(libPath, ch), false
+	return s.storeChain(libPath, ch), false
 }
 
-func (ix *Index) storeChain(libPath string, ch *Chain) *Chain {
-	ix.mu.Lock()
-	defer ix.mu.Unlock()
-	if old := ix.chains[libPath]; old != nil {
-		return old
-	}
-	ix.chains[libPath] = ch
-	return ch
+// storeChain keeps ch as libPath's chain unless one was stored meanwhile.
+func (s *Snapshot) storeChain(libPath string, ch *Chain) *Chain {
+	return s.chains.getOrPut(libPath, func() *Chain { return ch })
+}
+
+// autoState is what the configured auto objects give every object.
+type autoState struct {
+	funcs map[string]ChainFunc
+	// members are the lib paths of the auto objects, of the programs they
+	// inherit, and of the files those include as code.
+	members map[string]bool
+}
+
+func (s *Snapshot) autoState() *autoState {
+	return s.auto.load(func() *autoState {
+		a := &autoState{funcs: map[string]ChainFunc{}, members: map[string]bool{}}
+		for _, auto := range s.cfg.Lint.AutoObjects {
+			ch := s.Chain(NormalizeLibPath(auto, "/"))
+			for name, fn := range ch.Funcs {
+				fn.DefinedIn = "(auto object)"
+				a.funcs[name] = fn
+			}
+			for _, o := range ch.Objects {
+				a.members[o] = true
+				if u := s.Unit(o); u != nil {
+					for _, c := range u.code {
+						a.members[c] = true
+					}
+				}
+			}
+		}
+		return a
+	})
 }
 
 // AutoFuncs returns the functions every object gets from the configured
 // auto objects.
-func (ix *Index) AutoFuncs() map[string]ChainFunc {
-	ix.mu.Lock()
-	once := ix.autoOnce
-	ix.mu.Unlock()
-	once.Do(func() {
-		m := map[string]ChainFunc{}
-		for _, auto := range ix.Cfg.Lint.AutoObjects {
-			for name, fn := range ix.Chain(NormalizeLibPath(auto, "/")).Funcs {
-				fn.DefinedIn = "(auto object)"
-				m[name] = fn
-			}
-		}
-		ix.mu.Lock()
-		ix.autoFuncs = m
-		ix.mu.Unlock()
-	})
-	ix.mu.Lock()
-	defer ix.mu.Unlock()
-	return ix.autoFuncs
-}
+func (s *Snapshot) AutoFuncs() map[string]ChainFunc { return s.autoState().funcs }
 
-// inAutoChain reports whether libPath is an auto object, one of the
-// programs an auto object inherits, or a file one of those #includes as
-// code.
-func (ix *Index) inAutoChain(libPath string) bool {
-	for _, auto := range ix.Cfg.Lint.AutoObjects {
-		for _, o := range ix.Chain(NormalizeLibPath(auto, "/")).Objects {
-			if o == libPath {
-				return true
-			}
-			ix.mu.Lock()
-			included := ix.incUsers[libPath][o]
-			ix.mu.Unlock()
-			if included {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-// UsersOf returns the objects whose inherit closure includes libPath, plus
-// the objects that #include it as code. The second result is false when
-// the whole-lib scan could not complete (cancelled); the answer is then
-// unknown.
-func (ix *Index) UsersOf(ctx context.Context, libPath string) ([]string, bool) {
-	if !ix.LoadAll(ctx) {
+// UsersOf returns the objects whose program includes libPath's: those
+// that inherit it, however indirectly, and those that #include it as
+// code. It needs the whole-lib scan and runs it if it has not completed.
+// The second result is false when the answer cannot be had: the scan was
+// cancelled, or the index has moved on to a newer generation.
+func (s *Snapshot) UsersOf(ctx context.Context, libPath string) ([]string, bool) {
+	if !s.Scan(ctx) {
 		return nil, false
 	}
-	ix.mu.Lock()
-	if !ix.usersOK {
-		units := make(map[string]*Unit, len(ix.units))
-		for _, e := range ix.units {
-			if e.unit != nil && e.unit.LibPath != "" && e.unit.Funcs != nil {
-				units[e.unit.LibPath] = e.unit
-			}
-		}
-		users := map[string][]string{}
-		closures := map[string][]string{}
-		var closure func(p string, visiting map[string]bool) []string
-		closure = func(p string, visiting map[string]bool) []string {
-			if c, ok := closures[p]; ok {
-				return c
-			}
-			if visiting[p] {
-				return nil
-			}
-			visiting[p] = true
-			var out []string
-			if u := units[p]; u != nil {
-				for _, ref := range u.Inherits {
-					if !ref.Resolved {
-						continue
-					}
-					out = append(out, ref.Path)
-					out = append(out, closure(ref.Path, visiting)...)
-				}
-			}
-			delete(visiting, p)
-			closures[p] = out
-			return out
-		}
-		for p := range units {
-			seen := map[string]bool{}
-			for _, anc := range closure(p, map[string]bool{}) {
-				if anc != p && !seen[anc] {
-					seen[anc] = true
-					users[anc] = append(users[anc], p)
-				}
-			}
-		}
-		ix.users, ix.usersOK = users, true
-	}
-	out := append([]string(nil), ix.users[libPath]...)
-	for u := range ix.incUsers[libPath] {
-		out = append(out, u)
-	}
-	ix.mu.Unlock()
-	return out, true
+	return s.users(libPath)
 }
 
-// IsIncluded reports whether some object #includes libPath's file as code.
-func (ix *Index) IsIncluded(ctx context.Context, libPath string) bool {
-	if !ix.LoadAll(ctx) {
-		return true // unknown: assume the conservative answer
+// users answers UsersOf from the index's reverse edges, which are those
+// of this generation only while it is the current one.
+func (s *Snapshot) users(libPath string) ([]string, bool) {
+	ix := s.ix
+	ix.mu.RLock()
+	if ix.cur != s || !ix.walked || len(ix.todo) > 0 {
+		ix.mu.RUnlock()
+		return nil, false
 	}
-	ix.mu.Lock()
-	defer ix.mu.Unlock()
-	return len(ix.incUsers[libPath]) > 0
+	var out []string
+	seen := map[string]bool{libPath: true}
+	for queue := []string{libPath}; len(queue) > 0; queue = queue[1:] {
+		for key := range ix.children[queue[0]] {
+			if u, _ := s.units.get(key); u != nil && !seen[u.LibPath] {
+				seen[u.LibPath] = true
+				out = append(out, u.LibPath)
+				queue = append(queue, u.LibPath)
+			}
+		}
+	}
+	ix.mu.RUnlock()
+	slices.Sort(out)
+	return out, true
 }
 
 // LookupState classifies a callable lookup.
@@ -346,6 +302,9 @@ type Lookup struct {
 // maxUserChains bounds the fallback search through inheritors' chains.
 const maxUserChains = 20
 
+// usersFunc answers UsersOf, or declines to.
+type usersFunc func(ctx context.Context, libPath string) ([]string, bool)
+
 // LookupCallable resolves function name fn in the object at target.
 //
 // self says the receiver is this_object() in code that lives in target:
@@ -354,15 +313,20 @@ const maxUserChains = 20
 // too — the callback a module registers is routinely provided by a
 // sibling module or the leaf. When the receiver is the named object
 // itself ("/path"->fn()), only its own chain counts.
-func (ix *Index) LookupCallable(ctx context.Context, target, fn string, self bool) Lookup {
-	if ix.Root == "" || target == "" {
+func (s *Snapshot) LookupCallable(ctx context.Context, target, fn string, self bool) Lookup {
+	return s.lookupCallable(ctx, target, fn, self, s.UsersOf)
+}
+
+func (s *Snapshot) lookupCallable(ctx context.Context, target, fn string, self bool, usersOf usersFunc) Lookup {
+	if !s.HasLib() || target == "" {
 		return Lookup{State: LookupUnknown}
 	}
-	ch := ix.Chain(target)
+	ch := s.Chain(target)
 	if f, ok := ch.Funcs[fn]; ok {
 		return Lookup{State: LookupFound, Fn: f}
 	}
-	if f, ok := ix.AutoFuncs()[fn]; ok {
+	auto := s.autoState()
+	if f, ok := auto.funcs[fn]; ok {
 		return Lookup{State: LookupFound, Fn: f}
 	}
 	if ch.Partial {
@@ -370,29 +334,29 @@ func (ix *Index) LookupCallable(ctx context.Context, target, fn string, self boo
 	}
 	if !self {
 		// A profile stub lists an object's public interface only.
-		if st, ok := ix.FS.(interface{ IsStub(string) bool }); ok && st.IsStub(ix.objectFS(target)) {
+		if u := s.Unit(target); u != nil && u.Stub {
 			return Lookup{State: LookupMissing, Note: " or is private there (a profile lists public functions only)"}
 		}
 		return Lookup{State: LookupMissing}
 	}
 	// Code in the auto object's own chain runs as every object in the
 	// lib: this_object() there can be anything.
-	if ix.inAutoChain(target) {
+	if auto.members[target] {
 		return Lookup{State: LookupUnknown}
 	}
-	users, ok := ix.UsersOf(ctx, target)
+	users, ok := usersOf(ctx, target)
 	if !ok {
 		return Lookup{State: LookupUnknown}
 	}
 	if len(users) == 0 {
-		if ix.Partial {
+		if s.partial {
 			// Only the checkout could be searched for inheritors.
 			return Lookup{State: LookupMissing, Note: " (nor in this checkout; inheritors elsewhere in the lib cannot be seen)"}
 		}
 		return Lookup{State: LookupMissing}
 	}
 	for _, u := range users {
-		if unit := ix.Unit(u); unit != nil {
+		if unit := s.Unit(u); unit != nil {
 			if _, ok := unit.Funcs[fn]; ok {
 				return Lookup{State: LookupFoundInUser}
 			}
@@ -403,7 +367,7 @@ func (ix *Index) LookupCallable(ctx context.Context, target, fn string, self boo
 		if checked >= maxUserChains {
 			return Lookup{State: LookupUnknown} // bounded: cannot verify
 		}
-		uch := ix.Chain(u)
+		uch := s.Chain(u)
 		checked++
 		if uch.Partial {
 			return Lookup{State: LookupUnknown}
@@ -419,8 +383,12 @@ func (ix *Index) LookupCallable(ctx context.Context, target, fn string, self boo
 // ProvidedByUsers reports whether any inheritor/includer of libPath
 // supplies a real definition of fn. It returns true (assume provided)
 // whenever the bounded search cannot decide.
-func (ix *Index) ProvidedByUsers(ctx context.Context, libPath, fn string) bool {
-	users, ok := ix.UsersOf(ctx, libPath)
+func (s *Snapshot) ProvidedByUsers(ctx context.Context, libPath, fn string) bool {
+	return s.providedByUsers(ctx, libPath, fn, s.UsersOf)
+}
+
+func (s *Snapshot) providedByUsers(ctx context.Context, libPath, fn string, usersOf usersFunc) bool {
+	users, ok := usersOf(ctx, libPath)
 	if !ok {
 		return true
 	}
@@ -428,7 +396,7 @@ func (ix *Index) ProvidedByUsers(ctx context.Context, libPath, fn string) bool {
 		return false
 	}
 	for _, u := range users {
-		if unit := ix.Unit(u); unit != nil {
+		if unit := s.Unit(u); unit != nil {
 			if f, ok := unit.Funcs[fn]; ok && !f.PrototypeOnly {
 				return true
 			}
@@ -439,7 +407,7 @@ func (ix *Index) ProvidedByUsers(ctx context.Context, libPath, fn string) bool {
 		if checked >= maxUserChains {
 			return true
 		}
-		uch := ix.Chain(u)
+		uch := s.Chain(u)
 		checked++
 		if uch.Partial {
 			return true

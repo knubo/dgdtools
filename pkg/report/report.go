@@ -76,7 +76,7 @@ func Summary(w io.Writer, res *lint.Result, verbose bool) {
 		byRule[d.Rule]++
 	}
 	for _, n := range res.Notes {
-		fmt.Fprintf(w, "note: %s\n", n)
+		fmt.Fprintf(w, "note: %s\n", n.Message)
 	}
 	for _, s := range res.Skipped {
 		fmt.Fprintf(w, "warning: could not read %s\n", s)
@@ -158,8 +158,14 @@ type jsonOut struct {
 	Tool        string     `json:"tool"`
 	Diagnostics []jsonDiag `json:"diagnostics"`
 	Summary     jsonSum    `json:"summary"`
-	Notes       []string   `json:"notes,omitempty"`
+	Notes       []jsonNote `json:"notes,omitempty"`
 	Skipped     []string   `json:"skipped,omitempty"`
+}
+
+type jsonNote struct {
+	Kind    diag.NoteKind `json:"kind"`
+	Message string        `json:"message"`
+	Path    string        `json:"path,omitempty"`
 }
 
 type jsonSum struct {
@@ -173,7 +179,10 @@ type jsonSum struct {
 // positions; offsets are byte offsets into the file.
 func JSON(w io.Writer, res *lint.Result, o Options) error {
 	out := jsonOut{Version: 1, Tool: "dgdlint " + o.Version, Diagnostics: []jsonDiag{},
-		Notes: res.Notes, Skipped: res.Skipped}
+		Skipped: res.Skipped}
+	for _, n := range res.Notes {
+		out.Notes = append(out.Notes, jsonNote{n.Kind, n.Message, n.Path})
+	}
 	out.Summary.Stats = res.Stats
 	for _, d := range res.Diagnostics {
 		switch d.Severity {

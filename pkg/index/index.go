@@ -7,323 +7,163 @@
 // file's own inherit chain. The index is what lets a linter give LPC the
 // missing-function check other languages get from their compiler.
 //
-// Three properties shape the design:
+// Four properties shape the design:
 //
 //   - Lazy. Nothing is read until asked for. Linting one file loads its
 //     include closure, its inherit chain, and the targets of its calls.
-//     Only the reverse "who inherits me" map needs the whole lib, and it
-//     is built on first use.
+//     Only "who inherits me" needs the whole lib, and that scan runs on
+//     first use.
 //   - Three-valued. Lookups answer Found, Missing or Unknown. An inherit
 //     that cannot be resolved, a parent that could not be fully parsed, a
-//     missing header: each makes the affected chain Partial, and a miss in
-//     a partial chain is Unknown, never Missing.
-//   - Invalidatable. Each unit records the files it was built from, so a
-//     changed file drops exactly the units that depend on it.
+//     missing header, a cancelled scan: each makes the affected answer
+//     Unknown, never Missing.
+//   - Generational. All questions are asked of a Snapshot, one generation
+//     of the index. A snapshot only ever fills in what it has not read
+//     yet; nothing it has answered changes. Invalidate does not touch the
+//     snapshots in use: it makes the next generation, which shares every
+//     unit the change did not reach. A lint run holds one snapshot from
+//     start to end, so runs and edits never wait for each other.
+//   - Incremental. The index knows who was built from which file, who
+//     inherits whom and who asked about whom, so a change drops exactly
+//     what depends on it, names the files whose diagnostics it can
+//     affect, and leaves a completed whole-lib scan complete but for the
+//     files that changed.
 //
-// All file access goes through vfs.FS. An Index is safe for concurrent
-// use and holds no global state.
+// All file access goes through vfs.FS; the package reads no environment,
+// working directory or other process state. Paths given to it are
+// absolute.
 package index
 
 import (
-	"context"
-	"fmt"
-	"io/fs"
-	"path"
+	"maps"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
-	"sync/atomic"
 
-	"github.com/mmcdole/dgdtools/internal/par"
 	"github.com/mmcdole/dgdtools/pkg/config"
+	"github.com/mmcdole/dgdtools/pkg/diag"
 	"github.com/mmcdole/dgdtools/pkg/fileset"
-	"github.com/mmcdole/dgdtools/pkg/lexer"
 	"github.com/mmcdole/dgdtools/pkg/pp"
-	"github.com/mmcdole/dgdtools/pkg/syntax"
 	"github.com/mmcdole/dgdtools/pkg/token"
 	"github.com/mmcdole/dgdtools/pkg/vfs"
 )
 
-// FuncInfo describes one function of an object.
-type FuncInfo struct {
-	Static, Private bool
-	// PrototypeOnly marks a declared-but-never-defined function: DGD
-	// compiles these fine and raises "Undefined function" at call time.
-	PrototypeOnly bool
-	// MinArgs/MaxArgs bound the accepted argument count. MaxArgs -1 means
-	// unbounded (trailing ellipsis).
-	MinArgs, MaxArgs int
-	Path             string // fs path of the defining file
-	Off              uint32
-	// Decl is the declaration as written, without its body:
-	// "static varargs int query(string what, mixed extra...)".
-	// Type is its return type as written ("int", "string *", a type
-	// macro such as "status"), or "" for a function declared without one.
-	// Both come from real files and from profile stubs alike; Params
-	// splits Decl into its parameters.
-	Decl, Type string
-}
-
-// VarInfo describes one global variable of an object.
-type VarInfo struct {
-	Static, Private bool
-	// Type is the declared type as written, including '*'s.
-	Type string
-	Off  uint32
-}
-
-// Params returns the parameters of a function declaration as written
-// ("string what", "mixed extra..."), for signature help.
-func Params(decl string) []string {
-	open := strings.IndexByte(decl, '(')
-	close := strings.LastIndexByte(decl, ')')
-	if open < 0 || close <= open {
-		return nil
-	}
-	inner := strings.TrimSpace(decl[open+1 : close])
-	if inner == "" || inner == "void" {
-		return nil
-	}
-	var out []string
-	for _, p := range strings.Split(inner, ",") {
-		out = append(out, strings.TrimSpace(p))
-	}
-	return out
-}
-
-// SourceText returns the significant tokens first..last of f joined into
-// one line: the text as written minus comments, directives and layout.
-func SourceText(f *token.File, first, last int) string {
-	var b strings.Builder
-	prev := token.EOF
-	for i := first; i <= last && i < len(f.Tokens); i++ {
-		t := f.Tokens[i]
-		if t.Kind.IsTrivia() || t.Kind == token.Directive || t.Kind == token.EOF {
-			continue
-		}
-		switch {
-		case b.Len() == 0, prev == token.LParen, prev == token.Star && t.Kind != token.Star && t.Kind != token.Comma && t.Kind != token.RParen,
-			t.Kind == token.Comma, t.Kind == token.RParen, t.Kind == token.Semicolon, t.Kind == token.Ellipsis,
-			t.Kind == token.LParen && prev == token.Ident:
-		default:
-			b.WriteByte(' ')
-		}
-		b.Write(f.Text(t))
-		prev = t.Kind
-	}
-	return b.String()
-}
-
-// DeclPrefix renders the specifiers and type of a declaration as written,
-// with a trailing space when non-empty.
-func DeclPrefix(f *token.File, specs []syntax.Spec, typ *syntax.TypeSpec) string {
-	var parts []string
-	for _, s := range specs {
-		parts = append(parts, string(f.Text(f.Tokens[s.Tok])))
-	}
-	if typ != nil {
-		parts = append(parts, SourceText(f, typ.First, typ.Last))
-	}
-	if len(parts) == 0 {
-		return ""
-	}
-	return strings.Join(parts, " ") + " "
-}
-
-// TypeText renders a declared type with its '*'s: "string *".
-func TypeText(f *token.File, typ *syntax.TypeSpec, stars int) string {
-	if typ == nil {
-		return ""
-	}
-	s := SourceText(f, typ.First, typ.Last)
-	if stars > 0 {
-		s += " " + strings.Repeat("*", stars)
-	}
-	return s
-}
-
-// FuncDeclText renders a function's declaration as written, without body
-// or terminator: specifiers, return type, name and parameter list.
-func FuncDeclText(f *token.File, fn *syntax.FuncDecl) string {
-	name := "operator"
-	if fn.Name != nil {
-		name = fn.Name.Name
-	}
-	return DeclPrefix(f, fn.Specs, fn.Type) + strings.Repeat("*", fn.Stars) + name +
-		"(" + SourceText(f, fn.LParen+1, fn.RParen-1) + ")"
-}
-
-// InheritRef is one inherit statement.
-type InheritRef struct {
-	Raw      string // source text of the path expression
-	Path     string // resolved lib path (no .c)
-	Label    string
-	Resolved bool
-	Private  bool
-	Off, End uint32
-}
-
-// BadInclude is an #include that provably resolves to nothing.
-type BadInclude struct {
-	Raw      string
-	Off, End uint32
-}
-
-// Unit is the indexed view of one source file: facts only, no tokens or
-// tree, so a whole lib of units stays small.
-type Unit struct {
-	FSPath  string
-	LibPath string // "" when the file is outside the lib root
-
-	Funcs    map[string]FuncInfo
-	Vars     map[string]VarInfo
-	Inherits []InheritRef
-
-	// Partial is true when the symbol table may be missing entries: a
-	// top-level region did not parse, an include is unresolved, or a
-	// macro stands at declaration level.
-	Partial bool
-	// MacrosComplete is true when every reachable #include resolved.
-	MacrosComplete bool
-	// Declares is true when the file certainly declares a function or
-	// variable (outside any conditional branch chosen by guess).
-	Declares    bool
-	BadIncludes []BadInclude
-	// UnknownIncludes counts includes that could not be resolved but are
-	// not provably missing (the lib is incomplete).
-	UnknownIncludes int
-	AutoSave        bool
-	// Deps are the fs paths this unit was built from (itself included).
-	Deps []string
-}
-
-// Parsed is a Unit together with its token stream, tree and macro view,
-// for the file currently being linted.
-type Parsed struct {
-	Unit *Unit
-	Tok  *token.File
-	Tree *syntax.File
-	View *pp.View
-}
-
-// Stats counts what the index could not see. They are how a drop in
-// coverage becomes observable.
-type Stats struct {
-	Units             atomic.Int64
-	UnresolvedInherit atomic.Int64
-	UnknownIncludes   atomic.Int64
-	PartialUnits      atomic.Int64
-}
-
-// Index is the lazy whole-lib view.
-type Index struct {
-	FS   vfs.FS
-	Root string // absolute lib root; "" in file-local mode
-	Cfg  *config.Config
-
-	// Partial says there is no whole lib on disk: files come from a
-	// checkout of one subtree and/or from a profile's stubs. What exists
-	// is then decided per path by Covers.
-	Partial bool
-	// CheckoutDir on disk is the lib directory CheckoutLib
-	// ("/players/name"); both empty when the root is a real lib.
+// Layout says where the lib is.
+//
+//   - A whole lib on disk: Root.
+//   - A partial checkout: no Root; CheckoutDir on disk is the lib
+//     directory CheckoutLib, and the rest of the lib is known only as far
+//     as a profile's stubs describe it.
+//   - Neither: only file-local facts are available.
+type Layout struct {
+	// Root is the lib's directory on disk, "" when the lib is not there.
+	Root string
+	// CheckoutDir is a directory on disk holding the lib directory
+	// CheckoutLib ("/players/name"); both empty without a checkout.
 	CheckoutDir, CheckoutLib string
-	// Covered are lib directory prefixes ("/std/") known completely,
-	// except for paths matching Holes.
+	// Stubs is the location prefix of a profile's stubs: the stub for lib
+	// file "/std/room.c" is read from the file system as
+	// Stubs+"/std/room.c". Empty without a profile. A file on disk always
+	// wins over its stub.
+	Stubs string
+	// Covered are lib directory prefixes ("/std/") the stubs describe
+	// completely, except for paths matching the Holes globs.
 	Covered []string
-	Holes   *fileset.Matcher
+	Holes   []string
+}
 
-	// Complete is false when the lib on disk lacks things the config says
-	// it has (include dirs, the force-include, an auto object): a partial
-	// checkout or a wrong root. Missing references are then Unknown.
-	Complete bool
-	// Notes describe project-level degradations, for the user.
-	Notes []string
+// lib is what an index knows for its whole life: the file system, the
+// configuration and the layout. It is immutable.
+type lib struct {
+	fs  vfs.FS
+	cfg *config.Config
+	lay Layout
 
-	Stats Stats
+	// partial says there is no whole lib on disk: what exists is decided
+	// per path by Covers.
+	partial bool
+	// complete is false when the lib on disk lacks things the config says
+	// it has (include dirs, the force-include, an auto object): a wrong
+	// root. Missing references are then Unknown.
+	complete bool
+	notes    []diag.Note
 
 	dialect  token.Dialect
 	exclude  *fileset.Matcher
 	virtual  *fileset.Matcher
+	holes    *fileset.Matcher
 	defined  map[string]bool
 	override map[string]pp.Class
 	markers  map[string]bool
-
-	mu       sync.Mutex
-	tables   map[string]*tableEntry
-	units    map[string]*unitEntry
-	chains   map[string]*Chain
-	exists   map[string]bool
-	incUsers map[string]map[string]bool // lib path of an included code file -> includer lib paths
-	users    map[string][]string
-	usersOK  bool
-	allOnce  *sync.Once
-	allDone  bool // the whole-lib scan ran to completion (guarded by mu)
-
-	baseOnce   *sync.Once
-	baseLayers []*pp.Table
-	baseDeps   []string
-	baseOK     bool
-
-	autoOnce  *sync.Once
-	autoFuncs map[string]ChainFunc
 }
 
-type tableEntry struct {
-	once  sync.Once
-	ok    bool // file exists and was read
-	table *pp.Table
+// Index is the lib's index across generations. It hands out the current
+// Snapshot and makes the next one when files change. An Index is safe for
+// concurrent use and holds no global state.
+type Index struct {
+	*lib
+
+	// mu guards everything below. A snapshot's own tables have their own
+	// locks, but a unit is added to one only while mu is held, so holding
+	// mu is holding the set of units still.
+	mu  sync.RWMutex
+	cur *Snapshot
+
+	// The reverse edges and the scan state describe the current
+	// generation only: they are updated as its units are built and as
+	// Invalidate replaces it. A snapshot that has been replaced neither
+	// reads nor writes them.
+
+	// builtFrom maps a file to the units whose facts depend on it: the
+	// units that #include it, directly or not, and the units that looked
+	// for an #include there and did not find it.
+	builtFrom map[string]map[string]struct{}
+	// children maps a lib path to the units that inherit it directly or
+	// #include it as code.
+	children map[string]map[string]struct{}
+	// refs maps a lib path to the units that asked about that object
+	// while being linted (a call target, an object path), with the
+	// generation of the question.
+	refs map[string]map[string]uint64
+	// asked are the units whose lint asked who inherits them, with the
+	// generation of the question.
+	asked map[string]uint64
+
+	// walked says the scan scope has been listed; todo then holds the
+	// files in it that have no unit in the current generation yet. The
+	// whole-lib scan is complete when todo is empty.
+	walked bool
+	todo   map[string]struct{}
+	// scanning admits one scan at a time.
+	scanning chan struct{}
 }
 
-type unitEntry struct {
-	once sync.Once
-	unit *Unit
-}
-
-// New creates an index over the project's lib. root may be "" (no lib:
-// only file-local facts are available).
-func New(cfg *config.Config, root string, fsys vfs.FS) *Index {
-	return NewLayout(cfg, Layout{Root: root}, fsys)
-}
-
-// Layout says where the lib is. For a whole lib on disk only Root is set.
-// For a partial checkout Root is a virtual directory (nothing real is
-// under it), Partial is set, CheckoutDir/CheckoutLib mount the checkout,
-// and Covered names the directories a profile knows completely.
-type Layout struct {
-	Root                     string
-	Partial                  bool
-	CheckoutDir, CheckoutLib string
-	Covered                  []string
-	Holes                    []string
-}
-
-// NewLayout creates an index for a layout.
-func NewLayout(cfg *config.Config, lay Layout, fsys vfs.FS) *Index {
-	root := lay.Root
-	ix := &Index{
-		Partial: lay.Partial, CheckoutDir: lay.CheckoutDir, CheckoutLib: lay.CheckoutLib, Covered: lay.Covered,
-		Holes: fileset.NewMatcher(lay.Holes),
-		FS:    fsys, Root: root, Cfg: cfg,
+// New creates an index over a lib.
+func New(cfg *config.Config, lay Layout, fsys vfs.FS) *Index {
+	l := &lib{
+		fs: fsys, cfg: cfg, lay: lay,
+		partial:  lay.Root == "" && (lay.CheckoutDir != "" || lay.Stubs != ""),
 		dialect:  cfg.TokenDialect(),
 		exclude:  fileset.NewMatcher(cfg.Exclude),
 		virtual:  fileset.NewMatcher(cfg.Lint.VirtualPaths),
+		holes:    fileset.NewMatcher(lay.Holes),
 		defined:  map[string]bool{},
 		override: map[string]pp.Class{},
 		markers:  map[string]bool{},
 	}
 	for _, d := range pp.Predefined {
-		ix.defined[d] = true
+		l.defined[d] = true
 	}
 	for _, d := range cfg.Lint.Defines {
-		ix.defined[d] = true
+		l.defined[d] = true
 	}
 	for s := range cfg.SpecifierMacroSet() {
-		ix.override[s] = pp.ClassEmpty
+		l.override[s] = pp.ClassEmpty
 	}
 	for name, cls := range cfg.Lint.Macros {
 		if c, ok := pp.ParseClass(cls); ok {
-			ix.override[name] = c
+			l.override[name] = c
 		}
 	}
 	markers := cfg.Lint.AutosaveMarkers
@@ -331,768 +171,305 @@ func NewLayout(cfg *config.Config, lay Layout, fsys vfs.FS) *Index {
 		markers = []string{"set_auto_save"}
 	}
 	for _, m := range markers {
-		ix.markers[m] = true
+		l.markers[m] = true
 	}
-	ix.reset()
 
-	ix.Complete = root != "" && !ix.Partial
-	if ix.Complete {
+	l.complete = lay.Root != ""
+	if l.complete {
+		real := func(libPath string) string {
+			return filepath.Join(lay.Root, filepath.FromSlash(strings.TrimPrefix(libPath, "/")))
+		}
 		var missing []string
 		for _, d := range cfg.Lint.IncludeDirs {
-			if !fsys.IsDir(ix.fsPath(d)) {
+			if !fsys.IsDir(real(d)) {
 				missing = append(missing, d)
 			}
 		}
-		if f := cfg.Lint.IncludeFile; f != "" && !fsys.Exists(ix.fsPath(f)) {
+		if f := cfg.Lint.IncludeFile; f != "" && !fsys.Exists(real(f)) {
 			missing = append(missing, f)
 		}
 		for _, a := range cfg.Lint.AutoObjects {
-			if !fsys.Exists(ix.objectFS(a)) {
+			if !fsys.Exists(real(withC(a))) {
 				missing = append(missing, a)
 			}
 		}
 		if len(missing) > 0 {
-			ix.Complete = false
-			ix.Notes = append(ix.Notes, "lib looks incomplete under "+root+" (missing "+
-				strings.Join(missing, ", ")+"): missing-reference findings are disabled")
+			l.complete = false
+			l.notes = append(l.notes, diag.Note{
+				Kind: diag.NoteIncompleteLib, Path: lay.Root,
+				Message: "lib looks incomplete under " + lay.Root + " (missing " +
+					strings.Join(missing, ", ") + "): missing-reference findings are disabled",
+			})
 		}
 	}
+
+	ix := &Index{lib: l, scanning: make(chan struct{}, 1)}
+	ix.forget()
+	ix.cur = newSnapshot(ix, 1)
 	return ix
 }
 
-func (ix *Index) reset() {
-	ix.tables = map[string]*tableEntry{}
-	ix.units = map[string]*unitEntry{}
-	ix.chains = map[string]*Chain{}
-	ix.exists = map[string]bool{}
-	ix.incUsers = map[string]map[string]bool{}
-	ix.users, ix.usersOK = nil, false
-	ix.allOnce, ix.allDone = &sync.Once{}, false
-	ix.baseOnce = &sync.Once{}
-	ix.baseLayers, ix.baseDeps, ix.baseOK = nil, nil, false
-	ix.autoOnce = &sync.Once{}
+// forget empties the reverse edges. The caller holds mu (or is New).
+func (ix *Index) forget() {
+	ix.builtFrom = map[string]map[string]struct{}{}
+	ix.children = map[string]map[string]struct{}{}
+	ix.refs = map[string]map[string]uint64{}
+	ix.asked = map[string]uint64{}
 }
 
-// Invalidate tells the index that the named files changed (on disk or in
-// an overlay). Units built from them are dropped, along with every
-// memoized chain and the reverse-inheritance map; everything else is
-// kept. It returns the fs paths of the units that were dropped, which are
-// the files whose diagnostics may have changed.
+// HasLib reports whether there is a lib to index at all; without one only
+// file-local facts are available.
+func (l *lib) HasLib() bool { return l.lay.Root != "" || l.partial }
+
+// Partial reports whether the lib is known only in part: a checkout of
+// one subtree and/or a profile's stubs.
+func (l *lib) Partial() bool { return l.partial }
+
+// Complete reports whether the whole lib is on disk and has everything
+// the configuration says it has.
+func (l *lib) Complete() bool { return l.complete }
+
+// Notes are the remarks about the lib as a whole.
+func (l *lib) Notes() []diag.Note { return slices.Clone(l.notes) }
+
+// Snapshot returns the current generation.
+func (ix *Index) Snapshot() *Snapshot {
+	ix.mu.RLock()
+	defer ix.mu.RUnlock()
+	return ix.cur
+}
+
+// Generation returns the number of the current generation. It grows by
+// one with every Invalidate.
+func (ix *Index) Generation() uint64 { return ix.Snapshot().gen }
+
+// Invalidate tells the index that the named files changed, were created
+// or were deleted (on disk or in an overlay). It makes a new generation
+// that shares everything the change cannot have touched, and returns, in
+// sorted order, the files whose diagnostics the change can affect: the
+// named files; the files built from them; the objects that inherit one of
+// those, however indirectly; the files that were linted and asked about
+// one of those objects; and, when an object changed, the files whose lint
+// asked who inherits them.
+//
+// Snapshots handed out before are not disturbed, and what they answer
+// stays what it was; results computed from one are results about the
+// generation before the change.
 func (ix *Index) Invalidate(paths ...string) []string {
-	changed := map[string]bool{}
+	changed := map[string]struct{}{}
+	exists := map[string]bool{} // of the changed files the scan covers
 	for _, p := range paths {
-		if abs, err := filepath.Abs(p); err == nil {
-			changed[abs] = true
+		p = ix.clean(p)
+		changed[p] = struct{}{}
+		if ix.inScope(p) {
+			exists[p] = ix.fs.Exists(p) && !ix.fs.IsDir(p)
 		}
 	}
+
 	ix.mu.Lock()
 	defer ix.mu.Unlock()
-	baseHit := false
-	for _, d := range ix.baseDeps {
-		if changed[d] {
-			baseHit = true
-		}
-	}
-	var dropped []string
-	if baseHit {
-		for p := range ix.units {
-			if !strings.HasPrefix(p, incKey) {
-				dropped = append(dropped, p)
+	old := ix.cur
+	next := newSnapshot(ix, old.gen+1)
+	affected := maps.Clone(changed)
+	everyUnit := func() {
+		for key, u := range old.units.complete() {
+			if u != nil {
+				affected[key] = struct{}{}
 			}
 		}
-		ix.reset()
-		return dropped
 	}
+	// rescan puts a dropped unit's file back on the scan's list; listed
+	// then corrects the list for files that were created or deleted.
+	rescan := func(key string) {
+		if ix.walked && ix.inScope(key) {
+			ix.todo[key] = struct{}{}
+		}
+	}
+	listed := func() {
+		for p, is := range exists {
+			if is && ix.walked {
+				ix.todo[p] = struct{}{}
+			} else {
+				delete(ix.todo, p)
+			}
+		}
+	}
+
+	// The force-included header is part of every file.
+	if b, ok := old.base.get(); ok && b.touchedBy(changed) {
+		everyUnit()
+		for key := range old.units.keys() {
+			rescan(key)
+		}
+		listed()
+		next.headers = old.headers.carry(changed)
+		ix.forget()
+		ix.cur = next
+		return sorted(affected)
+	}
+
+	// The units built from a changed file.
+	stale := map[string]struct{}{}
 	for p := range changed {
-		delete(ix.tables, p)
-		delete(ix.exists, p)
+		if old.units.has(p) {
+			stale[p] = struct{}{}
+		}
+		for key := range ix.builtFrom[p] {
+			stale[key] = struct{}{}
+		}
 	}
-	for p, e := range ix.units {
-		u := e.unit
-		hit := changed[p]
-		if u != nil {
-			for _, d := range u.Deps {
-				if changed[d] {
-					hit = true
-					break
-				}
+	// The objects whose program changed with them: those units and the
+	// changed files themselves (which may not have existed), then
+	// everything that inherits one of those or includes it as code.
+	objects := map[string]struct{}{}
+	for p := range changed {
+		if lp := ix.LibPath(p); lp != "" {
+			objects[lp] = struct{}{}
+		}
+	}
+	for key := range stale {
+		if u, _ := old.units.get(key); u != nil && u.LibPath != "" {
+			objects[u.LibPath] = struct{}{}
+		}
+	}
+	objectChanged := len(objects) > 0
+	for queue := slices.Collect(maps.Keys(objects)); len(queue) > 0; queue = queue[1:] {
+		for key := range ix.children[queue[0]] {
+			affected[key] = struct{}{}
+			u, _ := old.units.get(key)
+			if u == nil {
+				continue
+			}
+			if _, seen := objects[u.LibPath]; !seen {
+				objects[u.LibPath] = struct{}{}
+				queue = append(queue, u.LibPath)
 			}
 		}
-		if hit {
-			delete(ix.units, p)
-			if !strings.HasPrefix(p, incKey) {
-				dropped = append(dropped, p)
+	}
+	for key := range stale {
+		affected[key] = struct{}{}
+	}
+
+	// The linted files that asked about one of those objects. A question
+	// is void once the unit that asked has been rebuilt.
+	asks := func(key string, gen uint64) bool {
+		u, _ := old.units.get(key)
+		_, gone := stale[key]
+		return u != nil && !gone && u.gen <= gen
+	}
+	for lp := range objects {
+		for key, gen := range ix.refs[lp] {
+			if asks(key, gen) {
+				affected[key] = struct{}{}
+			} else {
+				delete(ix.refs[lp], key)
 			}
 		}
 	}
-	ix.chains = map[string]*Chain{}
-	ix.users, ix.usersOK = nil, false
-	ix.allOnce, ix.allDone = &sync.Once{}, false
-	ix.autoOnce = &sync.Once{}
-	return dropped
-}
-
-// ---------------------------------------------------------------- paths
-
-func (ix *Index) fsPath(libPath string) string {
-	if ix.CheckoutDir != "" {
-		if libPath == ix.CheckoutLib {
-			return ix.CheckoutDir
-		}
-		if rest, ok := strings.CutPrefix(libPath, ix.CheckoutLib+"/"); ok {
-			return filepath.Join(ix.CheckoutDir, filepath.FromSlash(rest))
-		}
-	}
-	return filepath.Join(ix.Root, filepath.FromSlash(strings.TrimPrefix(libPath, "/")))
-}
-
-// objectFS is the fs path of an object's source (".c" appended when the
-// lib path has no extension).
-func (ix *Index) objectFS(libPath string) string {
-	if path.Ext(libPath) == "" {
-		libPath += ".c"
-	}
-	return ix.fsPath(libPath)
-}
-
-// rel returns fsPath relative to the lib root, slash-separated and with
-// its extension ("players/x/room.c"); false when it is outside the lib.
-func (ix *Index) rel(fsPath string) (string, bool) {
-	under := func(dir string) (string, bool) {
-		r, err := filepath.Rel(dir, fsPath)
-		if err != nil || r == ".." || strings.HasPrefix(r, ".."+string(filepath.Separator)) {
-			return "", false
-		}
-		return filepath.ToSlash(r), true
-	}
-	if ix.CheckoutDir != "" {
-		if r, ok := under(ix.CheckoutDir); ok {
-			return strings.TrimPrefix(path.Join(ix.CheckoutLib, r), "/"), true
-		}
-	}
-	if ix.Root == "" {
-		return "", false
-	}
-	return under(ix.Root)
-}
-
-// Covers reports whether the index knows everything under libPath's
-// location, so that "not found" there means "does not exist". With a whole
-// lib that is the lib's completeness; with a partial checkout it is the
-// checkout itself and the directories the profile captured completely.
-func (ix *Index) Covers(libPath string) bool {
-	if !ix.Partial {
-		return ix.Complete
-	}
-	if ix.CheckoutLib != "" && (libPath == ix.CheckoutLib || strings.HasPrefix(libPath, ix.CheckoutLib+"/")) {
-		return true
-	}
-	for _, c := range ix.Covered {
-		if strings.HasPrefix(libPath, c) {
-			// An object path has no extension; holes are file globs.
-			rel := strings.TrimPrefix(libPath, "/")
-			return !ix.Holes.Match(rel) && !ix.Holes.Match(rel+".c")
-		}
-	}
-	return false
-}
-
-// includeProvablyMissing reports whether an unresolved include is known
-// not to exist: every place the driver would look is covered.
-func (ix *Index) includeProvablyMissing(fromFS string, inc pp.Include) bool {
-	if !ix.Partial {
-		return ix.Complete
-	}
-	var cands []string
-	if !inc.Angle {
-		if strings.HasPrefix(inc.Name, "/") {
-			cands = append(cands, inc.Name)
-		} else {
-			from, ok := ix.rel(fromFS)
-			if !ok {
-				return false
+	// Who inherits a file can change with any object.
+	if objectChanged {
+		for key, gen := range ix.asked {
+			if asks(key, gen) {
+				affected[key] = struct{}{}
+			} else {
+				delete(ix.asked, key)
 			}
-			cands = append(cands, path.Join("/", path.Dir(from), inc.Name))
 		}
 	}
-	for _, dir := range ix.Cfg.Lint.IncludeDirs {
-		cands = append(cands, path.Join(dir, inc.Name))
-	}
-	for _, c := range cands {
-		if !ix.Covers(path.Clean(c)) {
-			return false
+	// Every object gets the auto object's functions.
+	autoChanged := false
+	for _, a := range ix.cfg.Lint.AutoObjects {
+		if _, hit := objects[NormalizeLibPath(a, "/")]; hit {
+			autoChanged = true
+			everyUnit()
 		}
 	}
-	return len(cands) > 0
-}
 
-// LibPath maps an fs path to its lib path ("/std/room" for std/room.c),
-// or "" when the file is not under the root.
-func (ix *Index) LibPath(fsPath string) string {
-	rel, ok := ix.rel(fsPath)
-	if !ok {
-		return ""
-	}
-	return fileset.LibPath(rel)
-}
-
-// Excluded reports whether fsPath matches the config's exclude globs.
-func (ix *Index) Excluded(fsPath string) bool {
-	rel, ok := ix.rel(fsPath)
-	return ok && ix.exclude.Match(rel)
-}
-
-// ObjectExists reports whether libPath is backed by a file.
-func (ix *Index) ObjectExists(libPath string) bool {
-	p := ix.objectFS(libPath)
-	ix.mu.Lock()
-	v, ok := ix.exists[p]
-	ix.mu.Unlock()
-	if ok {
-		return v
-	}
-	v = ix.FS.Exists(p)
-	ix.mu.Lock()
-	ix.exists[p] = v
-	ix.mu.Unlock()
-	return v
-}
-
-// IsVirtual reports whether libPath is served by a virtual-object daemon.
-func (ix *Index) IsVirtual(libPath string) bool {
-	return ix.virtual.Match(strings.TrimPrefix(libPath, "/"))
-}
-
-// ObjectPath turns an object path as written in fromLib into an absolute
-// lib path. A path without a leading slash is resolved from the lib root,
-// as the driver does, unless the config says paths are file-relative.
-func (ix *Index) ObjectPath(p, fromLib string) string {
-	if ix.Cfg.Lint.RelativeObjectPaths == "file" {
-		return NormalizeLibPath(p, fromLib)
-	}
-	return NormalizeLibPath(p, "/")
-}
-
-// NormalizeLibPath strips .c and makes p absolute relative to fromLib's
-// directory.
-func NormalizeLibPath(p, fromLib string) string {
-	p = strings.TrimSuffix(strings.TrimSpace(p), ".c")
-	if !strings.HasPrefix(p, "/") {
-		p = path.Join(path.Dir(fromLib), p)
-	}
-	return path.Clean(p)
-}
-
-// Walk visits every non-excluded .c file under dir (an fs path).
-func (ix *Index) Walk(dir string, visit func(fsPath string)) error {
-	return ix.FS.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return nil
+	for key := range stale {
+		if u, _ := old.units.get(key); u != nil {
+			ix.unregister(u)
 		}
-		if d.IsDir() {
-			if p != dir {
-				if rel, ok := ix.rel(p); ok && (ix.exclude.Match(rel) || ix.exclude.MatchDir(rel)) {
-					return filepath.SkipDir
-				}
+		rescan(key)
+	}
+	listed()
+
+	next.units = old.units.carry(stale)
+	next.headers = old.headers.carry(changed)
+	next.base = old.base.carry()
+	if !autoChanged {
+		next.auto = old.auto.carry()
+	}
+	next.chains = without(old.chains, objects)
+	for p, why := range old.failed {
+		if _, gone := stale[p]; !gone {
+			next.failed[p] = why
+		}
+	}
+	ix.cur = next
+	return sorted(affected)
+}
+
+// built records a unit the snapshot finished building. The caller holds
+// mu.
+func (ix *Index) built(s *Snapshot, key string, u *Unit) {
+	if ix.cur != s {
+		return
+	}
+	delete(ix.todo, key)
+	if u != nil {
+		ix.register(u)
+	}
+}
+
+func (ix *Index) register(u *Unit) {
+	add := func(m map[string]map[string]struct{}, k string) {
+		set := m[k]
+		if set == nil {
+			set = map[string]struct{}{}
+			m[k] = set
+		}
+		set[u.Path] = struct{}{}
+	}
+	for _, d := range u.watch {
+		add(ix.builtFrom, d)
+	}
+	for _, parent := range u.parents() {
+		add(ix.children, parent)
+	}
+}
+
+func (ix *Index) unregister(u *Unit) {
+	del := func(m map[string]map[string]struct{}, k string) {
+		if set := m[k]; set != nil {
+			delete(set, u.Path)
+			if len(set) == 0 {
+				delete(m, k)
 			}
-			return nil
-		}
-		if filepath.Ext(p) != ".c" || ix.Excluded(p) {
-			return nil
-		}
-		visit(p)
-		return nil
-	})
-}
-
-// ------------------------------------------------------- macro tables
-
-func (ix *Index) table(fsPath string) (*pp.Table, bool) {
-	ix.mu.Lock()
-	e := ix.tables[fsPath]
-	if e == nil {
-		e = &tableEntry{}
-		ix.tables[fsPath] = e
-	}
-	ix.mu.Unlock()
-	e.once.Do(func() {
-		src, err := ix.FS.ReadFile(fsPath)
-		if err != nil {
-			return
-		}
-		f := lexer.Lex(fsPath, src, ix.dialect)
-		e.table = pp.Scan(f, pp.Select(f, ix.defined))
-		e.ok = true
-	})
-	return e.table, e.ok
-}
-
-// ResolveInclude maps an include to the fs path the driver would read:
-// "name" searches the including file's directory then the include dirs,
-// <name> the include dirs only. The second result is false when nothing
-// was found.
-func (ix *Index) ResolveInclude(fromFS string, inc pp.Include) (string, bool) {
-	var cands []string
-	if !inc.Angle {
-		if strings.HasPrefix(inc.Name, "/") {
-			if ix.Root != "" {
-				cands = append(cands, ix.fsPath(inc.Name))
-			}
-		} else {
-			cands = append(cands, filepath.Join(filepath.Dir(fromFS), filepath.FromSlash(inc.Name)))
 		}
 	}
-	if ix.Root != "" {
-		for _, dir := range ix.Cfg.Lint.IncludeDirs {
-			cands = append(cands, ix.fsPath(path.Join(dir, inc.Name)))
-		}
+	for _, d := range u.watch {
+		del(ix.builtFrom, d)
 	}
-	for _, c := range cands {
-		if ix.FS.Exists(c) && !ix.FS.IsDir(c) {
-			return filepath.Clean(c), true
-		}
-	}
-	return "", false
-}
-
-const maxIncludeDepth = 12
-
-// incKey prefixes the unit-map keys of included-code units, which are
-// parsed standalone and must not be confused with objects.
-const incKey = "\x00inc:"
-
-// closure walks the include graph below t in preprocessing order.
-type closure struct {
-	order    []*pp.Table // tables in the order their definitions take effect
-	deps     []string
-	complete bool
-	seen     map[string]bool
-}
-
-func (ix *Index) walkIncludes(c *closure, fsPath string, t *pp.Table, depth int) {
-	for _, inc := range t.Includes {
-		p, ok := ix.ResolveInclude(fsPath, inc)
-		if !ok {
-			c.complete = false
-			continue
-		}
-		if c.seen[p] {
-			continue
-		}
-		c.seen[p] = true
-		c.deps = append(c.deps, p)
-		sub, ok := ix.table(p)
-		if !ok {
-			c.complete = false
-			continue
-		}
-		if depth < maxIncludeDepth {
-			ix.walkIncludes(c, p, sub, depth+1)
-		} else {
-			c.complete = false
-		}
-		c.order = append(c.order, sub)
+	for _, parent := range u.parents() {
+		del(ix.children, parent)
 	}
 }
 
-// base returns the tables of the driver's force-included header.
-func (ix *Index) base() ([]*pp.Table, bool) {
-	ix.mu.Lock()
-	once := ix.baseOnce
-	ix.mu.Unlock()
-	once.Do(func() {
-		ix.baseOK = true
-		inc := ix.Cfg.Lint.IncludeFile
-		if ix.Root == "" {
-			ix.baseOK = false
-			return
-		}
-		if inc == "" {
-			return
-		}
-		p := ix.fsPath(inc)
-		t, ok := ix.table(p)
-		if !ok {
-			ix.baseOK = false
-			return
-		}
-		c := &closure{complete: true, seen: map[string]bool{p: true}, deps: []string{p}}
-		ix.walkIncludes(c, p, t, 0)
-		c.order = append(c.order, t)
-		ix.baseOK = c.complete
-		ix.baseDeps = c.deps
-		for i := len(c.order) - 1; i >= 0; i-- {
-			ix.baseLayers = append(ix.baseLayers, c.order[i])
-		}
-	})
-	return ix.baseLayers, ix.baseOK
-}
-
-// view builds the macro view of a file from its own table.
-func (ix *Index) view(fsPath string, own *pp.Table) (*pp.View, *closure) {
-	c := &closure{complete: true, seen: map[string]bool{fsPath: true}, deps: []string{fsPath}}
-	ix.walkIncludes(c, fsPath, own, 0)
-	base, baseOK := ix.base()
-	v := &pp.View{Override: ix.override, Complete: c.complete && baseOK}
-	v.Layers = append(v.Layers, own)
-	for i := len(c.order) - 1; i >= 0; i-- {
-		v.Layers = append(v.Layers, c.order[i])
-	}
-	v.Layers = append(v.Layers, base...)
-	c.deps = append(c.deps, ix.baseDeps...)
-	return v, c
-}
-
-// ---------------------------------------------------------------- units
-
-// Unit returns the indexed facts for a lib path, or nil when no file
-// backs it.
-func (ix *Index) Unit(libPath string) *Unit {
-	if ix.Root == "" || libPath == "" {
+// parents are the lib paths whose program is part of u's: what it
+// inherits directly and what it includes as code.
+func (u *Unit) parents() []string {
+	if u.LibPath == "" {
 		return nil
 	}
-	return ix.UnitFS(ix.objectFS(libPath))
+	out := slices.Clone(u.code)
+	for _, ref := range u.Inherits {
+		if ref.Resolved {
+			out = append(out, ref.Path)
+		}
+	}
+	return out
 }
 
-// UnitFS returns the indexed facts for an fs path, or nil if unreadable.
-func (ix *Index) UnitFS(fsPath string) *Unit {
-	fsPath = filepath.Clean(fsPath)
-	ix.mu.Lock()
-	e := ix.units[fsPath]
-	if e == nil {
-		e = &unitEntry{}
-		ix.units[fsPath] = e
-	}
-	ix.mu.Unlock()
-	e.once.Do(func() {
-		if p := ix.build(fsPath); p != nil {
-			e.unit = p.Unit
-		}
-	})
-	return e.unit
-}
-
-// Parse lexes and parses fsPath for linting and returns its tree together
-// with its facts. The tree is not retained by the index.
-func (ix *Index) Parse(fsPath string) *Parsed {
-	fsPath = filepath.Clean(fsPath)
-	var parsed *Parsed
-	ix.mu.Lock()
-	e := ix.units[fsPath]
-	if e == nil {
-		e = &unitEntry{}
-		ix.units[fsPath] = e
-	}
-	ix.mu.Unlock()
-	e.once.Do(func() {
-		if parsed = ix.build(fsPath); parsed != nil {
-			e.unit = parsed.Unit
-		}
-	})
-	if parsed != nil || e.unit == nil {
-		return parsed
-	}
-	// Facts already existed (the file was loaded as someone's parent):
-	// parse again for the tree.
-	if p := ix.build(fsPath); p != nil {
-		p.Unit = e.unit
-		return p
-	}
-	return nil
-}
-
-func (ix *Index) build(fsPath string) (parsed *Parsed) {
-	src, err := ix.FS.ReadFile(fsPath)
-	if err != nil {
-		return nil
-	}
-	// A bug in the analysis of one file must not take down a run over a
-	// hundred thousand: the file is reported as unreadable instead.
-	defer func() {
-		if r := recover(); r != nil {
-			ix.mu.Lock()
-			ix.Notes = append(ix.Notes, fmt.Sprintf("internal error analyzing %s (please report): %v", fsPath, r))
-			ix.mu.Unlock()
-			parsed = nil
-		}
-	}()
-	f := lexer.Lex(fsPath, src, ix.dialect)
-	sel := pp.Select(f, ix.defined)
-	own := pp.Scan(f, sel)
-	view, cl := ix.view(fsPath, own)
-	tree := syntax.Parse(f, syntax.Options{Macros: view, Sel: sel})
-
-	u := &Unit{
-		FSPath: fsPath, LibPath: ix.LibPath(fsPath),
-		Funcs: map[string]FuncInfo{}, Vars: map[string]VarInfo{},
-		Partial: tree.Partial, MacrosComplete: view.Complete, Deps: cl.deps,
-	}
-	for _, e := range tree.Errors {
-		if e.Severe {
-			u.Partial = true
-		}
-	}
-
-	// Includes: provably missing only when the lib is complete.
-	for _, inc := range own.Includes {
-		if _, ok := ix.ResolveInclude(fsPath, inc); ok {
-			continue
-		}
-		u.Partial = true
-		if ix.includeProvablyMissing(fsPath, inc) {
-			t := f.Tokens[inc.Tok]
-			u.BadIncludes = append(u.BadIncludes, BadInclude{Raw: inc.Raw(), Off: t.Off, End: t.End})
-		} else {
-			u.UnknownIncludes++
-		}
-	}
-	if !view.Complete && len(u.BadIncludes) == 0 && u.UnknownIncludes == 0 {
-		u.UnknownIncludes = 1 // an include of an include failed
-	}
-
-	if own.Partial {
-		u.Partial = true
-	}
-	collectDecls(u, tree, fsPath)
-	for _, d := range tree.Decls {
-		if inh, ok := d.(*syntax.InheritDecl); ok {
-			u.Inherits = append(u.Inherits, ix.resolveInherit(tree, inh, u.LibPath, view))
-		}
-	}
-
-	// Code in included files belongs to the including program.
-	for _, dep := range cl.deps[1:] {
-		code := ix.includedCode(dep)
-		if code == nil {
-			continue
-		}
-		if len(code.Funcs) > 0 && u.LibPath != "" {
-			if lp := ix.LibPath(dep); lp != "" {
-				ix.mu.Lock()
-				m := ix.incUsers[lp]
-				if m == nil {
-					m = map[string]bool{}
-					ix.incUsers[lp] = m
-				}
-				m[u.LibPath] = true
-				ix.mu.Unlock()
-			}
-		}
-		for name, fi := range code.Funcs {
-			if own, exists := u.Funcs[name]; !exists || (own.PrototypeOnly && !fi.PrototypeOnly) {
-				u.Funcs[name] = fi
-			}
-		}
-		for name, vi := range code.Vars {
-			if _, exists := u.Vars[name]; !exists {
-				u.Vars[name] = vi
-			}
-		}
-		if code.Partial {
-			u.Partial = true
-		}
-	}
-
-	for _, i := range sel.Sig {
-		if t := f.Tokens[i]; t.Kind == token.Ident && ix.markers[string(f.Text(t))] {
-			u.AutoSave = true
-			break
-		}
-	}
-
-	ix.Stats.Units.Add(1)
-	if u.Partial {
-		ix.Stats.PartialUnits.Add(1)
-	}
-	ix.Stats.UnknownIncludes.Add(int64(u.UnknownIncludes))
-	for _, r := range u.Inherits {
-		if !r.Resolved {
-			ix.Stats.UnresolvedInherit.Add(1)
-		}
-	}
-	return &Parsed{Unit: u, Tok: f, Tree: tree, View: view}
-}
-
-// collectDecls records the functions and variables declared in tree.
-func collectDecls(u *Unit, tree *syntax.File, fsPath string) {
-	tree.Funcs(func(fn *syntax.FuncDecl) bool {
-		if fn.Name == nil {
-			return true // operator functions are not name-callable
-		}
-		minA, maxA := ParamRange(fn)
-		fi := FuncInfo{
-			Static: fn.Has(token.KwStatic), Private: fn.Has(token.KwPrivate),
-			PrototypeOnly: fn.Body == nil,
-			MinArgs:       minA, MaxArgs: maxA,
-			Path: fsPath, Off: tree.Off(fn.Name),
-			Decl: FuncDeclText(tree.Tok, fn), Type: TypeText(tree.Tok, fn.Type, fn.Stars),
-		}
-		if old, ok := u.Funcs[fn.Name.Name]; !ok || (old.PrototypeOnly && !fi.PrototypeOnly) {
-			u.Funcs[fn.Name.Name] = fi
-		}
-		return true
-	})
-	for _, d := range tree.Decls {
-		if vd, ok := d.(*syntax.VarDecl); ok {
-			for _, v := range vd.Vars {
-				u.Vars[v.Name.Name] = VarInfo{
-					Static: vd.Has(token.KwStatic), Private: vd.Has(token.KwPrivate),
-					Type: TypeText(tree.Tok, vd.Type, v.Stars), Off: tree.Off(v.Name),
-				}
-			}
-		}
-	}
-}
-
-// ParamRange derives the accepted argument-count range of a function: a
-// per-parameter `varargs` makes that and later parameters optional, a
-// class-level `varargs` makes all optional, and a trailing `...` collects
-// unbounded extras.
-func ParamRange(fn *syntax.FuncDecl) (minArgs, maxArgs int) {
-	n := len(fn.Params)
-	minArgs, maxArgs = n, n
-	for i, p := range fn.Params {
-		if p.Varargs {
-			minArgs = i
-			break
-		}
-	}
-	if fn.Has(token.KwVarargs) {
-		minArgs = 0
-	}
-	if fn.Ellipsis {
-		maxArgs = -1
-		if minArgs == n {
-			minArgs = n - 1
-		}
-	}
-	if minArgs < 0 {
-		minArgs = 0
-	}
-	return minArgs, maxArgs
-}
-
-// IncludeDeclares reports whether the file an #include resolves to, or
-// anything it includes in turn, declares a function or a variable. It
-// returns the fs path of the first such file.
-func (ix *Index) IncludeDeclares(fromFS string, inc pp.Include) (string, bool) {
-	p, ok := ix.ResolveInclude(fromFS, inc)
-	if !ok {
-		return "", false
-	}
-	t, ok := ix.table(p)
-	if !ok {
-		return "", false
-	}
-	c := &closure{complete: true, seen: map[string]bool{p: true}, deps: []string{p}}
-	ix.walkIncludes(c, p, t, 0)
-	for _, dep := range c.deps {
-		if u := ix.includedCode(dep); u != nil && u.Declares {
-			return dep, true
-		}
-	}
-	return "", false
-}
-
-// includedCode returns the declarations a #included file contributes, or
-// nil when it is a pure header.
-func (ix *Index) includedCode(fsPath string) *Unit {
-	t, ok := ix.table(fsPath)
-	if !ok {
-		return nil
-	}
-	_ = t
-	ix.mu.Lock()
-	key := incKey + fsPath
-	e := ix.units[key]
-	if e == nil {
-		e = &unitEntry{}
-		ix.units[key] = e
-	}
-	ix.mu.Unlock()
-	e.once.Do(func() {
-		src, err := ix.FS.ReadFile(fsPath)
-		if err != nil {
-			return
-		}
-		f := lexer.Lex(fsPath, src, ix.dialect)
-		sel := pp.Select(f, ix.defined)
-		if len(sel.Sig) == 0 {
-			e.unit = &Unit{FSPath: fsPath, Deps: []string{fsPath}}
-			return
-		}
-		own := pp.Scan(f, sel)
-		view := &pp.View{Layers: []*pp.Table{own}, Override: ix.override}
-		tree := syntax.Parse(f, syntax.Options{Macros: view, Sel: sel})
-		u := &Unit{
-			FSPath: fsPath, Funcs: map[string]FuncInfo{}, Vars: map[string]VarInfo{},
-			Partial: tree.Partial || own.Partial, Deps: []string{fsPath},
-		}
-		collectDecls(u, tree, fsPath)
-		for _, d := range tree.Decls {
-			switch d.(type) {
-			case *syntax.FuncDecl, *syntax.VarDecl:
-				if first, _ := d.Span(); !sel.Guessed(first) {
-					u.Declares = true
-				}
-			}
-		}
-		e.unit = u
-	})
-	return e.unit
-}
-
-func (ix *Index) resolveInherit(tree *syntax.File, d *syntax.InheritDecl, libPath string, view *pp.View) InheritRef {
-	ref := InheritRef{Raw: tree.Text(d.Path), Off: tree.Off(d.Path), End: tree.End(d.Path), Private: d.Private}
-	if d.Label != nil {
-		ref.Label = d.Label.Name
-	}
-	if libPath == "" {
-		return ref
-	}
-	val, ok := EvalString(ref.Raw, view, ix.dialect)
-	if !ok || val == "" {
-		return ref
-	}
-	ref.Path = ix.ObjectPath(val, libPath)
-	ref.Resolved = true
-	return ref
-}
-
-// LoadAll indexes every non-excluded .c file under the root, in parallel.
-// It is needed only for reverse lookups (UsersOf). It reports false when
-// the scan did not complete (no root, or the context was cancelled).
-func (ix *Index) LoadAll(ctx context.Context) bool {
-	if ix.Root == "" {
-		return false
-	}
-	ix.mu.Lock()
-	once := ix.allOnce
-	ix.mu.Unlock()
-	once.Do(func() {
-		var paths []string
-		// With a partial checkout the checkout is all there is to scan:
-		// who else in the lib inherits these files cannot be known, and
-		// a wizard's own tree is taken to be self-contained.
-		scan := ix.Root
-		if ix.Partial {
-			scan = ix.CheckoutDir
-		}
-		if scan != "" {
-			_ = ix.Walk(scan, func(p string) { paths = append(paths, p) })
-		}
-		par.Each(ctx, paths, func(p string) { ix.UnitFS(p) })
-		ix.mu.Lock()
-		if ctx.Err() != nil {
-			if ix.allOnce == once {
-				ix.allOnce = &sync.Once{} // retry next time
-			}
-		} else if ix.allOnce == once {
-			ix.allDone = true
-		}
-		ix.mu.Unlock()
-	})
-	ix.mu.Lock()
-	defer ix.mu.Unlock()
-	return ix.allDone && ix.allOnce == once
+func sorted(set map[string]struct{}) []string {
+	return slices.Sorted(maps.Keys(set))
 }

@@ -57,6 +57,13 @@ type callFacts struct {
 	strings []stringCall
 	paths   []pathRef
 	direct  []directCall
+	// lookups[i] is the resolution of strings[i], made on first need.
+	lookups []*lookedUp
+}
+
+type lookedUp struct {
+	index.Lookup
+	target string // the object looked in, for messages
 }
 
 type registrar struct {
@@ -67,7 +74,9 @@ type registrar struct {
 
 // calls extracts (once per file) every call site from the tree.
 func (p *Pass) calls() *callFacts {
-	p.shared.callsOnce.Do(func() { p.shared.calls = p.extractCalls() })
+	if p.shared.calls == nil {
+		p.shared.calls = p.extractCalls()
+	}
 	return p.shared.calls
 }
 
@@ -125,7 +134,7 @@ func (p *Pass) extractCalls() *callFacts {
 				if argIdx, ok := objRegs[name]; ok && argIdx < len(n.Args) {
 					if s, ok := strLit(n.Args[argIdx]); ok && strings.Contains(s, "/") {
 						cf.paths = append(cf.paths, pathRef{
-							Path: p.Index.ObjectPath(s, p.LibPath), Via: name,
+							Path: p.Index.ObjectPath(s), Via: name,
 							Start: t.Off(n.Args[argIdx]), End: t.End(n.Args[argIdx]),
 						})
 					}
@@ -166,7 +175,7 @@ func (p *Pass) extractCalls() *callFacts {
 							cf.strings = append(cf.strings, stringCall{
 								Func: fn2, Registrar: name, Kind: crossObject,
 								Target: targetPath, NArgs: -1,
-								TargetPath: p.Index.ObjectPath(fname, p.LibPath),
+								TargetPath: p.Index.ObjectPath(fname),
 								Start:      t.Off(n.Args[reg.arg+1]), End: t.End(n.Args[reg.arg+1]),
 							})
 						}
@@ -178,12 +187,12 @@ func (p *Pass) extractCalls() *callFacts {
 			return true
 		})
 	}
-	if st := p.shared.stats; st != nil {
-		st.callSites.Add(int64(len(cf.strings)))
-		for _, c := range cf.strings {
-			if c.Target == targetUnknown {
-				st.unknownReceivers.Add(1)
-			}
+	cf.lookups = make([]*lookedUp, len(cf.strings))
+	st := &p.shared.stats
+	st.callSites += len(cf.strings)
+	for _, c := range cf.strings {
+		if c.Target == targetUnknown {
+			st.unknownReceivers++
 		}
 	}
 	return cf
@@ -219,7 +228,7 @@ func (p *Pass) classifyTarget(e syntax.Expr) (targetKind, string) {
 	if !ok || s == "" {
 		return targetUnknown, ""
 	}
-	return targetPath, p.Index.ObjectPath(s, p.LibPath)
+	return targetPath, p.Index.ObjectPath(s)
 }
 
 // isIdentName reports whether s is a plausible LPC function name.
@@ -238,13 +247,19 @@ func isIdentName(s string) bool {
 	return true
 }
 
-// lookup resolves a string call through the index.
-func (p *Pass) lookup(c stringCall) (index.Lookup, string) {
-	switch c.Target {
-	case targetSelf:
-		return p.Index.LookupCallable(p.Ctx, p.LibPath, c.Func, true), p.LibPath + " (this_object)"
-	case targetPath:
-		return p.Index.LookupCallable(p.Ctx, c.TargetPath, c.Func, false), c.TargetPath
+// lookup resolves the i'th string call through the index, once for all
+// the rules that ask.
+func (p *Pass) lookup(i int) (index.Lookup, string) {
+	cf := p.calls()
+	if cf.lookups[i] == nil {
+		c, lk := cf.strings[i], &lookedUp{}
+		switch c.Target {
+		case targetSelf:
+			lk.Lookup, lk.target = p.Index.LookupCallable(p.Ctx, p.LibPath, c.Func, true), p.LibPath+" (this_object)"
+		case targetPath:
+			lk.Lookup, lk.target = p.Index.LookupCallable(p.Ctx, c.TargetPath, c.Func, false), c.TargetPath
+		}
+		cf.lookups[i] = lk
 	}
-	return index.Lookup{State: index.LookupUnknown}, ""
+	return cf.lookups[i].Lookup, cf.lookups[i].target
 }

@@ -31,12 +31,16 @@ import (
 // It needs the whole lib: a profile cannot be built from a partial
 // checkout.
 func (l *Linter) BuildProfile(ctx context.Context) (*profile.Profile, error) {
-	prj, cfg, ix := l.Project, l.Project.Config, l.Index
-	if prj.Root == "" || prj.Partial {
+	prj, cfg, ix := l.project, l.project.Config, l.index.Snapshot()
+	if prj.Root == "" {
 		return nil, fmt.Errorf("profile build needs the whole lib (a dgdtools.yml with root: at the lib)")
 	}
-	if !ix.Complete {
-		return nil, fmt.Errorf("profile build: %s", strings.Join(ix.Notes, "; "))
+	if !ix.Complete() {
+		var why []string
+		for _, n := range ix.Notes() {
+			why = append(why, n.Message)
+		}
+		return nil, fmt.Errorf("profile build: %s", strings.Join(why, "; "))
 	}
 	pb := cfg.ProfileBuild
 	share := pb.Share
@@ -93,14 +97,14 @@ func (l *Linter) BuildProfile(ctx context.Context) (*profile.Profile, error) {
 			return // outside the lib: nothing to say about it
 		}
 		rel = filepath.ToSlash(rel)
-		if queued[fsPath] || omit.Match(rel) || !l.FS.Exists(fsPath) || l.FS.IsDir(fsPath) {
+		if queued[fsPath] || omit.Match(rel) || !l.fs.Exists(fsPath) || l.fs.IsDir(fsPath) {
 			return
 		}
 		queued[fsPath] = true
 		queue = append(queue, fsPath)
 	}
 	covered := map[string]bool{}
-	err := l.FS.WalkDir(prj.Root, func(fp string, de fs.DirEntry, err error) error {
+	err := l.fs.WalkDir(prj.Root, func(fp string, de fs.DirEntry, err error) error {
 		if err != nil {
 			return nil
 		}
@@ -130,14 +134,14 @@ func (l *Linter) BuildProfile(ctx context.Context) (*profile.Profile, error) {
 		return nil, err
 	}
 	if minOwners > 0 {
-		for _, fp := range l.sharedByUse(ctx, minOwners, pb.Checkouts) {
+		for _, fp := range l.sharedByUse(ctx, ix, minOwners, pb.Checkouts) {
 			add(fp)
 		}
 	}
 	// A directory is covered when a share glob takes all of it.
 	for _, g := range share {
 		if dir, ok := strings.CutSuffix(strings.Trim(g, "/"), "/**"); ok && !strings.ContainsAny(dir, "*?") {
-			if l.FS.IsDir(filepath.Join(prj.Root, filepath.FromSlash(dir))) && !omit.MatchDir(dir) {
+			if l.fs.IsDir(filepath.Join(prj.Root, filepath.FromSlash(dir))) && !omit.MatchDir(dir) {
 				covered["/"+dir+"/"] = true
 			}
 		}
@@ -195,8 +199,8 @@ func (l *Linter) BuildProfile(ctx context.Context) (*profile.Profile, error) {
 // #include, or a constant call/clone/find target. An owner is a
 // per-wizard tree matching one of the checkout patterns, or else a
 // top-level directory.
-func (l *Linter) sharedByUse(ctx context.Context, minOwners int, checkouts []string) []string {
-	ix, root := l.Index, l.Project.Root
+func (l *Linter) sharedByUse(ctx context.Context, ix *index.Snapshot, minOwners int, checkouts []string) []string {
+	root := l.project.Root
 	owner := func(lib string) string {
 		segs := strings.Split(strings.Trim(lib, "/"), "/")
 		for _, pat := range checkouts {
@@ -215,8 +219,7 @@ func (l *Linter) sharedByUse(ctx context.Context, minOwners int, checkouts []str
 		}
 		return segs[0]
 	}
-	var files []string
-	_ = ix.Walk(root, func(p string) { files = append(files, p) })
+	files, _ := ix.Files(ctx, root)
 	var mu sync.Mutex
 	owners := map[string]map[string]bool{}
 	par.Each(ctx, files, func(f string) {
@@ -233,8 +236,8 @@ func (l *Linter) sharedByUse(ctx context.Context, minOwners int, checkouts []str
 		}
 		var out []*diag.Diagnostic
 		pass := &Pass{Ctx: ctx, File: parsed.Tok, Tree: parsed.Tree, View: parsed.View, Unit: u,
-			Index: ix, LibPath: u.LibPath, Config: l.Project.Config,
-			shared: &fileShared{stats: &runStats{}}, out: &out}
+			Index: ix.Query(u, true), LibPath: u.LibPath, Config: l.project.Config,
+			shared: &fileShared{}, out: &out}
 		cf := pass.calls()
 		for _, c := range cf.strings {
 			if c.Target == targetPath {

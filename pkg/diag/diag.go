@@ -60,6 +60,10 @@ type Diagnostic struct {
 	Code     string // stable short code, e.g. "E001"
 	Related  []Related
 	Fixes    []Fix
+	// Fingerprint identifies the finding by the text of the source line
+	// it is on rather than by its position, so that it survives edits
+	// elsewhere in the file. Baselines match on it.
+	Fingerprint string
 }
 
 // Related is a secondary location that explains a diagnostic.
@@ -85,6 +89,38 @@ type TextEdit struct {
 	End     uint32
 	NewText string
 }
+
+// Note is a remark about a run as a whole rather than about a place in a
+// file: how the project was resolved, what could not be checked and why.
+// Kind identifies the remark to programs; Message is for people.
+type Note struct {
+	Kind    NoteKind
+	Message string
+	// Path is the file or directory the note is about, when there is one.
+	Path string
+}
+
+// NoteKind is the stable identifier of a kind of Note.
+type NoteKind string
+
+const (
+	// NoteNoLib: no lib is known, so only file-local rules ran.
+	NoteNoLib NoteKind = "no-lib"
+	// NoteIncompleteLib: the lib root lacks things the configuration
+	// names; missing-reference findings are off.
+	NoteIncompleteLib NoteKind = "incomplete-lib"
+	// NoteOutsideLib: some linted files are not part of the lib; only
+	// file-local rules ran on them.
+	NoteOutsideLib NoteKind = "outside-lib"
+	// NoteProfile: which mudlib profile is in effect.
+	NoteProfile NoteKind = "profile"
+	// NoteUnplacedCheckout: a partial checkout whose place in the lib is
+	// not known; references between its own files are not checked.
+	NoteUnplacedCheckout NoteKind = "unplaced-checkout"
+	// NoteInternalError: the analysis of a file crashed; the file was
+	// skipped.
+	NoteInternalError NoteKind = "internal-error"
+)
 
 func (d Diagnostic) String() string {
 	if d.Rule != "" {

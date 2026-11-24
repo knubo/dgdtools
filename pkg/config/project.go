@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/mmcdole/dgdtools/pkg/diag"
 	"github.com/mmcdole/dgdtools/pkg/lexer"
 	"github.com/mmcdole/dgdtools/pkg/profile"
 	"github.com/mmcdole/dgdtools/pkg/token"
@@ -19,14 +20,16 @@ import (
 //
 //   - whole lib: Root is the lib on disk.
 //   - partial checkout: the wizard has one subtree. Partial is set, Root
-//     is a virtual directory that only the profile's stubs live under,
-//     and CheckoutDir on disk is mounted at lib path CheckoutLib.
-//   - no lib: Root is empty; only file-local analysis is possible.
+//     is empty, and CheckoutDir on disk is the lib directory CheckoutLib
+//     (both empty when the checkout's place in the lib is not known). The
+//     rest of the lib is known as far as the profile describes it.
+//   - no lib: neither; only file-local analysis is possible.
 type Project struct {
 	Config *Config
 	// ConfigPath is the config file used, "" when none.
 	ConfigPath string
-	// Root is the absolute lib root, or "" when no root is known.
+	// Root is the absolute path of the lib on disk, or "" when the whole
+	// lib is not there.
 	Root string
 	// Profile is the mudlib profile in effect, or nil.
 	Profile *profile.Profile
@@ -37,51 +40,78 @@ type Project struct {
 	// root, or the first linted path's directory. It is what a run with
 	// no path arguments lints when there is no whole lib.
 	Base string
-	// Notes are human-readable remarks about how the project was resolved.
-	Notes []string
+	// Notes are remarks about how the project was resolved.
+	Notes []diag.Note
 }
 
-// DiscoverOptions are the explicit overrides (CLI flags).
+// HasLib reports whether cross-file analysis is possible: the lib is on
+// disk, or part of it is and a profile or a lib path places it.
+func (prj *Project) HasLib() bool { return prj.Root != "" || prj.Partial }
+
+// DiscoverOptions are what the caller knows that the file system does
+// not say: explicit overrides (CLI flags, editor settings) and the parts
+// of the process environment discovery depends on. Discover itself reads
+// neither the working directory nor the environment.
 type DiscoverOptions struct {
 	ConfigPath string // use this config file
 	Root       string // use this lib root
 	NoConfig   bool   // do not look for a config file
 	Profile    string // use this profile (name or file)
 	LibPath    string // the checkout's lib path
+
+	// WorkDir is the absolute directory that relative paths (the paths
+	// to discover from, ConfigPath, Root, a Profile file) are relative
+	// to, and where discovery starts when no paths are given: a command's
+	// working directory. Without it every path must be absolute.
+	WorkDir string
+	// ProfileDirs are the directories searched for a profile given by
+	// name, after the directory of the config that names it; see
+	// profile.UserDirs.
+	ProfileDirs []string
 }
 
 // Discover resolves the project for the given paths. The nearest config
-// file at or above each path is used (the working directory when there are
-// no paths); paths that resolve to different config files are an error,
-// because a lint run has exactly one lib. A root is never guessed, and a
-// profile is never assumed: without a config file or flags the project has
-// neither.
+// file at or above each path is used (WorkDir when there are no paths);
+// paths that resolve to different config files are an error, because a
+// lint run has exactly one lib. A root is never guessed, and a profile is
+// never assumed: without a config file or explicit options the project
+// has neither.
 func Discover(fs vfs.FS, paths []string, opt DiscoverOptions) (*Project, error) {
 	prj := &Project{}
-	starts := paths
-	if len(starts) == 0 {
-		starts = []string{"."}
+	abs := func(p string) (string, error) {
+		switch {
+		case filepath.IsAbs(p):
+			return filepath.Clean(p), nil
+		case opt.WorkDir == "":
+			return "", fmt.Errorf("%s: a relative path needs a working directory", p)
+		}
+		return filepath.Join(opt.WorkDir, p), nil
 	}
-	startDir := func(p string) string {
+	var starts []string // the directories discovery starts from
+	if len(paths) == 0 && opt.WorkDir != "" {
+		paths = []string{opt.WorkDir}
+	}
+	for _, p := range paths {
+		p, err := abs(p)
+		if err != nil {
+			return nil, err
+		}
 		if !fs.IsDir(p) {
 			p = filepath.Dir(p)
 		}
-		abs, err := filepath.Abs(p)
-		if err != nil {
-			return p
-		}
-		return abs
+		starts = append(starts, p)
 	}
 	switch {
 	case opt.ConfigPath != "":
-		prj.ConfigPath = opt.ConfigPath
+		p, err := abs(opt.ConfigPath)
+		if err != nil {
+			return nil, err
+		}
+		prj.ConfigPath = p
 	case opt.NoConfig:
 	default:
-		for _, p := range starts {
-			found, err := FindPath(fs, startDir(p))
-			if err != nil {
-				return nil, err
-			}
+		for _, dir := range starts {
+			found := FindPath(fs, dir)
 			if found == "" {
 				continue
 			}
@@ -93,7 +123,10 @@ func Discover(fs vfs.FS, paths []string, opt DiscoverOptions) (*Project, error) 
 		}
 	}
 
-	base := startDir(starts[0]) // where a config-less project is anchored
+	base := "" // where a config-less project is anchored
+	if len(starts) > 0 {
+		base = starts[0]
+	}
 	if prj.ConfigPath != "" {
 		c, err := LoadFS(fs, prj.ConfigPath)
 		if err != nil {
@@ -110,12 +143,12 @@ func Discover(fs vfs.FS, paths []string, opt DiscoverOptions) (*Project, error) 
 	prj.Base = base
 
 	// Profile: from the flag, else from the config.
-	ref, rel := opt.Profile, "."
+	ref, rel := opt.Profile, opt.WorkDir
 	if ref == "" {
 		ref, rel = cfg.Profile, cfg.Dir
 	}
 	if ref != "" {
-		p, err := profile.Load(fs, ref, rel)
+		p, err := profile.Load(fs, ref, rel, opt.ProfileDirs)
 		if err != nil {
 			return nil, err
 		}
@@ -139,11 +172,11 @@ func Discover(fs vfs.FS, paths []string, opt DiscoverOptions) (*Project, error) 
 	}
 	switch {
 	case opt.Root != "":
-		abs, err := filepath.Abs(opt.Root)
+		root, err := abs(opt.Root)
 		if err != nil {
 			return nil, err
 		}
-		prj.Root = abs
+		prj.Root = root
 	case libPath != "":
 		prj.mount(base, libPath)
 	case prj.Profile != nil && !prj.wholeLib(fs):
@@ -154,10 +187,10 @@ func Discover(fs vfs.FS, paths []string, opt DiscoverOptions) (*Project, error) 
 			prj.mount(dir, lib)
 		} else {
 			prj.Partial = true
-			prj.Root = profile.VirtualRoot(prj.Profile.Name)
-			prj.Notes = append(prj.Notes, fmt.Sprintf(
+			prj.Root = ""
+			prj.Notes = append(prj.Notes, diag.Note{Kind: diag.NoteUnplacedCheckout, Path: base, Message: fmt.Sprintf(
 				"cannot tell where %s sits in the lib (no %s in its path): add `lib_path: /players/<you>` to dgdtools.yml to check references between your own files",
-				base, strings.Join(prj.Profile.Checkouts, " or ")))
+				base, strings.Join(prj.Profile.Checkouts, " or "))})
 		}
 	}
 	if prj.Profile != nil {
@@ -165,7 +198,7 @@ func Discover(fs vfs.FS, paths []string, opt DiscoverOptions) (*Project, error) 
 		if prj.CheckoutLib != "" {
 			what += fmt.Sprintf("; %s is %s", prj.CheckoutDir, prj.CheckoutLib)
 		}
-		prj.Notes = append(prj.Notes, what)
+		prj.Notes = append(prj.Notes, diag.Note{Kind: diag.NoteProfile, Path: prj.Profile.Path, Message: what})
 	}
 	if prj.Root != "" && !prj.Partial {
 		if !fs.IsDir(prj.Root) {
@@ -181,11 +214,7 @@ func (prj *Project) mount(dir, lib string) {
 	prj.Partial = true
 	prj.CheckoutDir = dir
 	prj.CheckoutLib = "/" + strings.Trim(filepath.ToSlash(lib), "/")
-	name := "none"
-	if prj.Profile != nil {
-		name = prj.Profile.Name
-	}
-	prj.Root = profile.VirtualRoot(name)
+	prj.Root = ""
 }
 
 // wholeLib reports whether the project root holds the lib itself: the

@@ -249,7 +249,7 @@ var ruleInheritOrder = &Rule{
 					if inc.Off > p.Tree.Off(lastInherit) || p.Tree.Sel.Guessed(inc.Tok) {
 						continue
 					}
-					if file, ok := p.Index.IncludeDeclares(p.File.Path, inc); ok {
+					if file, ok := p.Index.IncludeDeclares(inc); ok {
 						var target *syntax.InheritDecl
 						for _, d := range p.Tree.Decls {
 							if inh, ok := d.(*syntax.InheritDecl); ok && p.Tree.Off(inh) > inc.Off {
