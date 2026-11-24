@@ -258,6 +258,7 @@ type Index struct {
 	users    map[string][]string
 	usersOK  bool
 	allOnce  *sync.Once
+	allDone  bool // the whole-lib scan ran to completion (guarded by mu)
 
 	baseOnce   *sync.Once
 	baseLayers []*pp.Table
@@ -366,8 +367,9 @@ func (ix *Index) reset() {
 	ix.exists = map[string]bool{}
 	ix.incUsers = map[string]map[string]bool{}
 	ix.users, ix.usersOK = nil, false
-	ix.allOnce = &sync.Once{}
+	ix.allOnce, ix.allDone = &sync.Once{}, false
 	ix.baseOnce = &sync.Once{}
+	ix.baseLayers, ix.baseDeps, ix.baseOK = nil, nil, false
 	ix.autoOnce = &sync.Once{}
 }
 
@@ -425,7 +427,7 @@ func (ix *Index) Invalidate(paths ...string) []string {
 	}
 	ix.chains = map[string]*Chain{}
 	ix.users, ix.usersOK = nil, false
-	ix.allOnce = &sync.Once{}
+	ix.allOnce, ix.allDone = &sync.Once{}, false
 	ix.autoOnce = &sync.Once{}
 	return dropped
 }
@@ -1067,7 +1069,6 @@ func (ix *Index) LoadAll(ctx context.Context) bool {
 	ix.mu.Lock()
 	once := ix.allOnce
 	ix.mu.Unlock()
-	done := true
 	once.Do(func() {
 		var paths []string
 		// With a partial checkout the checkout is all there is to scan:
@@ -1098,14 +1099,17 @@ func (ix *Index) LoadAll(ctx context.Context) bool {
 		}
 		close(ch)
 		wg.Wait()
+		ix.mu.Lock()
 		if ctx.Err() != nil {
-			done = false
-			ix.mu.Lock()
 			if ix.allOnce == once {
 				ix.allOnce = &sync.Once{} // retry next time
 			}
-			ix.mu.Unlock()
+		} else if ix.allOnce == once {
+			ix.allDone = true
 		}
+		ix.mu.Unlock()
 	})
-	return done && ctx.Err() == nil
+	ix.mu.Lock()
+	defer ix.mu.Unlock()
+	return ix.allDone && ix.allOnce == once
 }
