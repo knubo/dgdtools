@@ -6,10 +6,13 @@ import (
 	"io/fs"
 	"path"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/mmcdole/dgdtools/pkg/config"
+	"github.com/mmcdole/dgdtools/pkg/diag"
 	"github.com/mmcdole/dgdtools/pkg/fileset"
 	"github.com/mmcdole/dgdtools/pkg/index"
 	"github.com/mmcdole/dgdtools/pkg/pp"
@@ -37,10 +40,11 @@ func (l *Linter) BuildProfile(ctx context.Context) (*profile.Profile, error) {
 	}
 	pb := cfg.ProfileBuild
 	share := pb.Share
-	if len(share) == 0 {
-		share = config.DefaultShare
-	}
 	shared := fileset.NewMatcher(share)
+	minOwners := pb.ShareMinOwners
+	if minOwners == 0 {
+		minOwners = config.DefaultShareMinOwners
+	}
 	omit := fileset.NewMatcher(pb.Omit)
 	exclude := fileset.NewMatcher(cfg.Exclude)
 	incDirs := map[string]bool{}
@@ -125,6 +129,11 @@ func (l *Linter) BuildProfile(ctx context.Context) (*profile.Profile, error) {
 	if err != nil {
 		return nil, err
 	}
+	if minOwners > 0 {
+		for _, fp := range l.sharedByUse(ctx, minOwners, pb.Checkouts) {
+			add(fp)
+		}
+	}
 	// A directory is covered when a share glob takes all of it.
 	for _, g := range share {
 		if dir, ok := strings.CutSuffix(strings.Trim(g, "/"), "/**"); ok && !strings.ContainsAny(dir, "*?") {
@@ -179,6 +188,97 @@ func (l *Linter) BuildProfile(ctx context.Context) (*profile.Profile, error) {
 	}
 	sort.Strings(p.Covered)
 	return p, nil
+}
+
+// sharedByUse scans the whole lib and returns the files referenced from
+// at least minOwners distinct owners. A reference is an inherit, an
+// #include, or a constant call/clone/find target. An owner is a
+// per-wizard tree matching one of the checkout patterns, or else a
+// top-level directory.
+func (l *Linter) sharedByUse(ctx context.Context, minOwners int, checkouts []string) []string {
+	ix, root := l.Index, l.Project.Root
+	owner := func(lib string) string {
+		segs := strings.Split(strings.Trim(lib, "/"), "/")
+		for _, pat := range checkouts {
+			want := strings.Split(strings.Trim(pat, "/"), "/")
+			if len(segs) > len(want) {
+				ok := true
+				for i, w := range want {
+					if w != "*" && w != segs[i] {
+						ok = false
+					}
+				}
+				if ok {
+					return strings.Join(segs[:len(want)], "/")
+				}
+			}
+		}
+		return segs[0]
+	}
+	var files []string
+	_ = ix.Walk(root, func(p string) { files = append(files, p) })
+	var mu sync.Mutex
+	owners := map[string]map[string]bool{}
+	ch := make(chan string, 256)
+	var wg sync.WaitGroup
+	for range runtime.NumCPU() {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for f := range ch {
+				if ctx.Err() != nil {
+					continue
+				}
+				parsed := ix.Parse(f)
+				if parsed == nil || parsed.Unit.LibPath == "" {
+					continue
+				}
+				u := parsed.Unit
+				refs := append([]string{}, u.Deps[1:]...)
+				for _, inh := range u.Inherits {
+					if inh.Resolved {
+						refs = append(refs, fileset.FSPath(root, inh.Path))
+					}
+				}
+				var out []*diag.Diagnostic
+				pass := &Pass{Ctx: ctx, File: parsed.Tok, Tree: parsed.Tree, View: parsed.View, Unit: u,
+					Index: ix, LibPath: u.LibPath, Config: l.Project.Config,
+					shared: &fileShared{stats: &runStats{}}, out: &out}
+				cf := pass.calls()
+				for _, c := range cf.strings {
+					if c.Target == targetPath {
+						refs = append(refs, fileset.FSPath(root, c.TargetPath))
+					}
+				}
+				for _, r := range cf.paths {
+					refs = append(refs, fileset.FSPath(root, r.Path))
+				}
+				me := owner(u.LibPath)
+				mu.Lock()
+				for _, r := range refs {
+					r = filepath.Clean(r)
+					if owners[r] == nil {
+						owners[r] = map[string]bool{}
+					}
+					owners[r][me] = true
+				}
+				mu.Unlock()
+			}
+		}()
+	}
+	for _, f := range files {
+		ch <- f
+	}
+	close(ch)
+	wg.Wait()
+	var out []string
+	for f, o := range owners {
+		if len(o) >= minOwners {
+			out = append(out, f)
+		}
+	}
+	sort.Strings(out)
+	return out
 }
 
 // Stub renders the public interface of a parsed file as source, the way

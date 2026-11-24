@@ -30,7 +30,13 @@ profile_build:
   # The code every wizard builds on. Its headers and the signatures of
   # its objects go into the profile (never function bodies), together
   # with everything it inherits or includes.
-  share: ["std/**", "obj/**", "room/**", "secure/**", "com/**", "dgd/**"]
+  # Shared code is found by use: any file referenced (inherit, #include,
+  # call/clone/find target) from at least this many distinct owners (a
+  # wizard's tree, a domain, or another top-level directory) is shared.
+  share_min_owners: 5        # the default; -1 = only what share: lists
+  # Added to what inference finds. A whole directory listed here is also
+  # marked complete, so a path missing under it is known not to exist.
+  share: ["std/**", "obj/**", "room/**", "secure/**", "dgd/**"]
   # Never put these in a profile, even when referenced.
   omit: []
   # Where wizards' own trees live; lets dgdlint recognize a checkout of

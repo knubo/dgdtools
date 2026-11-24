@@ -458,7 +458,42 @@ weeks, and grammars alone can ship in the first.
   (`@vscode/test-electron`) that opens the fixture lib and waits for a
   known diagnostic; grammar tests with `vscode-tmgrammar-test`.
 
-## 13. Open decisions
+## 13. Decisions
+
+Decided by the owner (the numbered list below is kept for the reasoning):
+
+- JSON-RPC: `github.com/sourcegraph/jsonrpc2`.
+- `dgdlint lsp` subcommand, not a separate binary.
+- Diagnostics for open documents only.
+- Latin-1 files stay as they are; editors are configured for them.
+- File association is workspace-scoped: `*.c`/`*.h` are LPC only under a
+  `dgdtools.yml`, with a lib-layout fallback; never claimed globally.
+- Profiles come from the search path (`profile.Resolve`); no download
+  command in the extension for now.
+- tree-sitter grammar deferred.
+- A separate `dgdlpc` Vim filetype.
+- Stubs open as read-only virtual documents.
+- The VS Code extension lives in this repository.
+
+Layout for editor support, all in this repository:
+
+```
+editors/
+  README.md            LSP snippets: Vim (vim-lsp, ALE, coc.nvim), Helix and
+                       Zed (LSP only until there is a tree-sitter grammar)
+  common/              shared word lists, sample files for grammar tests
+  vscode/              extension: TextMate grammar + LSP client
+  vim/                 standard runtime layout, installable by any plugin
+                       manager in Vim and Neovim:
+    ftdetect/dgdlpc.vim  workspace-scoped detection (dgdtools.yml upward)
+    syntax/dgdlpc.vim
+    ftplugin/dgdlpc.vim
+    indent/dgdlpc.vim
+  nvim/lsp/dgdlint.lua Neovim 0.11+ `vim.lsp.config` entry (candidate for
+                       upstreaming to nvim-lspconfig once stable)
+```
+
+### Original open decisions
 
 1. **Dependency:** take `sourcegraph/jsonrpc2` (recommended) or keep the
    module dependency-free and hand-roll the transport (+2 days).

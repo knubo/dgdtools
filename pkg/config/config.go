@@ -82,10 +82,17 @@ type ProfileBuild struct {
 	// DriverConfig is the DGD driver's config file: include_dirs,
 	// include_file, auto_object and typechecking are read from it.
 	DriverConfig string `yaml:"driver_config"`
-	// Share are globs (lib-relative) of the code every wizard builds on:
-	// its headers and object signatures go into the profile. The include
+	// ShareMinOwners selects shared code by use: a file referenced (by
+	// inherit, #include, or as a call/clone/find target) from at least
+	// this many distinct owners goes into the profile. An owner is one
+	// per-wizard tree (see Checkouts) or one other top-level directory.
+	// Default 5; -1 turns inference off.
+	ShareMinOwners int `yaml:"share_min_owners"`
+	// Share are globs (lib-relative) added to what inference finds; a
+	// glob taking a whole directory ("std/**") also marks it complete,
+	// so that a path missing under it is known not to exist. The include
 	// dirs, the force-included header, the auto object, and everything
-	// the shared files inherit or include are always added.
+	// shared files inherit or include are always added.
 	Share []string `yaml:"share"`
 	// Omit are globs never to put in a profile, even when referenced.
 	Omit []string `yaml:"omit"`
@@ -93,10 +100,8 @@ type ProfileBuild struct {
 	Checkouts []string `yaml:"checkouts"`
 }
 
-// DefaultShare is used when profile_build.share is empty: the usual
-// homes of shared code in an LPmud-style lib. Entries that do not exist
-// are ignored.
-var DefaultShare = []string{"std/**", "obj/**", "lib/**", "room/**", "secure/**", "com/**", "sys/**", "dgd/**", "kernel/**", "include/**"}
+// DefaultShareMinOwners is the inference threshold when none is set.
+const DefaultShareMinOwners = 5
 
 type DialectCfg struct {
 	SlashSlash *bool `yaml:"slash_slash"` // default true

@@ -656,12 +656,36 @@ in path order (`=== /std/room.c` separators). No timestamps: the same lib
 gives the same bytes. Versioned; a newer format is refused with a
 "rebuild the profile" message.
 
-**Selection** (`profile_build`): files matching `share` (default: the
-usual homes of shared code, `std/**`, `obj/**`, `lib/**`, `room/**`,
-`secure/**`, `com/**`, `sys/**`, `dgd/**`, `kernel/**`, `include/**`,
-whichever exist), everything under the include dirs, the force-included
-header, the auto objects, and the closure of what those include and
-inherit. A share glob that takes a whole directory makes it `covered`.
+**Selection** (`profile_build`) is by use, not by a hand-picked list: a
+file referenced (inherit, `#include`, or a constant call/clone/find
+target) from at least `share_min_owners` distinct owners is shared, where
+an owner is one per-wizard tree (`checkouts`) or one other top-level
+directory. Added to that: files matching `share`, everything under the
+include dirs, the force-included header, the auto objects, and the
+closure of what all of those include and inherit. `omit` always wins.
+Inference finds files, not directories, so only a `share` glob that takes
+a whole directory makes it `covered`.
+
+Measured on VikingMUD (ten trees, 9,106 whole-lib findings; "extra" is 54
+in every row, so precision does not move):
+
+| Selection | Size | Stubs | Identical | Lost |
+|---|---|---|---|---|
+| core `share` globs only (previous) | 46,926 B | 465 | 8,989 | 117 |
+| inference only, N=2 / 3 / 5 | 254,689 / 159,168 / 102,919 B | 2,012 / 923 / 451 | 8,972 / 8,962 / 8,951 | 134 / 144 / 155 |
+| N=2 + core globs | 260,885 B | 2,218 | 9,045 | 61 |
+| N=3 + core globs | 166,962 B | 1,161 | 9,036 | 70 |
+| **N=5 + core globs** | 113,878 B | 723 | 9,026 | 80 |
+
+Inference alone is worse than the core list: without covered directories
+"`/std/nosuch` does not exist" cannot be proven, and core files with few
+users drop out. Inference on top of the core globs recovers findings
+against widely used code outside the core (parts of `/com`, domain
+libraries such as `/d/*/std`, daemons). N=5 is the default: it recovers
+37 of the 56 findings N=2 would, at under half the size, and pulls in the
+fewest wizard files (55 under `/players`, 189 under `/d`, against 845 and
+875 at N=2). Those files' public declarations become part of the profile;
+`omit: ["players/**"]` keeps them out.
 
 ### 10.3 Using a profile
 
