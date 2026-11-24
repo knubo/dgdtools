@@ -188,6 +188,7 @@ func (s *Snapshot) header(p string) *header {
 		// Read on its own: what it defines and declares, not how it reads
 		// in any one includer.
 		env := pp.NewEnv(s.defined, s.override)
+		env.Header = true
 		sel := env.Scan(f, nil)
 		h := &header{table: env.Own()}
 		if len(sel.Sig) == 0 {
@@ -329,9 +330,12 @@ type analysis struct {
 	base *baseState
 }
 
-// analyze reads and parses p; nil when it cannot be read. The file is
-// read as the driver compiles it: after the force-included header, with
-// each #include taking effect where it stands.
+// analyze reads and parses p; nil when it cannot be read. An object's
+// source is read as the driver compiles it: after the force-included
+// header, with each #include taking effect where it stands. A header is
+// read the same way, but nothing is concluded from what it does not see
+// defined; and a file that is part of the force-included header is not
+// read after itself.
 func (s *Snapshot) analyze(p string) *analysis {
 	src, err := s.fs.ReadFile(p)
 	if err != nil {
@@ -339,8 +343,12 @@ func (s *Snapshot) analyze(p string) *analysis {
 	}
 	a := &analysis{tok: lexer.Lex(p, src, s.dialect), base: s.baseState(), inc: newClosure(p)}
 	a.env = pp.NewEnv(s.defined, s.override)
-	a.env.Add(a.base.layers...)
-	a.env.Complete = a.base.ok
+	a.env.Header = path.Ext(p) != ".c"
+	a.env.Complete = true
+	if !slices.Contains(a.base.deps, p) {
+		a.env.Add(a.base.layers...)
+		a.env.Complete = a.base.ok
+	}
 	a.sel = a.env.Scan(a.tok, func(inc pp.Include) {
 		n := len(a.inc.order)
 		s.include(a.inc, p, inc, 0)

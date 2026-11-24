@@ -20,6 +20,10 @@ type Env struct {
 	// read, so that "not defined here" means "not a macro". While a Scan
 	// is running it speaks for the part of the unit read so far.
 	Complete bool
+	// Header says the file is not compiled by itself, only as part of the
+	// files that include it: what they define before it is not known, so
+	// no name is certainly undefined in it.
+	Header bool
 
 	defined map[string]bool  // names defined before the first line
 	classes map[string]Class // configured classes; they override bodies
@@ -133,12 +137,13 @@ func (e *Env) state(name string) (m *Macro, defined, known bool) {
 	case e.defined[name]:
 		return nil, true, true
 	}
-	return nil, false, e.Complete
+	return nil, false, e.Complete && !e.Header
 }
 
 // Defined reports whether name is defined at the end of the environment
 // as it stands, and whether that is certain. A name no file defines is
-// certainly undefined only in a complete environment.
+// certainly undefined only in the complete environment of a file that is
+// compiled by itself.
 func (e *Env) Defined(name string) (defined, known bool) {
 	_, defined, known = e.state(name)
 	return defined, known
@@ -221,8 +226,9 @@ type frame struct {
 //
 // A condition is decided when its value is certain in the environment at
 // that point: `#if 0`, a name defined before the first line, by a file
-// read before, or earlier in f, and, in a complete environment, a name
-// defined nowhere. Anything else takes the first branch, and the tokens
+// read before, or earlier in f, and, in the complete environment of a
+// file that is not a header, a name defined nowhere. Anything else takes
+// the first branch, and the tokens
 // of that branch are marked Guessed: they are parsed, but nothing is
 // concluded from errors in them.
 //

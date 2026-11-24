@@ -246,6 +246,39 @@ func TestConditionsSeeIncludes(t *testing.T) {
 	assert.True(t, c.Tree.Sel.Guessed(first), "LOGGER is defined under a condition its header could not decide")
 }
 
+// A header is not compiled by itself: read for its own sake it is read
+// like an object, but a name it does not see defined may be defined by
+// whoever includes it. And the force-included header does not come before
+// itself.
+func TestHeadersReadAsUnits(t *testing.T) {
+	l := newLib(t, map[string]string{
+		"sys/forced.h":   "#ifndef FORCED_H\n#define FORCED_H\n#include <std.h>\n#define TRUE 1\nvoid from_forced();\n#endif\n",
+		"include/std.h":  "#ifndef STD_H\n#define STD_H\n#define status int\nstatus from_std();\n#endif\n",
+		"include/opt.h":  "#ifdef NDEBUG\nvoid quiet();\n#else\nvoid loud();\n#endif\n#if TRUE\nstatus sure();\n#endif\n",
+		"obj/includes.c": "#include <opt.h>\n",
+	})
+	s := l.ix.Snapshot()
+
+	for _, p := range []string{"/lib/sys/forced.h", "/lib/include/std.h"} {
+		h := s.Parse(p)
+		require.NotNil(t, h, p)
+		assert.Len(t, h.Tree.Decls, 1, "%s: its include guard is not already defined", p)
+		assert.Empty(t, h.Tree.Errors, p)
+	}
+
+	opt := s.Parse("/lib/include/opt.h")
+	require.NotNil(t, opt)
+	assert.Equal(t, []string{"quiet", "sure"}, slices.Sorted(maps.Keys(opt.Unit.Funcs)))
+	quiet, _ := opt.Tree.Decls[0].Span()
+	sure, _ := opt.Tree.Decls[1].Span()
+	assert.True(t, opt.Tree.Sel.Guessed(quiet), "NDEBUG may be defined by an includer")
+	assert.False(t, opt.Tree.Sel.Guessed(sure), "what the header does see decides")
+	assert.True(t, opt.Env.Complete, "its macros are all in view")
+
+	// The object that includes it reads the header the same way.
+	assert.Equal(t, []string{"quiet", "sure"}, slices.Sorted(maps.Keys(s.Unit("/obj/includes").Funcs)))
+}
+
 func TestParse(t *testing.T) {
 	l := newLib(t, map[string]string{
 		"std/base.c": "void create() { }\n",
