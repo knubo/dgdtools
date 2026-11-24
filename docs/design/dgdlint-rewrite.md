@@ -687,7 +687,7 @@ special-cased (macro after `->`, typed-object macros, `#undef`/`#define`,
 bracket-blind resynchronization, undecided `#if` branches, relative
 object paths, …). The file-level check cannot prove each individual
 finding: a file can fail to compile for a different reason than the one
-dgdlint gives. A spot check of four findings whose kind the oracle's
+the linter gives. A spot check of four findings whose kind the oracle's
 messages for that file did not echo found all four real (`):`, a missing
 `:` in a mapping, `reurn 0;`, a parameter named `new`).
 
@@ -929,7 +929,7 @@ evidence is in the path and the mapping is printed in the run's notes;
 
 For `this_object()->fn()` and callbacks, a function missing from a file's
 own chain is looked for in the files that inherit or include it. In a
-partial checkout only the checkout can be searched. dgdlint assumes a
+partial checkout only the checkout can be searched. The linter assumes a
 wizard's own files are inherited by their own files, reports the miss,
 and says so in the message ("nor in this checkout; inheritors elsewhere
 in the lib cannot be seen"). The strictly safe alternative, treating
@@ -1005,7 +1005,7 @@ today. Generalizing to FluffOS or LDMud is mostly not profile work:
   errors only in DGD).
 - **Efun/kfun tables** per driver (name, arity, purity) for name
   resolution and for knowing that e.g. `call_other` and `call_out` exist
-  with which argument positions; today the handful dgdlint needs are
+  with which argument positions; today the handful the linter needs are
   hard-coded as DGD kfuns.
 - **Semantics the runtime rules encode:** visibility and `call_other`
   reachability (`static`/`private`/`protected`/`nosave` differ),
