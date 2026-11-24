@@ -73,8 +73,10 @@ type Config struct {
 	IncludeFile string `yaml:"include_file"`
 	// AutoObjects are lib paths implicitly inherited by every object.
 	AutoObjects []string `yaml:"auto_objects"`
-	// Create is the function the driver calls in an object when it is
-	// made (the driver config's create).
+	// Create is the function a new object is initialized by: the one the
+	// driver calls (the driver config's create), or, in a lib whose auto
+	// object receives that call and passes it on under another name, the
+	// one the lib's objects define.
 	Create string `yaml:"create"`
 	// RelativeObjectPaths says what an object path without a leading
 	// slash is relative to. The driver leaves that to the lib (its driver

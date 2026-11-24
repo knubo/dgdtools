@@ -339,3 +339,35 @@ func TestStubLocations(t *testing.T) {
 	assert.Equal(t, "mini", name)
 	assert.Equal(t, p.Files[libFile], prj.Profile.Files["/std/room.c"], "the location names the stub")
 }
+
+// What a new object is initialized by is a fact about the lib: a lib
+// whose auto object passes the driver's call on under another name says
+// so in its configuration, and its profile tells the checkouts.
+func TestProfileCarriesTheCreateFunction(t *testing.T) {
+	m := vfs.Mem{
+		"/mud/dgdtools.yml":        "root: lib\ncreate: setup\nprofile_build:\n  name: m\n  driver_config: mud.dgd\n  share: [\"std/**\"]\n  checkouts: [\"usr/*\"]\n",
+		"/mud/mud.dgd":             "auto_object = \"/sys/auto\";\ncreate = \"_F_create\";\n",
+		"/mud/lib/sys/auto.c":      "void _F_create() { }\n",
+		"/mud/lib/std/thing.c":     "void setup() { }\n",
+		"/mud/lib/usr/ann/sword.c": "inherit \"/std/thing\";\nvoid setup() { }\n",
+	}
+	full, err := config.Discover(m, []string{"/mud/lib"}, config.DiscoverOptions{})
+	require.NoError(t, err)
+	assert.Equal(t, "setup", full.Config.Create, "the configuration's word wins over the driver's")
+	p, err := profilebuild.Build(context.Background(), full, m)
+	require.NoError(t, err)
+	assert.Equal(t, "setup", p.Create)
+	data, err := p.Marshal()
+	require.NoError(t, err)
+
+	alone := vfs.Mem{
+		"/home/ann/usr/ann/dgdtools.yml": "profile: ../../m.profile\n",
+		"/home/ann/m.profile":            string(data),
+		"/home/ann/usr/ann/sword.c":      m["/mud/lib/usr/ann/sword.c"],
+	}
+	part, err := config.Discover(alone, []string{"/home/ann/usr/ann"}, config.DiscoverOptions{})
+	require.NoError(t, err)
+	want := []string{"sword.c:2 lifecycle-chain setup() overrides inherited /std/thing::setup() but does not chain it; call ::setup()"}
+	assert.Equal(t, want, findings(t, full, m, "/mud/lib/usr/ann"))
+	assert.Equal(t, want, findings(t, part, alone))
+}

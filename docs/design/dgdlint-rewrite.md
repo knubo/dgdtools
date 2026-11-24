@@ -286,11 +286,18 @@ line are designed in [config.md](config.md). What the linter adds:
   macros (`public` is some lib's `#define`, not a keyword), what marks
   an object that saves itself, which of the lib's functions take a
   function name. The function a new object is initialized by is the
-  driver config's `create` parameter; `lifecycle-chain` checks that one,
-  falls back to the customary `create` when the parameter is not known,
-  and takes other names as its option (a lib whose auto object receives
-  the driver's call under one name and passes it on under another says
-  so there).
+  project key `create`, read from the driver config's `create`
+  parameter; `lifecycle-chain` checks that one, and falls back to the
+  customary `create` when nothing says. A lib whose auto object receives
+  the driver's call under one name and passes it on under another (the
+  kernel library: `_F_create`, then `create`; the corpus lib:
+  `__create`, then `create`) sets the key to what its objects define. It
+  is a project key and not an option of the rule because it is a fact
+  about the lib that a profile must carry: a wizard's checkout has no
+  root config, and with the name only in the root's rule options the
+  partial-checkout corpus test lost the rule's findings in every
+  checkout. The rule's option `names` is for further functions held to
+  the same rule.
 - **The call registry declares call shapes.** An entry of
   `conventions.call_registry` is one or more forms
   `{function: N, object: M, args: K}`: the argument that names the

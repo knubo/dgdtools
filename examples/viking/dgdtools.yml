@@ -20,6 +20,10 @@ dialect:
   slash_slash: true
   closures: false
 
+# The driver's create function is __create, which the auto object
+# receives and passes on: what an object of this lib defines is create().
+create: create
+
 conventions:
   # /dgd/include/Std.h has `#define public`.
   specifier_macros: [public]
@@ -36,7 +40,7 @@ conventions:
 
 profile_build:
   name: viking
-  # include_dirs, include_file, auto_object, create and typechecking.
+  # include_dirs, include_file, auto_object and typechecking.
   driver_config: etc/config.viking
   share: ["std/**", "obj/**", "room/**", "secure/**", "dgd/**"]
   checkouts: ["players/*", "d/*"]
@@ -51,9 +55,6 @@ lint:
     # Not on; when asked for, about the parts of the lib that have path
     # macros.
     raw-inherit-path: { deny: ["/std/", "/obj/"] }
-    # The driver's create function is __create, which the auto object
-    # receives and passes on as create().
-    lifecycle-chain: { names: [create] }
   overrides:
     - paths: ["legacy/**"]
       rules: { lifecycle-chain: off }

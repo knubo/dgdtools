@@ -186,7 +186,8 @@ func TestExampleConfigsLoad(t *testing.T) {
 		"add_action": {{Function: 0}},
 		"store_fp":   {{Object: &zero, Function: 1}, {Function: 0}},
 	}, c.Conventions.CallRegistry)
-	assert.Equal(t, map[string]any{"names": []any{"create"}}, c.Lint.Rules["lifecycle-chain"].Options)
+	assert.Equal(t, "create", c.Create)
+	assert.Equal(t, map[string]any{"deny": []any{"/std/", "/obj/"}}, c.Lint.Rules["raw-inherit-path"].Options)
 	assert.Contains(t, c.Exclude, "attic/**")
 }
 

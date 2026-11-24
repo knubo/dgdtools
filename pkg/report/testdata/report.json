@@ -135,31 +135,31 @@
     "adjacent-strings": {
       "code": "E002",
       "group": "syntax",
-      "doc": "adjacent string literals (\"a\" \"b\"); DGD has no implicit concatenation",
+      "doc": "adjacent strings",
       "url": "https://github.com/mmcdole/dgdtools/blob/main/docs/rules.md#adjacent-strings"
     },
     "callable-not-found": {
       "code": "R001",
       "group": "runtime",
-      "doc": "string-referenced function (obj->fn(), call_other, call_out, registrars) missing from the target's inherit chain",
+      "doc": "no such function",
       "url": "https://github.com/mmcdole/dgdtools/blob/main/docs/rules.md#callable-not-found"
     },
     "static-crossobj": {
       "code": "R002",
       "group": "runtime",
-      "doc": "call_other to an unreachable function: private always, static from another object",
+      "doc": "out of reach",
       "url": "https://github.com/mmcdole/dgdtools/blob/main/docs/rules.md#static-crossobj"
     },
     "unformatted": {
       "code": "C003",
       "group": "convention",
-      "doc": "file is not formatted as `dgdtools format` would format it",
+      "doc": "not formatted",
       "url": "https://github.com/mmcdole/dgdtools/blob/main/docs/rules.md#unformatted"
     },
     "unreachable-code": {
       "code": "S004",
       "group": "suspicious",
-      "doc": "statement directly after return, break, continue or goto in the same block",
+      "doc": "never runs",
       "url": "https://github.com/mmcdole/dgdtools/blob/main/docs/rules.md#unreachable-code"
     }
   },

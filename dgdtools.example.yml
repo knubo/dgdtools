@@ -46,7 +46,12 @@ dialect:
 # include_dirs: ["/include"]
 # include_file: "/include/std.h"       # force-included everywhere
 # auto_objects: ["/kernel/lib/auto"]   # implicitly inherited by everything
-# create: "_F_create"                  # called by the driver in a new object
+
+# The function a new object is initialized by. The driver's config names
+# the one the driver calls; a lib whose auto object receives that call and
+# passes it on under another name (the kernel library: _F_create, then
+# create) says here what its objects define.
+# create: create
 
 # What an object path without a leading slash is relative to. The driver
 # hands every inherit and every call_other("path", ...) to the lib's
@@ -153,7 +158,7 @@ lint:
     # The parts of the lib that must be inherited through path macros.
     raw-inherit-path: { severity: warning, deny: ["/lib/"] }
     # The functions that must call what they override. Default: the
-    # driver's create function.
+    # project's create function.
     # lifecycle-chain: { names: [create, reset] }
     # syntax-error: { max_per_file: 5 }
 

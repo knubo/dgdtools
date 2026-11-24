@@ -150,11 +150,11 @@ Under non-strict typechecking DGD silently pads missing call_other arguments wit
 
 Lifecycle function (the create function) does not call the inherited implementations.
 
-A create function that overrides an inherited one without calling it (::create()) leaves the parent uninitialized. With several defining parents, label each inherit and chain each one. Proof-based: files with no explicit inherit, parents without the function, and unresolved parents are skipped. The function is the one the driver calls in a new object: the driver config's create parameter (the project key create), and "create" when that is not known. A lib whose auto object receives that call and passes it on under another name, or that has more such functions, lists them in the option names.
+A create function that overrides an inherited one without calling it (::create()) leaves the parent uninitialized. With several defining parents, label each inherit and chain each one. Proof-based: files with no explicit inherit, parents without the function, and unresolved parents are skipped. The function is the project's create function: the project key create, which is read from the driver config's create parameter and set by a lib whose auto object receives the driver's call and passes it on under another name; "create" when nothing says. The option names lists other functions to hold to the same rule.
 
 Options:
 
-- `names`: a list of strings; the functions that must call what they override (default: the driver's create function)
+- `names`: a list of strings; the functions that must call what they override (default: the project's create function)
 
 ## suspicious
 

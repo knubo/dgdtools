@@ -75,6 +75,20 @@ func result() *lint.Result {
 	}
 }
 
+// rules is the rule table the result is reported with: the rules that
+// occur and one that does not, with texts of their own, so that the
+// golden files do not change with the wording of the real rules.
+func rules() []*lint.Rule {
+	return []*lint.Rule{
+		{Code: "E002", Name: "adjacent-strings", Group: lint.GroupSyntax, Severity: diag.Error, Doc: "adjacent strings", Explain: "Two strings side by side."},
+		{Code: "R001", Name: "callable-not-found", Group: lint.GroupRuntime, Severity: diag.Error, Doc: "no such function", Explain: "The function is not there."},
+		{Code: "R002", Name: "static-crossobj", Group: lint.GroupRuntime, Severity: diag.Error, Doc: "out of reach", Explain: "The function cannot be called from there."},
+		{Code: "S004", Name: "unreachable-code", Group: lint.GroupSuspicious, Severity: diag.Warning, Doc: "never runs", Explain: "Nothing gets here."},
+		{Code: "C003", Name: "unformatted", Group: lint.GroupConvention, Severity: diag.Info, Doc: "not formatted", Explain: "The formatter would change it."},
+		{Code: "C002", Name: "missing-visibility", Group: lint.GroupConvention, Severity: diag.Warning, Doc: "no specifier", Explain: "Not among the findings."},
+	}
+}
+
 // golden compares got with the file of that name in testdata.
 func golden(t *testing.T, name string, got []byte) {
 	t.Helper()
@@ -88,7 +102,7 @@ func golden(t *testing.T, name string, got []byte) {
 }
 
 func TestFormats(t *testing.T) {
-	rules := lint.Rules()
+	rules := rules()
 	for _, base := range []struct{ name, dir string }{{"", "/work/mud"}, {"-absolute", ""}} {
 		o := report.Options{BaseDir: base.dir, Version: "v1.2.3"}
 		for _, f := range []struct{ format, file string }{
@@ -122,7 +136,7 @@ func TestFormats(t *testing.T) {
 // URI wherever the file is, and the machine formats are valid JSON.
 func TestSARIFLocations(t *testing.T) {
 	var b bytes.Buffer
-	require.NoError(t, report.SARIF(&b, result(), lint.Rules(), report.Options{BaseDir: "/work/mud", Version: "v1"}))
+	require.NoError(t, report.SARIF(&b, result(), rules(), report.Options{BaseDir: "/work/mud", Version: "v1"}))
 	var doc struct {
 		Runs []struct {
 			OriginalURIBaseIDs map[string]struct{ URI string } `json:"originalUriBaseIds"`
@@ -151,8 +165,8 @@ func TestSARIFLocations(t *testing.T) {
 	require.NoError(t, json.Unmarshal(b.Bytes(), &doc))
 	run := doc.Runs[0]
 	assert.Equal(t, "file:///work/mud/", run.OriginalURIBaseIDs["%SRCROOT%"].URI)
-	assert.Len(t, run.Tool.Driver.Rules, len(lint.Rules()))
-	assert.Equal(t, "https://github.com/mmcdole/dgdtools/blob/main/docs/rules.md#syntax-error", run.Tool.Driver.Rules[0].HelpURI)
+	assert.Len(t, run.Tool.Driver.Rules, len(rules()), "every rule of the table, found or not")
+	assert.Equal(t, "https://github.com/mmcdole/dgdtools/blob/main/docs/rules.md#adjacent-strings", run.Tool.Driver.Rules[0].HelpURI)
 
 	loc := func(i int) (uri, base string) {
 		a := run.Results[i].Locations[0].PhysicalLocation.ArtifactLocation

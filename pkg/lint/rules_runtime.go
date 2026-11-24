@@ -202,11 +202,11 @@ var ruleLifecycleChain = &Rule{
 		"it (::create()) leaves the parent uninitialized. With several defining " +
 		"parents, label each inherit and chain each one. Proof-based: files with " +
 		"no explicit inherit, parents without the function, and unresolved " +
-		"parents are skipped. The function is the one the driver calls in a new " +
-		"object: the driver config's create parameter (the project key create), " +
-		"and \"create\" when that is not known. A lib whose auto object receives " +
-		"that call and passes it on under another name, or that has more such " +
-		"functions, lists them in the option names.",
+		"parents are skipped. The function is the project's create function: the " +
+		"project key create, which is read from the driver config's create " +
+		"parameter and set by a lib whose auto object receives the driver's call " +
+		"and passes it on under another name; \"create\" when nothing says. The " +
+		"option names lists other functions to hold to the same rule.",
 	Default: true, Severity: diag.Warning, CrossFile: true, CompiledOnly: true,
 	Options: func() any { return &lifecycleOptions{} },
 	Run: func(p *Pass) {
@@ -231,11 +231,11 @@ var ruleLifecycleChain = &Rule{
 
 // lifecycleOptions are the options of lifecycle-chain.
 type lifecycleOptions struct {
-	Names []string `yaml:"names" doc:"the functions that must call what they override (default: the driver's create function)"`
+	Names []string `yaml:"names" doc:"the functions that must call what they override (default: the project's create function)"`
 }
 
 // defaultCreate is the create function assumed when neither the driver's
-// configuration nor the project says: the name LPC libs use by custom.
+// configuration nor the project's says: the name LPC libs use by custom.
 const defaultCreate = "create"
 
 type lifecycleParent struct {

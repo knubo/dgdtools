@@ -128,7 +128,7 @@ only settings can differ from one directory to the next.
 | `lib_path` | The lib path of the directory a partial checkout is (`/players/ann`), when its path on disk does not show it (the profile lists the lib's checkout patterns, such as `players/*`). |
 | `exclude` | Globs, relative to the lib root, that directory walks skip. A file named on the command line is always taken. |
 | `dialect` | `slash_slash`, `closures`, and `typechecking` (the driver's level; the rules that depend on it are silent while it is unknown). |
-| `include_dirs`, `include_file`, `auto_objects`, `create` | What the driver's config says: the include search path, the header included into every file, the object every object inherits, and the function the driver calls in a new object. Usually read from `profile_build.driver_config` or the profile; set here they override both. |
+| `include_dirs`, `include_file`, `auto_objects`, `create` | What the driver's config says: the include search path, the header included into every file, the object every object inherits, and the function a new object is initialized by. Usually read from `profile_build.driver_config` or the profile; set here they override both (a lib whose auto object receives the driver's `create` call and passes it on as another function names that function). |
 | `relative_object_paths` | What `"std/room"` (no leading slash) is relative to. DGD hands every `inherit` and every `call_other("path", …)` to the lib's driver object to resolve, so this is the lib's choice: `root` (the default, and what the driver's own functions such as `compile_object` do) or `file` (the directory of the file that says it, as in the kernel library). |
 | `conventions` | The lib's own habits; nothing here has a default. `specifier_macros: [public]` names empty macros that stand where a specifier does, and `macros: {FOREACH: statement}` says how to read a macro that cannot be classified from its `#define` (`expression`, `empty`, `specifier`, `type`, `string`, `statement`, `opaque`); `defines:` lists names to treat as defined in `#ifdef`. `call_registry`: the lib's functions that take the name of a function to call later, each with the argument that names the `function`, optionally the argument that says in which `object` (without it: `this_object()`) and the first of the `args` passed on; a function called in several ways lists its forms. `object_registry`: functions whose string argument is an object path (`compile_object`, `find_object`, `clone_object` are built in). `format_registry`: scanf-style functions and the position of their format string (`sscanf` is built in). `autosave_markers`: names whose mention marks an object as one that saves itself with `save_object`. `virtual_paths`: lib-path globs served by virtual-object daemons. |
 | `profile_build` | For whoever has the whole lib: `driver_config` (the DGD driver config), `share` (globs of shared code), `omit` (never put in a profile), `checkouts` (per-wizard tree patterns), `name`. Used by `dgdtools profile build`, and directly when linting the whole lib. |
@@ -492,11 +492,12 @@ DGD rather than being duplicated as lint rules.
 
 ### Lifecycle chaining
 
-The lifecycle function is the one the driver calls in a new object: the
-driver config's `create` parameter (read from `profile_build.driver_config`
-or the profile, or set as the project key `create`), and `create` when that
-is not known. A lib whose auto object receives the driver's call and passes
-it on under another name, or that has more such functions, lists them:
+The lifecycle function is the project's `create` function: the driver
+config's `create` parameter (read from `profile_build.driver_config` or
+the profile), and `create` when nothing says. A lib whose auto object
+receives the driver's call and passes it on under another name sets the
+project key (`create: create`), so that its profile carries it; other
+functions to hold to the same rule are the rule's option:
 `lifecycle-chain: { names: [create, reset] }`.
 
 The rule is proof-based: files with no explicit inherit, parents without the
