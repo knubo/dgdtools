@@ -383,3 +383,52 @@ func TestLintExitCode(t *testing.T) {
 	assert.Equal(t, 2, exitCode(crashed, diag.Error, true))
 	assert.Same(t, crash, internalError(crashed).(*lint.FileError))
 }
+
+// Standard input is linted as a nameless buffer, or, with a name, as
+// that file in that file's project in place of what is on disk.
+func TestLintStdin(t *testing.T) {
+	dir := tree(t, map[string]string{
+		"dgdtools.yml":     "root: lib\nlint:\n  overrides:\n    - paths: [\"quiet/**\"]\n      rules: {no-effect-statement: off}\n",
+		"lib/std/base.c":   "void known() { }\n",
+		"lib/obj/saved.c":  "void f() { }\n",
+		"lib/quiet/keep.c": "",
+	})
+	const buffer = "inherit \"/std/base\";\nvoid f() {\n    x == 1;\n    this_object()->known();\n    this_object()->unknown();\n}\n"
+	saved := filepath.Join(dir, "lib/obj/saved.c")
+
+	// Nameless: what one file can tell.
+	t.Chdir(filepath.Join(dir, "lib"))
+	code, out, errs := dgdtools(t, buffer, "lint", "-")
+	assert.Equal(t, 0, code, errs)
+	assert.Equal(t, "<stdin>:3:7: warning: comparison has no effect as a statement (did you mean =?) [S002 no-effect-statement]\n", out)
+	assert.Contains(t, errs, "note: standard input has no place in the lib")
+	assert.Contains(t, errs, "1 file(s): 0 error(s), 1 warning(s)")
+
+	// Named: the buffer is that file, whatever is on disk, with the
+	// lib around it and the settings of its path.
+	code, out, errs = dgdtools(t, buffer, "lint", "--stdin-filename", "obj/saved.c")
+	assert.Equal(t, 1, code, errs)
+	assert.Equal(t, strings.Join([]string{
+		"obj/saved.c:3:7: warning: comparison has no effect as a statement (did you mean =?) [S002 no-effect-statement]",
+		"obj/saved.c:5:20: error: function 'unknown' is not defined in /obj/saved (this_object) (called via ->) [R001 callable-not-found]",
+		"",
+	}, "\n"), out)
+	assert.NotContains(t, errs, "standard input has no place")
+	assert.Equal(t, "void f() { }\n", read(t, saved), "nothing is written")
+	// A file that does not exist yet, in a directory with its own rules.
+	code, out, _ = dgdtools(t, buffer, "lint", "-", "--stdin-filename", filepath.Join(dir, "lib/quiet/new.c"), "--output-format", "json")
+	assert.Equal(t, 1, code)
+	assert.Contains(t, out, `"path": "quiet/new.c"`)
+	assert.Contains(t, out, `"rule": "callable-not-found"`)
+	assert.NotContains(t, out, "no-effect-statement")
+
+	for _, args := range [][]string{
+		{"lint", "-", saved},
+		{"lint", "--stdin-filename", "x.c", saved},
+		{"lint", "-", "--write-baseline"},
+	} {
+		code, _, errs = dgdtools(t, buffer, args...)
+		assert.Equal(t, 2, code, args)
+		assert.Contains(t, errs, "standard input", args)
+	}
+}

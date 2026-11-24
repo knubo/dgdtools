@@ -342,6 +342,8 @@ wizards can fetch it; dgdtools itself ships no profiles.
 dgdtools lint                          # the project found from the working directory
 dgdtools lint dir/ file.c ...          # these; the project is found from the paths
 dgdtools lint --output-format json ... # also: sarif, github
+dgdtools lint --stdin-filename obj/key.c   # standard input as that file: an unsaved buffer
+dgdtools lint -                        # standard input, nameless: file-local rules
 dgdtools lint --select syntax ...      # run only these rules (names, codes or groups)
 dgdtools lint --enable RULES --ignore RULES ...   # adjust the configured set
 dgdtools lint --write-baseline         # accept current findings; later runs report only new ones

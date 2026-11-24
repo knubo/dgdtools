@@ -2,24 +2,34 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/mmcdole/dgdtools/pkg/config"
 	"github.com/mmcdole/dgdtools/pkg/diag"
 	"github.com/mmcdole/dgdtools/pkg/lint"
 	"github.com/mmcdole/dgdtools/pkg/report"
+	"github.com/mmcdole/dgdtools/pkg/vfs"
 )
 
 const lintUsage = `usage: dgdtools lint [flags] [path ...]
+       dgdtools lint [flags] -
 
 Lints the named files and the .c and .h files under the named
 directories. With no path, the whole project: the lib root of the nearest
 dgdtools.yml at or above the working directory. Without a dgdtools.yml
 only file-local rules run. A wizard with only their own folder puts
 "profile: NAME" in a dgdtools.yml there (or passes --profile).
+
+"-" lints standard input. With --stdin-filename it is linted as that
+file, in that file's project, in place of what is on disk (an editor's
+unsaved buffer); without, it has no place in a lib and file-local rules
+run.
 
 Exit codes: 0 no findings at or above the fail-on severity, 1 findings,
 2 usage or configuration error, or an internal error on some file. A file
@@ -28,10 +38,10 @@ that cannot be read is a warning.
 
 // lintCmd is `dgdtools lint`: pkg/lint run over the paths, pkg/report
 // for the output.
-func lintCmd(ctx context.Context, args []string, _ io.Reader, stdout, stderr io.Writer) int {
+func lintCmd(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	var (
 		project                    projectFlags
-		format, output             string
+		format, output, stdinName  string
 		sel, ignore, enable        string
 		failOn, baseline           string
 		writeBaseline, noBaseline  bool
@@ -43,6 +53,7 @@ func lintCmd(ctx context.Context, args []string, _ io.Reader, stdout, stderr io.
 	fs.StringVar(&format, "output-format", "human", "how findings are written: "+strings.Join(report.Formats, ", ")+" (a `format`)")
 	fs.StringVar(&output, "output", "", "write findings to `file` instead of standard output")
 	fs.StringVar(&output, "o", "", "short for --output")
+	fs.StringVar(&stdinName, "stdin-filename", "", "lint standard input as the file `path` (which need not exist): its project, its settings, its name in the output")
 	fs.StringVar(&sel, "select", "", "run only these `rules` (names, codes or groups, comma-separated)")
 	fs.StringVar(&enable, "enable", "", "also run these `rules`")
 	fs.StringVar(&ignore, "ignore", "", "do not run these `rules`")
@@ -66,8 +77,32 @@ func lintCmd(ctx context.Context, args []string, _ io.Reader, stdout, stderr io.
 	if err != nil {
 		return fail(err)
 	}
-	for i, path := range paths {
-		paths[i] = p.abs(path)
+	fromStdin := len(paths) == 1 && paths[0] == "-" || len(paths) == 0 && stdinName != ""
+	switch {
+	case !fromStdin && (stdinName != "" || slices.Contains(paths, "-")):
+		return fail(errors.New("standard input (\"-\", --stdin-filename) cannot be combined with paths"))
+	case fromStdin && writeBaseline:
+		return fail(errors.New("--write-baseline records the findings of files, not of standard input"))
+	case fromStdin:
+		// The text takes the file's place: the linter reads it wherever
+		// it would have read the file.
+		src, err := io.ReadAll(stdin)
+		if err != nil {
+			return fail(err)
+		}
+		path := filepath.Join(p.wd, "<stdin>")
+		if stdinName != "" {
+			path = p.abs(stdinName)
+		} else {
+			local = true // nameless, it is no object of any lib
+		}
+		buffer := vfs.NewOverlay(p.fsys)
+		buffer.Set(path, src)
+		p.fsys, paths = buffer, []string{path}
+	default:
+		for i, path := range paths {
+			paths[i] = p.abs(path)
+		}
 	}
 	l, err := newLinter(p, &project, paths)
 	if err != nil {
@@ -141,6 +176,9 @@ func lintCmd(ctx context.Context, args []string, _ io.Reader, stdout, stderr io.
 		return fail(err)
 	}
 	if !quiet {
+		if fromStdin && stdinName == "" && l.Project().HasLib() {
+			fmt.Fprintln(stderr, "note: standard input has no place in the lib: file-local rules only (--stdin-filename says where it belongs)")
+		}
 		report.Summary(stderr, res, ropt, stats)
 	}
 	if crash := internalError(res); crash != nil && quiet {

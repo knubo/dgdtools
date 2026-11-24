@@ -431,9 +431,10 @@ line are designed in [config.md](config.md). What the linter adds:
 
 ```
 dgdtools lint [flags] [path ...]  lint files/directories (default: project)
+dgdtools lint [flags] -           lint standard input
 dgdtools rules                    list rules (code, name, default, scope)
-dgdtools explain RULE             documentation for one rule
-dgdtools config [path]            the project of a path, the settings of a file
+dgdtools explain RULE             documentation for one rule and its options
+dgdtools config [path]            check a path's configuration; show the project and the settings of a file
 ```
 
 Flags of `lint`: `--config`, `--no-config`, `--root`, `--profile`,
@@ -442,14 +443,24 @@ needs one), `--output-format human|json|sarif|github`, `--output FILE`,
 `--select RULES` (run only these), `--enable`, `--ignore`,
 `--fail-on SEVERITY`, `--baseline FILE`, `--write-baseline`,
 `--no-baseline`, `--local` (file-local rules only), `--stats`,
-`--max-per-file N`, `--quiet`, `--exit-zero`. Flags may follow paths;
-`--` ends them. `--output-format` rather than `--format`: `format` is
-the name of the other subcommand (ruff made the same choice).
+`--max-per-file N`, `--stdin-filename PATH`, `--quiet`, `--exit-zero`.
+Flags may follow paths; `--` ends them. `--output-format` rather than
+`--format`: `format` is the name of the other subcommand (ruff made the
+same choice).
+
+**Standard input** (`-`, or `--stdin-filename PATH`, which implies it)
+is what an editor without a language server, or a hook, pipes an unsaved
+buffer through, as with `format`. Named, the text takes the file's place
+in a `vfs.Overlay`: its project is discovered from the path, the linter
+reads the buffer wherever it would have read the file, the lib around it
+is the one on disk, and the output names the path. Nameless, it is no
+object of any lib: the file-local rules run and a note says so.
 
 **Exit codes:** `0` no findings at or above `fail_on`; `1` findings;
-`2` usage, configuration or I/O error (including an unknown rule name and
-a path that does not exist). Syntax errors in linted files are findings,
-not tool errors (ruff/ESLint: same).
+`2` usage or configuration error (including an unknown rule name and a
+path that does not exist) or an internal error on some file. Syntax
+errors in linted files are findings, not tool errors (ruff/ESLint:
+same); a file that cannot be read is a warning.
 
 **Output:** human (`path:line:col: severity: message [rule]`, the format
 editors and `grep` already parse, related locations indented beneath, a
