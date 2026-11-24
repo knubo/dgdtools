@@ -137,11 +137,28 @@ lint:
 	assert.Equal(t, "off", c.Lint.Overrides[0].Rules["runtime"].Severity)
 	assert.Equal(t, "statement", c.Lint.Macros["FOREACH"])
 
+	// A misspelled key is an error, not a silently ignored setting.
+	m["/typo/dgdtools.yml"] = "lint:\n  include_dir: [/x]\n"
+	_, err = LoadFS(m, "/typo/dgdtools.yml")
+	assert.ErrorContains(t, err, "include_dir")
+
 	// Cycles are reported.
 	m["/loop/a.yml"] = "extends: b.yml\n"
 	m["/loop/b.yml"] = "extends: a.yml\n"
 	_, err = LoadFS(m, "/loop/a.yml")
 	assert.ErrorContains(t, err, "cycle")
+}
+
+// The documented example must stay loadable and name only real settings.
+func TestExampleConfigLoads(t *testing.T) {
+	c, err := Load("../../dgdtools.example.yml")
+	require.NoError(t, err)
+	assert.Equal(t, "etc/config.viking", c.DriverConfig)
+	assert.Equal(t, "root", c.Lint.RelativeObjectPaths)
+	assert.Equal(t, "warning", c.Lint.Rules["raw-inherit-path"].Severity)
+	require.Len(t, c.Lint.Overrides, 1)
+	assert.Equal(t, "off", c.Lint.Overrides[0].Rules["lifecycle-chain"].Severity)
+	assert.Contains(t, c.Exclude, "**/attic/**")
 }
 
 func TestLegacyConfigStillLoads(t *testing.T) {

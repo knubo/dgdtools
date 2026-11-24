@@ -6,7 +6,9 @@
 package config
 
 import (
+	"bytes"
 	"fmt"
+	"io"
 	"path/filepath"
 
 	"gopkg.in/yaml.v3"
@@ -217,7 +219,11 @@ func loadInto(fs vfs.FS, path string, c *Config, seen map[string]bool) error {
 	}
 	root, drv := c.Root, c.DriverConfig
 	c.Root, c.DriverConfig = "", ""
-	if err := yaml.Unmarshal(data, c); err != nil {
+	// Unknown keys are errors: a misspelled setting must not be silently
+	// ignored (ruff, Biome and golangci-lint all reject them).
+	dec := yaml.NewDecoder(bytes.NewReader(data))
+	dec.KnownFields(true)
+	if err := dec.Decode(c); err != nil && err != io.EOF {
 		return fmt.Errorf("%s: %w", path, err)
 	}
 	if c.Root == "" {

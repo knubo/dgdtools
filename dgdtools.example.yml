@@ -1,16 +1,25 @@
-# dgdtools.yml -- shared configuration for dgdfmt and dgdlint.
-# Place at your project root; every field is optional. The values below
-# are a real working setup for a classic DGD mudlib (VikingMUD) and form
-# a reasonable starting point for any DGD lib.
+# dgdtools.yml -- shared configuration for dgdfmt, dgdlint and dgdcmp.
+# Place it at your project root; every field is optional. dgdlint finds it
+# by walking up from the path it is asked to lint. The values below are a
+# working setup for a classic DGD mudlib (VikingMUD) and a reasonable
+# starting point for any DGD lib.
+
+# extends: ../shared/dgdtools.yml   # layer on another config: scalars and
+#                                   # lists replace, maps merge
 
 dialect:
   slash_slash: true          # // comments (DGD SLASHSLASH build flag)
-  closures: false            # `function` keyword (DGD CLOSURES build flag)
+  closures: false            # `function` keyword, &f(), (*f)() (CLOSURES flag)
 
 root: lib                    # filesystem directory that is the lib's "/"
 
-exclude:
-  - "attic/**"               # retired code kept for reference
+# The DGD driver's own config file. dgdlint reads include_dirs,
+# include_file, auto_object and typechecking from it, so they do not have
+# to be copied below.
+driver_config: etc/config.viking
+
+exclude:                     # pruned from directory walks; a file named on
+  - "**/attic/**"            # the command line is always linted
   - "**/old/**"
   - "**/OLD/**"
   - "**/.old/**"
@@ -25,14 +34,26 @@ format:
   function_headers: split    # split (KNF: name at column 0) | joined
 
 lint:
-  # Mirror the driver config (include dirs, forced include, auto object)
-  # so #include and inherit macros resolve.
-  include_dirs: ["/dgd/include", "/std/include"]
-  include_file: "/dgd/include/Std.h"
-  auto_objects: ["/dgd/lib/object"]
+  # Only needed without driver_config, or to override it:
+  # include_dirs: ["/dgd/include", "/std/include"]
+  # include_file: "/dgd/include/Std.h"   # force-included everywhere
+  # auto_objects: ["/dgd/lib/object"]    # implicitly inherited by everything
+  # typechecking: 1                      # unknown = typechecking rules silent
+
+  # What "std/room" (no leading slash) is relative to. DGD resolves object
+  # names from the lib root; "file" is for libs that rewrite paths.
+  relative_object_paths: root
 
   # Identifiers accepted in specifier position (empty visibility macros).
   specifier_macros: [public]
+
+  # Override the class dgdlint derives from a #define, for the rare macro
+  # it reads wrongly: type | specifier | statement | expression | opaque.
+  macros: {}
+
+  # Names to treat as defined when choosing #ifdef branches (__DGD__ is
+  # built in). Code in a branch dgdlint cannot decide is not judged.
+  defines: []
 
   # Functions whose string argument names a callback on this_object();
   # call_other and call_out are built in. Value = 0-based argument index.
@@ -44,7 +65,7 @@ lint:
   # find_object are built in); value = 0-based argument index.
   object_registry: {}
 
-  # scanf/printf-style functions and their format-string argument index;
+  # scanf-style functions and their format-string argument index;
   # sscanf (arg 1) is built in.
   format_registry: {}
 
@@ -52,20 +73,34 @@ lint:
   autosave_markers: [set_auto_save, D_STORE]
 
   # Lib-path globs served by virtual-object daemons (objects with no
-  # backing .c file). Generated-data directories are usually better
-  # handled with an exclude such as "**/var/**".
+  # backing .c file).
   virtual_paths: []
 
-  # Rules run by their built-in defaults (see `dgdlint -rules`); enable
-  # adds to the defaults, disable removes. The rules: section below only
-  # tunes a rule's settings; listing one there does not enable it.
-  enable: []
-  disable: []
+  # Rules: `dgdlint rules` lists them with their defaults. A key is a rule
+  # name, a code (E001), or a group (all, syntax, runtime, suspicious,
+  # convention); a value is off | info | warning | error, or a mapping
+  # with a severity and the rule's options. Rule beats group beats all.
+  # Giving a severity turns a rule on.
   rules:
     raw-inherit-path: { severity: warning, deny: ["/std/", "/obj/"] }
     # Resolved explicit parents defining these functions must be chained.
     lifecycle-chain: { names: [create] }
-  path_rules:
-    - paths: ["legacy/**"]
-      disable: [lifecycle-chain]
+    # unreachable-code: warning
+    # syntax-error: { max_per_file: 5 }
+
+  # Different settings for parts of the lib (globs relative to the root).
+  overrides:
+    - paths: ["players/**"]
+      rules: { lifecycle-chain: off }
+
+  # Legacy spellings, still read: enable/disable lists and path_rules.
+  # enable: []
+  # disable: []
+  # path_rules:
+  #   - paths: ["legacy/**"]
+  #     disable: [lifecycle-chain]
+
+  # Known findings to subtract (written by `dgdlint --write-baseline`).
+  baseline: dgdlint-baseline.json
+
   fail_on: error             # exit 1 at this severity or above
