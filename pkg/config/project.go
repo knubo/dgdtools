@@ -397,8 +397,8 @@ func (prj *Project) wholeLib(fs vfs.FS) bool {
 }
 
 // InferCheckout recognizes a per-wizard tree in dir's path: with pattern
-// "players/*", /home/me/mud/players/ann/rooms is the checkout
-// /home/me/mud/players/ann at lib path /players/ann. Patterns are
+// "usr/*", /home/me/mud/usr/ann/rooms is the checkout
+// /home/me/mud/usr/ann at lib path /usr/ann. Patterns are
 // tried in order; within one, the outermost match wins.
 func InferCheckout(dir string, patterns []string) (checkoutDir, lib string, ok bool) {
 	segs := strings.Split(filepath.ToSlash(dir), "/")

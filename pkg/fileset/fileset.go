@@ -95,7 +95,7 @@ func Under(dir, p string) (rel string, ok bool) {
 }
 
 // Tree says where a lib is on disk: all of it under Root, or, for a
-// partial checkout, its directory CheckoutLib ("/players/name") under
+// partial checkout, its directory CheckoutLib ("/usr/name") under
 // CheckoutDir. With neither there is no lib.
 type Tree struct {
 	Root                     string
