@@ -35,30 +35,54 @@ else is new.
 ## 2. Architecture
 
 ```
+pkg/diag     the diagnostics model: finding, severity, tags, related
+             locations, fixes as text edits, notes
 pkg/vfs      file access: OS, in-memory overlay (unsaved editor buffers)
 pkg/token    lossless token model; the one table of keywords, specifiers,
-             types and operator precedence
+             types and operator precedence; lexical errors by offset
 pkg/lexer    byte-lossless lexer
 pkg/pp       the preprocessor model: the ordered #define environment of
              a translation unit, macro classes, conditional-branch
              selection, the constant evaluator
-pkg/syntax   AST + hand-written error-tolerant recursive-descent parser
-pkg/config   dgdtools.yml, project discovery, per-file settings (nested
-             scopes, .editorconfig), DGD driver-config reader
+pkg/syntax   AST + hand-written error-tolerant recursive-descent parser,
+             its error pass (ordering, cascades, macro taint), and
+             declarations rendered as text (signatures, types)
+pkg/directive  the comments addressed to the tool: dgdtools-ignore ...
+pkg/tokcmp   significant-token comparison of two files
+pkg/profile  a mudlib profile: manifest, stubs, the file format, lookup
 pkg/editorconfig  .editorconfig files
 pkg/fileset  where a lib is on disk: path mapping, globs, the walk
+pkg/config   dgdtools.yml, its validation, project discovery, per-file
+             settings (nested scopes, .editorconfig), DGD driver-config
+             reader
 pkg/index    lazy cross-file index over syntax trees: symbols, inherit
              chains, #define environments; three-valued lookups;
              invalidation
-pkg/lint     the embeddable linter: rules, suppressions, baseline,
-             diagnostics with ranges/related locations/fix edits
+pkg/calls    the late-bound call sites of one file (obj->fn(),
+             call_other, call_out, the lib's registrars) and the
+             registry of functions that take a function name
 pkg/format   the formatter: a layout plan from the syntax tree, a
              token-stream printer, the token-equality gate (section 8)
-pkg/tokcmp   significant-token comparison of two files
+pkg/lint     the embeddable linter: rules with typed options, the layers
+             of rule settings, suppressions, baseline, diagnostics
+pkg/profilebuild  a profile from a whole lib: which files are shared, and
+             each one's stub
 pkg/report   output writers: human, JSON, SARIF 2.1.0, GitHub annotations
 cmd/dgdtools the one binary: a thin front end per subcommand (lint,
              format, rules, explain, config, profile) over the packages
 ```
+
+Each package imports only packages above it in this list. Three of the boundaries are worth stating, because they were
+once elsewhere. `pkg/token` knows nothing of diagnostics: a lexical
+error is an offset and a message (`token.Error`), and the parser turns
+it into a syntax error. `pkg/calls` is a function of one file's tree,
+its #define environment and the registry (`calls.Extract`), with no rule
+or pass in it, so the profile builder asks it what the linter asks it.
+And `pkg/index` answers lookups with facts, not sentences: a function
+that is missing comes back with where it was searched
+(`Lookup.Searched`: the chain, a stub that lists public functions only,
+the inheritors, the checkout) and the rule that reports it words the
+message.
 
 ### 2.1 Why a hand-written recursive-descent parser
 
@@ -917,9 +941,18 @@ Late-bound call sites with a known receiver: 6.5% (old) → 22.5% (new;
   stability.
 - `pkg/config` (discovery, settings scopes, `.editorconfig`, the
   user-level fallback, validation), `pkg/editorconfig`, `pkg/pp`,
-  `pkg/diag`, `cmd/dgdtools` (every subcommand: exit codes, output
+  `pkg/diag`, `pkg/directive`, `pkg/calls` (the driver's calls, declared
+  registry forms), `cmd/dgdtools` (every subcommand: exit codes, output
   formats, baseline workflow, discovery from anywhere, check/diff/stdin,
-  line ranges, git-changed lines).
+  line ranges, git-changed lines, configuration verification).
+- Golden files, rewritten with `-update`: `pkg/report` (a result with
+  one of everything, in every format, with and without a base
+  directory), `pkg/profile` (the uncompressed file format), and
+  `docs/rules.md` itself, which `pkg/lint` checks against the rule
+  table.
+- `pkg/profilebuild`: a small whole lib built into a profile, then one
+  of its trees linted alone against the profile and compared with the
+  whole-lib run.
 - Corpus (`-tags corpus`): `TestCorpusParse` (182,126 `.c`/`.h` files
   parsed twice: no panics, span and ordering invariants) and
   `TestCorpusLint` (whole-lib run, no internal errors, core directories
