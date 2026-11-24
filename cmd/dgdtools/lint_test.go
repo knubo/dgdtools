@@ -37,7 +37,7 @@ func TestLintFromAnywhere(t *testing.T) {
 	// walking up from the file, not from the working directory.
 	code, out, errs := dgdtools(t, "", "lint", file)
 	assert.Equal(t, 1, code)
-	assert.Contains(t, out, "castle.c:5:11: error: missing ';' before 'c' [syntax-error]")
+	assert.Contains(t, out, "castle.c:5:11: error: missing ';' before 'c' [E001 syntax-error]")
 	assert.Contains(t, errs, "1 file(s): 1 error(s)")
 
 	// A directory.
@@ -60,7 +60,7 @@ func TestLintFromAnywhere(t *testing.T) {
 	// No config anywhere: file-local mode still catches it, and says so.
 	code, out, errs = dgdtools(t, "", "lint", filepath.Join(dir, "stray/castle.c"))
 	assert.Equal(t, 1, code)
-	assert.Contains(t, out, "[syntax-error]")
+	assert.Contains(t, out, "[E001 syntax-error]")
 	assert.Contains(t, errs, "file-local rules only")
 
 	// --exit-zero, --quiet; flags before and after the path; "--" ends
@@ -133,11 +133,35 @@ func TestLintOutputFormats(t *testing.T) {
 
 	_, out, _ = dgdtools(t, "", "lint", "--output-format", "github", file)
 	assert.Contains(t, out, "::error file=")
-	assert.Contains(t, out, "title=dgdtools adjacent-strings::")
+	assert.Contains(t, out, "title=dgdtools E002 adjacent-strings::")
 
 	code, _, errs := dgdtools(t, "", "lint", "--output-format", "xml", file)
 	assert.Equal(t, 2, code)
 	assert.Contains(t, errs, "unknown output format")
+
+	// Paths are written from the working directory: relative for what is
+	// under it, absolute for the rest, in every format.
+	sub := filepath.Join(dir, "sub")
+	write(t, dir, map[string]string{"sub/b.c": "void g() { x == 1; }\n"})
+	t.Chdir(sub)
+	_, out, _ = dgdtools(t, "", "lint", "b.c", file)
+	assert.Equal(t, strings.Join([]string{
+		file + ":2:12: error: adjacent string literals are a syntax error in DGD; join them with '+' [E002 adjacent-strings]",
+		file + ":4:2: error: missing '}' to close '{' opened on line 1 [E001 syntax-error]",
+		"    " + file + ":1:10: note: opened here",
+		"b.c:1:14: warning: comparison has no effect as a statement (did you mean =?) [S002 no-effect-statement]",
+		"",
+	}, "\n"), out)
+	t.Chdir(dir)
+	_, out, _ = dgdtools(t, "", "lint", "--output-format", "json")
+	assert.Contains(t, out, `"path": "a.c"`)
+	assert.Contains(t, out, `"path": "sub/b.c"`)
+	_, out, _ = dgdtools(t, "", "lint", "--output-format", "github")
+	assert.Contains(t, out, "::warning file=sub/b.c,line=1,")
+	_, out, _ = dgdtools(t, "", "lint", "--output-format", "sarif")
+	assert.Contains(t, out, `"uri": "sub/b.c"`)
+	assert.Contains(t, out, `"uriBaseId": "%SRCROOT%"`)
+	assert.Contains(t, out, `"uri": "file://`+filepath.ToSlash(dir)+`/"`)
 
 	// --output writes the report to a file.
 	outFile := filepath.Join(dir, "report.json")
@@ -157,8 +181,8 @@ func TestLintSelectionAndFailOn(t *testing.T) {
 	// Warnings do not fail by default.
 	code, out, _ := dgdtools(t, "", "lint", file)
 	assert.Equal(t, 0, code)
-	assert.Contains(t, out, "[assignment-in-condition]")
-	assert.Contains(t, out, "[no-effect-statement]")
+	assert.Contains(t, out, "[S001 assignment-in-condition]")
+	assert.Contains(t, out, "[S002 no-effect-statement]")
 
 	code, _, _ = dgdtools(t, "", "lint", "--fail-on", "warning", file)
 	assert.Equal(t, 1, code)
@@ -179,7 +203,7 @@ func TestLintSelectionAndFailOn(t *testing.T) {
 
 	_, out, _ = dgdtools(t, "", "lint", file, "--ignore", "no-effect-statement", "--enable", "missing-visibility")
 	assert.NotContains(t, out, "no-effect-statement")
-	assert.Contains(t, out, "[missing-visibility]")
+	assert.Contains(t, out, "[C002 missing-visibility]")
 
 	code, _, errs := dgdtools(t, "", "lint", "--select", "bogus", file)
 	assert.Equal(t, 2, code)

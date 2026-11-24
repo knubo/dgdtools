@@ -1,0 +1,5 @@
+::error file=lib/obj/key.c,line=9,col=19,endLine=9,endColumn=29,title=dgdtools R001 callable-not-found::function 'do_unlok' is not defined in /obj/key (this_object) (called via add_action)
+::error file=lib/obj/key.c,line=12,col=9,endLine=12,endColumn=12,title=dgdtools E002 adjacent-strings::adjacent string literals are a syntax error in DGD; join them with '+'
+::warning file=lib/obj/key.c,line=20,col=5,endLine=21,endColumn=14,title=dgdtools S004 unreachable-code::unreachable code
+::error file=lib/room/a b.c,line=3,col=1,endLine=3,endColumn=8,title=dgdtools R002 static-crossobj::'hidden' in /std/room is static — call_other from another object returns nil
+::notice file=/elsewhere/loose.c,line=1,col=1,endLine=1,endColumn=1,title=dgdtools C003 unformatted::file is not formatted (run `dgdtools format`)%0Asecond line, 100%25 of it

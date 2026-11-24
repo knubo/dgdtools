@@ -290,8 +290,8 @@ one-line `dgdtools.yml` in it, and lint there:
 $ cat players/yourname/dgdtools.yml
 profile: viking
 $ cd players/yourname && dgdtools lint
-room/hall.c:14:21: error: missing ';' before 'add_exit' [syntax-error]
-obj/key.c:9:19: error: function 'do_unlok' is not defined in /players/yourname/obj/key (this_object) ... [callable-not-found]
+room/hall.c:14:21: error: missing ';' before 'add_exit' [E001 syntax-error]
+obj/key.c:9:19: error: function 'do_unlok' is not defined in /players/yourname/obj/key (this_object) ... [R001 callable-not-found]
 ```
 
 `profile: viking` names a **mudlib profile**, a small file your mud
@@ -520,12 +520,30 @@ to detect diamonds or enforce call order.
 
 ### Machine-readable output and embedding
 
+Findings are written one per line, compiler style, with the rule's code
+and name at the end:
+
+```
+obj/key.c:9:19: error: function 'do_unlok' is not defined in /obj/key (this_object) (called via add_action) [R001 callable-not-found]
+```
+
+Paths are written from the working directory: relative for the files
+under it, absolute for the rest. A declaration that comes from a profile
+is located by the stub's URI (`dgdtools-profile://NAME/std/room.c`).
+
 `--output-format json` emits a versioned document: each diagnostic has
-its rule name and code, severity, line/column, byte range, related
-locations, and any fix as text edits; the summary includes the "not
-verified" counters. `--output-format sarif` is SARIF 2.1.0 for
-code-scanning upload; `--output-format github` writes GitHub Actions
-annotations. The linter never modifies files.
+its rule name and code, severity, line/column, byte range, a fingerprint
+of its source line, tags (`unnecessary`, `deprecated`), related
+locations, and any fix as text edits with its applicability (`safe` or
+`unsafe`); `rules` describes the rules that occur, with the address of
+their documentation; `errors` lists the files that were not linted
+(`unreadable` or `internal`); the summary includes the "not verified"
+counters. `--output-format sarif` is SARIF 2.1.0 for code-scanning
+upload: locations are URIs (relative to `%SRCROOT%`, the working
+directory, or `file:` for files outside it), rules carry `helpUri`,
+results a partial fingerprint. `--output-format github` writes GitHub
+Actions annotations. Columns count bytes. The linter never modifies
+files.
 
 Everything is a Go library, and `cmd/dgdtools` is a thin front end over
 it. `pkg/lint`: a `Linter` takes a project and a file system (`pkg/vfs`,

@@ -134,11 +134,14 @@ func lintCmd(ctx context.Context, args []string, _ io.Reader, stdout, stderr io.
 		defer f.Close()
 		out = f
 	}
-	if err := report.Write(out, format, res, l.Rules(), report.Options{Version: version}); err != nil {
+	// Paths are written as the user would write them: from the working
+	// directory.
+	ropt := report.Options{BaseDir: p.wd, Version: version}
+	if err := report.Write(out, format, res, l.Rules(), ropt); err != nil {
 		return fail(err)
 	}
 	if !quiet {
-		report.Summary(stderr, res, stats)
+		report.Summary(stderr, res, ropt, stats)
 	}
 	if crash := internalError(res); crash != nil && quiet {
 		fail(crash) // the summary would have said it

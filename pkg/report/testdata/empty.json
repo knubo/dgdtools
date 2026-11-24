@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "tool": "dgdtools v1.2.3",
+  "diagnostics": [],
+  "summary": {
+    "errors": 0,
+    "warnings": 0,
+    "infos": 0,
+    "stats": {
+      "files": 0,
+      "suppressed": 0,
+      "baselined": 0,
+      "capped": 0,
+      "unresolved_inherits": 0,
+      "unknown_includes": 0,
+      "partial_files": 0,
+      "call_sites": 0,
+      "unknown_receivers": 0,
+      "tainted_syntax_errors": 0,
+      "guessed_branch_findings": 0
+    }
+  }
+}

@@ -609,6 +609,21 @@ Properties the core guarantees (each has a test in `pkg/lint` or
   suppressed or baselined ones. What (4) holds back is counted
   (`Stats.Capped`, in the summary); `--max-per-file -1` lifts the
   limits, and `--write-baseline` always does.
+- **Reports name files the way the user did.** `pkg/report` writes a
+  file under `Options.BaseDir` (the front end gives its working
+  directory) by its path from there and any other by its absolute path;
+  it reads no working directory itself. The human format ends each
+  finding with `[CODE name]`. SARIF locations are URIs: a relative
+  reference with `uriBaseId: %SRCROOT%` (and `originalUriBaseIds` saying
+  where that is) under the base, a `file:` URI outside it. A location in
+  a profile's stub is a URI already (`dgdtools-profile://NAME/…`) and is
+  written as one in every format, never run through path arithmetic.
+  JSON carries the model's new parts (`tags`, fix `applicability`,
+  `fingerprint`), a `rules` table for the rules that occur (code, group,
+  summary, documentation address) rather than a URL on each of half a
+  million findings, and `errors`. SARIF regions give the byte range
+  beside the columns, which count bytes; SARIF `fixes` are not written,
+  because their offsets count characters.
 - **Notes** about a run as a whole are `diag.Note` values with a stable
   `Kind` (`no-lib`, `incomplete-lib`, `outside-lib`, `profile`,
   `unplaced-checkout`).

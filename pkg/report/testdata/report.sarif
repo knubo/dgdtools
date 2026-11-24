@@ -1,0 +1,697 @@
+{
+  "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+  "runs": [
+    {
+      "originalUriBaseIds": {
+        "%SRCROOT%": {
+          "uri": "file:///work/mud/"
+        }
+      },
+      "results": [
+        {
+          "ruleId": "callable-not-found",
+          "level": "error",
+          "message": {
+            "text": "function 'do_unlok' is not defined in /obj/key (this_object) (called via add_action)"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "lib/obj/key.c",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 9,
+                  "startColumn": 19,
+                  "endLine": 9,
+                  "endColumn": 29,
+                  "byteOffset": 140,
+                  "byteLength": 10
+                }
+              }
+            }
+          ],
+          "partialFingerprints": {
+            "dgdtools/line/v1": "00000000000000a1"
+          }
+        },
+        {
+          "ruleId": "adjacent-strings",
+          "level": "error",
+          "message": {
+            "text": "adjacent string literals are a syntax error in DGD; join them with '+'"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "lib/obj/key.c",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 12,
+                  "startColumn": 9,
+                  "endLine": 12,
+                  "endColumn": 12,
+                  "byteOffset": 201,
+                  "byteLength": 3
+                }
+              }
+            }
+          ],
+          "partialFingerprints": {
+            "dgdtools/line/v1": "00000000000000b2"
+          }
+        },
+        {
+          "ruleId": "unreachable-code",
+          "level": "warning",
+          "message": {
+            "text": "unreachable code"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "lib/obj/key.c",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 20,
+                  "startColumn": 5,
+                  "endLine": 21,
+                  "endColumn": 14,
+                  "byteOffset": 300,
+                  "byteLength": 31
+                }
+              }
+            }
+          ],
+          "relatedLocations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "lib/obj/key.c",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 19,
+                  "startColumn": 5
+                }
+              },
+              "message": {
+                "text": "control leaves here"
+              }
+            }
+          ],
+          "partialFingerprints": {
+            "dgdtools/line/v1": "00000000000000c3"
+          }
+        },
+        {
+          "ruleId": "static-crossobj",
+          "level": "error",
+          "message": {
+            "text": "'hidden' in /std/room is static — call_other from another object returns nil"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "lib/room/a%20b.c",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 3,
+                  "startColumn": 1,
+                  "endLine": 3,
+                  "endColumn": 8,
+                  "byteOffset": 40,
+                  "byteLength": 7
+                }
+              }
+            }
+          ],
+          "relatedLocations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "dgdtools-profile://my%20lib/std/room.c"
+                },
+                "region": {
+                  "startLine": 5,
+                  "startColumn": 12
+                }
+              },
+              "message": {
+                "text": "defined here"
+              }
+            },
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "lib/std/base.c",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "region": {
+                  "startLine": 2,
+                  "startColumn": 1
+                }
+              },
+              "message": {
+                "text": "inherited through here"
+              }
+            }
+          ],
+          "partialFingerprints": {
+            "dgdtools/line/v1": "00000000000000d4"
+          }
+        },
+        {
+          "ruleId": "unformatted",
+          "level": "note",
+          "message": {
+            "text": "file is not formatted (run `dgdtools format`)\nsecond line, 100% of it"
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "file:///elsewhere/loose.c"
+                },
+                "region": {
+                  "startLine": 1,
+                  "startColumn": 1,
+                  "endLine": 1,
+                  "endColumn": 1,
+                  "byteOffset": 0,
+                  "byteLength": 0
+                }
+              }
+            }
+          ],
+          "partialFingerprints": {
+            "dgdtools/line/v1": "00000000000000e5"
+          }
+        }
+      ],
+      "tool": {
+        "driver": {
+          "informationUri": "https://github.com/mmcdole/dgdtools",
+          "name": "dgdtools",
+          "rules": [
+            {
+              "id": "syntax-error",
+              "name": "syntax-error",
+              "shortDescription": {
+                "text": "the file does not parse; DGD will refuse to compile it"
+              },
+              "fullDescription": {
+                "text": "Reported by the linter's own error-tolerant parser, which implements the DGD 1.7 grammar on unpreprocessed source. A missing ';' is reported where the ';' belongs (DGD reports the token after it). Errors that could be an artifact of a macro the linter cannot see through are not reported: a statement that uses a fragment macro, or, when some #include could not be resolved, an error next to an unknown identifier. After an error that leaves the file's structure in doubt (unbalanced braces) later errors in the file are dropped as likely consequences."
+              },
+              "helpUri": "https://github.com/mmcdole/dgdtools/blob/main/docs/rules.md#syntax-error",
+              "defaultConfiguration": {
+                "level": "error"
+              },
+              "properties": {
+                "code": "E001",
+                "group": "syntax"
+              }
+            },
+            {
+              "id": "adjacent-strings",
+              "name": "adjacent-strings",
+              "shortDescription": {
+                "text": "adjacent string literals (\"a\" \"b\"); DGD has no implicit concatenation"
+              },
+              "fullDescription": {
+                "text": "Older LPmud drivers and C concatenate adjacent string literals. DGD does not: it is a syntax error and the object will not compile. Join the strings with '+' (DGD folds constant concatenation at compile time). The diagnostic carries a fix that inserts the '+'."
+              },
+              "helpUri": "https://github.com/mmcdole/dgdtools/blob/main/docs/rules.md#adjacent-strings",
+              "defaultConfiguration": {
+                "level": "error"
+              },
+              "properties": {
+                "code": "E002",
+                "group": "syntax"
+              }
+            },
+            {
+              "id": "legacy-closure",
+              "name": "legacy-closure",
+              "shortDescription": {
+                "text": "(: ob, \"fn\" :) function-pointer literal; not DGD syntax"
+              },
+              "fullDescription": {
+                "text": "The (: ... :) literal comes from other LPC dialects. DGD rejects it as a syntax error. Use the lib's function-pointer constructor instead."
+              },
+              "helpUri": "https://github.com/mmcdole/dgdtools/blob/main/docs/rules.md#legacy-closure",
+              "defaultConfiguration": {
+                "level": "error"
+              },
+              "properties": {
+                "code": "E003",
+                "group": "syntax"
+              }
+            },
+            {
+              "id": "declaration-initializer",
+              "name": "declaration-initializer",
+              "shortDescription": {
+                "text": "variable initialized in its declaration (int x = 5;); not DGD syntax"
+              },
+              "fullDescription": {
+                "text": "DGD 1.7 declarations cannot carry an initializer, for globals or locals. It is a syntax error. Declare first and assign in a statement (globals: in create())."
+              },
+              "helpUri": "https://github.com/mmcdole/dgdtools/blob/main/docs/rules.md#declaration-initializer",
+              "defaultConfiguration": {
+                "level": "error"
+              },
+              "properties": {
+                "code": "E004",
+                "group": "syntax"
+              }
+            },
+            {
+              "id": "declaration-after-statement",
+              "name": "declaration-after-statement",
+              "shortDescription": {
+                "text": "local declaration after a statement in the same block; a DGD compile error"
+              },
+              "fullDescription": {
+                "text": "DGD requires every local declaration of a block to come before the block's first statement (an empty statement ';' counts). Violations are the compile error \"declaration after statement\". Blocks in which a macro stands as a statement before the declaration are not reported, since the macro may expand to declarations."
+              },
+              "helpUri": "https://github.com/mmcdole/dgdtools/blob/main/docs/rules.md#declaration-after-statement",
+              "defaultConfiguration": {
+                "level": "error"
+              },
+              "properties": {
+                "code": "E005",
+                "group": "syntax"
+              }
+            },
+            {
+              "id": "include-not-found",
+              "name": "include-not-found",
+              "shortDescription": {
+                "text": "#include target not found in the file's directory or the include dirs"
+              },
+              "fullDescription": {
+                "text": "A missing #include is a compile error when the object loads. Only reported when the lib is complete (the configured include dirs and force-included header exist); in a partial checkout the target is unknown, not missing. Like a C compiler's fatal \"file not found\", it stops syntax reporting for the rest of the file."
+              },
+              "helpUri": "https://github.com/mmcdole/dgdtools/blob/main/docs/rules.md#include-not-found",
+              "defaultConfiguration": {
+                "level": "error"
+              },
+              "properties": {
+                "code": "E006",
+                "group": "syntax"
+              }
+            },
+            {
+              "id": "bad-directive",
+              "name": "bad-directive",
+              "shortDescription": {
+                "text": "malformed preprocessor directive (text after #else/#endif, unknown directive)"
+              },
+              "fullDescription": {
+                "text": "DGD's preprocessor rejects tokens after #else and #endif (\"bad token in control\"; write them as a comment) and unknown directive names (\"undefined control\"), even inside a skipped #if block."
+              },
+              "helpUri": "https://github.com/mmcdole/dgdtools/blob/main/docs/rules.md#bad-directive",
+              "defaultConfiguration": {
+                "level": "error"
+              },
+              "properties": {
+                "code": "E007",
+                "group": "syntax"
+              }
+            },
+            {
+              "id": "inherit-after-declaration",
+              "name": "inherit-after-declaration",
+              "shortDescription": {
+                "text": "inherit statement after a variable or function declaration"
+              },
+              "fullDescription": {
+                "text": "DGD requires every inherit to precede all declarations (\"inherit must precede all declarations\"). That includes declarations that arrive through an #include placed before the inherit: a header with a prototype or a variable must be included after the inherit statements."
+              },
+              "helpUri": "https://github.com/mmcdole/dgdtools/blob/main/docs/rules.md#inherit-after-declaration",
+              "defaultConfiguration": {
+                "level": "error"
+              },
+              "properties": {
+                "code": "E008",
+                "group": "syntax"
+              }
+            },
+            {
+              "id": "missing-parameter-type",
+              "name": "missing-parameter-type",
+              "shortDescription": {
+                "text": "untyped parameter in a typeless function, under driver typechecking"
+              },
+              "fullDescription": {
+                "text": "With typechecking >= 1 in the driver config, a function written without a return type is still type-checked, and a parameter without a type is the compile error \"missing type for parameter\". Silent when the typechecking level is unknown (set dialect.typechecking or profile_build.driver_config)."
+              },
+              "helpUri": "https://github.com/mmcdole/dgdtools/blob/main/docs/rules.md#missing-parameter-type",
+              "defaultConfiguration": {
+                "level": "error"
+              },
+              "properties": {
+                "code": "E009",
+                "group": "syntax"
+              }
+            },
+            {
+              "id": "return-value",
+              "name": "return-value",
+              "shortDescription": {
+                "text": "value returned from a void (or typeless) function, or bare return in a typed one"
+              },
+              "fullDescription": {
+                "text": "DGD rejects 'return expr;' in a void function (\"value returned from void function\") and 'return;' in a function with a non-void type (\"function must return value\"). Under typechecking >= 1 a function declared without a return type is void, which makes this the most common reason old LPmud code does not compile on DGD: give the function a type."
+              },
+              "helpUri": "https://github.com/mmcdole/dgdtools/blob/main/docs/rules.md#return-value",
+              "defaultConfiguration": {
+                "level": "error"
+              },
+              "properties": {
+                "code": "E010",
+                "group": "syntax"
+              }
+            },
+            {
+              "id": "callable-not-found",
+              "name": "callable-not-found",
+              "shortDescription": {
+                "text": "string-referenced function (obj->fn(), call_other, call_out, registrars) missing from the target's inherit chain"
+              },
+              "fullDescription": {
+                "text": "In DGD a call_other to a function that does not exist silently returns nil. Reported only when the receiver is known (a string constant, a macro that evaluates to one, or this_object()) and the target's whole inherit chain was resolved and parsed; for a file that other objects inherit or #include, the function is also looked for in those users."
+              },
+              "helpUri": "https://github.com/mmcdole/dgdtools/blob/main/docs/rules.md#callable-not-found",
+              "defaultConfiguration": {
+                "level": "error"
+              },
+              "properties": {
+                "code": "R001",
+                "group": "runtime"
+              }
+            },
+            {
+              "id": "static-crossobj",
+              "name": "static-crossobj",
+              "shortDescription": {
+                "text": "call_other to an unreachable function: private always, static from another object"
+              },
+              "fullDescription": {
+                "text": "call_other cannot reach private functions at all, and reaches static functions only from the same object. The call silently returns nil."
+              },
+              "helpUri": "https://github.com/mmcdole/dgdtools/blob/main/docs/rules.md#static-crossobj",
+              "defaultConfiguration": {
+                "level": "error"
+              },
+              "properties": {
+                "code": "R002",
+                "group": "runtime"
+              }
+            },
+            {
+              "id": "undefined-prototype",
+              "name": "undefined-prototype",
+              "shortDescription": {
+                "text": "function declared but never defined anywhere in the chain, and called"
+              },
+              "fullDescription": {
+                "text": "DGD compiles a call to a function that only has a prototype and raises \"Undefined function\" when the call runs. Not reported when an inheritor or includer of the file provides the definition."
+              },
+              "helpUri": "https://github.com/mmcdole/dgdtools/blob/main/docs/rules.md#undefined-prototype",
+              "defaultConfiguration": {
+                "level": "error"
+              },
+              "properties": {
+                "code": "R003",
+                "group": "runtime"
+              }
+            },
+            {
+              "id": "target-object-missing",
+              "name": "target-object-missing",
+              "shortDescription": {
+                "text": "literal object path (inherit, clone_object, call target) with no backing file"
+              },
+              "fullDescription": {
+                "text": "Loading an object whose file does not exist is a runtime error (for an inherit, a compile error). Paths served by virtual-object daemons belong in conventions.virtual_paths. Not reported when the lib on disk is incomplete."
+              },
+              "helpUri": "https://github.com/mmcdole/dgdtools/blob/main/docs/rules.md#target-object-missing",
+              "defaultConfiguration": {
+                "level": "error"
+              },
+              "properties": {
+                "code": "R004",
+                "group": "runtime"
+              }
+            },
+            {
+              "id": "callback-arity",
+              "name": "callback-arity",
+              "shortDescription": {
+                "text": "dispatched call passing an argument count the target cannot accept"
+              },
+              "fullDescription": {
+                "text": "Under non-strict typechecking DGD silently pads missing call_other arguments with nil and drops extras; under strict typechecking it is a runtime error."
+              },
+              "helpUri": "https://github.com/mmcdole/dgdtools/blob/main/docs/rules.md#callback-arity",
+              "defaultConfiguration": {
+                "level": "warning"
+              },
+              "properties": {
+                "code": "R005",
+                "group": "runtime"
+              }
+            },
+            {
+              "id": "lifecycle-chain",
+              "name": "lifecycle-chain",
+              "shortDescription": {
+                "text": "lifecycle function (the create function) does not call the inherited implementations"
+              },
+              "fullDescription": {
+                "text": "A create function that overrides an inherited one without calling it (::create()) leaves the parent uninitialized. With several defining parents, label each inherit and chain each one. Proof-based: files with no explicit inherit, parents without the function, and unresolved parents are skipped. The function is the one the driver calls in a new object: the driver config's create parameter (the project key create), and \"create\" when that is not known. A lib whose auto object receives that call and passes it on under another name, or that has more such functions, lists them in the option names."
+              },
+              "helpUri": "https://github.com/mmcdole/dgdtools/blob/main/docs/rules.md#lifecycle-chain",
+              "defaultConfiguration": {
+                "level": "warning"
+              },
+              "properties": {
+                "code": "R006",
+                "group": "runtime"
+              }
+            },
+            {
+              "id": "assignment-in-condition",
+              "name": "assignment-in-condition",
+              "shortDescription": {
+                "text": "condition assigns a bare constant or the result of unparenthesized &&/||"
+              },
+              "fullDescription": {
+                "text": "Assign-and-test (if (x = f())) is an accepted LPC idiom. Two forms are almost always bugs: assigning a constant (if (x = 0), a typo for ==) and storing the result of an unparenthesized logical expression (if (x = f() && ready) gives x 0 or 1). Parenthesizing the assignment or the right-hand side states the intent and silences the rule. Assignments with an invalid target (!x = f()) are compile errors and left to DGD."
+              },
+              "helpUri": "https://github.com/mmcdole/dgdtools/blob/main/docs/rules.md#assignment-in-condition",
+              "defaultConfiguration": {
+                "level": "warning"
+              },
+              "properties": {
+                "code": "S001",
+                "group": "suspicious"
+              }
+            },
+            {
+              "id": "no-effect-statement",
+              "name": "no-effect-statement",
+              "shortDescription": {
+                "text": "comparison used as a statement (x == 1;)"
+              },
+              "fullDescription": {
+                "text": "A statement whose top-level operator is a comparison computes a value and discards it; almost always a typo for assignment."
+              },
+              "helpUri": "https://github.com/mmcdole/dgdtools/blob/main/docs/rules.md#no-effect-statement",
+              "defaultConfiguration": {
+                "level": "warning"
+              },
+              "properties": {
+                "code": "S002",
+                "group": "suspicious"
+              }
+            },
+            {
+              "id": "sscanf-format",
+              "name": "sscanf-format",
+              "shortDescription": {
+                "text": "more variables supplied than %-conversions in the scan format"
+              },
+              "fullDescription": {
+                "text": "Fewer variables than conversions is the legal idiom for discarding trailing matches; more variables than conversions means some are never assigned. sscanf is built in; add mudlib scanf-style functions with conventions.format_registry."
+              },
+              "helpUri": "https://github.com/mmcdole/dgdtools/blob/main/docs/rules.md#sscanf-format",
+              "defaultConfiguration": {
+                "level": "warning"
+              },
+              "properties": {
+                "code": "S003",
+                "group": "suspicious"
+              }
+            },
+            {
+              "id": "unreachable-code",
+              "name": "unreachable-code",
+              "shortDescription": {
+                "text": "statement directly after return, break, continue or goto in the same block"
+              },
+              "fullDescription": {
+                "text": "Code after an unconditional jump in the same block never runs. Labels and case labels restart reachability. Off by default: legal, and common as leftover debugging in old code."
+              },
+              "helpUri": "https://github.com/mmcdole/dgdtools/blob/main/docs/rules.md#unreachable-code",
+              "defaultConfiguration": {
+                "level": "warning"
+              },
+              "properties": {
+                "code": "S004",
+                "group": "suspicious"
+              }
+            },
+            {
+              "id": "invalid-suppression",
+              "name": "invalid-suppression",
+              "shortDescription": {
+                "text": "a dgdtools-ignore comment that does not do what it was written to do"
+              },
+              "fullDescription": {
+                "text": "A comment that begins with dgdtools-ignore is an instruction, and one that cannot be followed protects nothing while looking as if it did: a rule name that does not exist (a typo), a target that is neither lint, lint/RULE nor format, a comment that names nothing, a range (dgdtools-ignore-start) that names no rule, an end with no start. The plain form is about one line: the line of code it stands on, or the next line when it stands alone; -start and -end are about what is between them; the formatter is turned off by range only. A comment that merely mentions dgdtools-ignore is not a directive."
+              },
+              "helpUri": "https://github.com/mmcdole/dgdtools/blob/main/docs/rules.md#invalid-suppression",
+              "defaultConfiguration": {
+                "level": "warning"
+              },
+              "properties": {
+                "code": "S005",
+                "group": "suspicious"
+              }
+            },
+            {
+              "id": "raw-inherit-path",
+              "name": "raw-inherit-path",
+              "shortDescription": {
+                "text": "inherit uses a literal path string where the lib mandates macros"
+              },
+              "fullDescription": {
+                "text": "For libs that name their inheritable objects with macros (inherit I_ROOM;), so that a moved file is one changed #define. The option deny restricts the rule to the parts of the lib that have such macros."
+              },
+              "helpUri": "https://github.com/mmcdole/dgdtools/blob/main/docs/rules.md#raw-inherit-path",
+              "defaultConfiguration": {
+                "level": "warning"
+              },
+              "properties": {
+                "code": "C001",
+                "group": "convention"
+              }
+            },
+            {
+              "id": "missing-visibility",
+              "name": "missing-visibility",
+              "shortDescription": {
+                "text": "function with no visibility specifier"
+              },
+              "fullDescription": {
+                "text": "Flags functions declared without private, static, nomask or one of the lib's specifier macros (conventions.specifier_macros, or an empty macro the file's headers define)."
+              },
+              "helpUri": "https://github.com/mmcdole/dgdtools/blob/main/docs/rules.md#missing-visibility",
+              "defaultConfiguration": {
+                "level": "warning"
+              },
+              "properties": {
+                "code": "C002",
+                "group": "convention"
+              }
+            },
+            {
+              "id": "unformatted",
+              "name": "unformatted",
+              "shortDescription": {
+                "text": "file is not formatted as `dgdtools format` would format it"
+              },
+              "fullDescription": {
+                "text": "Formats the file exactly as `dgdtools format` does, with the format settings of that file, and reports a difference. What dgdtools-ignore-start format comments protect is left alone here too."
+              },
+              "helpUri": "https://github.com/mmcdole/dgdtools/blob/main/docs/rules.md#unformatted",
+              "defaultConfiguration": {
+                "level": "note"
+              },
+              "properties": {
+                "code": "C003",
+                "group": "convention"
+              }
+            },
+            {
+              "id": "static-autosave-var",
+              "name": "static-autosave-var",
+              "shortDescription": {
+                "text": "static global in an object that saves itself; excluded from save_object"
+              },
+              "fullDescription": {
+                "text": "Static variables are not saved by save_object. Off by default: static is also the deliberate idiom for runtime-only state, so this is a review aid for specifier changes, not a standing audit. An object saves itself when its source mentions one of conventions.autosave_markers (the lib's function or macro that turns saving on); without markers the rule reports nothing."
+              },
+              "helpUri": "https://github.com/mmcdole/dgdtools/blob/main/docs/rules.md#static-autosave-var",
+              "defaultConfiguration": {
+                "level": "warning"
+              },
+              "properties": {
+                "code": "C004",
+                "group": "convention"
+              }
+            },
+            {
+              "id": "unresolved-inherit",
+              "name": "unresolved-inherit",
+              "shortDescription": {
+                "text": "inherit path the macro evaluator could not resolve"
+              },
+              "fullDescription": {
+                "text": "Informational: cross-file rules cannot verify anything involving this object's inherit chain. Usually a path built from a function-like macro or a macro from an unresolved #include."
+              },
+              "helpUri": "https://github.com/mmcdole/dgdtools/blob/main/docs/rules.md#unresolved-inherit",
+              "defaultConfiguration": {
+                "level": "note"
+              },
+              "properties": {
+                "code": "C005",
+                "group": "convention"
+              }
+            },
+            {
+              "id": "unused-suppression",
+              "name": "unused-suppression",
+              "shortDescription": {
+                "text": "a dgdtools-ignore comment for a finding that is not there"
+              },
+              "fullDescription": {
+                "text": "Reported for each rule a dgdtools-ignore comment names that has no finding where the comment says. A suppression that is not needed hides the next finding that turns up there. A comment for a rule that did not run on the file (it is off, or needs a lib that is not known) is not reported: whether it is needed cannot be told."
+              },
+              "helpUri": "https://github.com/mmcdole/dgdtools/blob/main/docs/rules.md#unused-suppression",
+              "defaultConfiguration": {
+                "level": "warning"
+              },
+              "properties": {
+                "code": "C006",
+                "group": "convention"
+              }
+            }
+          ],
+          "version": "v1.2.3"
+        }
+      }
+    }
+  ],
+  "version": "2.1.0"
+}
