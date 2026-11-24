@@ -85,14 +85,115 @@ func (o *Overlay) Exists(path string) bool {
 	o.mu.RLock()
 	_, ok := o.m[filepath.Clean(path)]
 	o.mu.RUnlock()
-	return ok || o.base.Exists(path)
+	return ok || o.base.Exists(path) || o.shadowDir(path)
 }
 
-func (o *Overlay) IsDir(path string) bool { return o.base.IsDir(path) }
+// IsDir reports whether path is a directory in the base or holds a
+// shadowed file.
+func (o *Overlay) IsDir(path string) bool { return o.base.IsDir(path) || o.shadowDir(path) }
 
-// WalkDir walks the base tree. Shadowed files that do not exist in the
-// base are not visited: an unsaved new file is linted by naming it.
-func (o *Overlay) WalkDir(root string, fn fs.WalkDirFunc) error { return o.base.WalkDir(root, fn) }
+// shadowDir reports whether some shadowed file lies below path.
+func (o *Overlay) shadowDir(path string) bool {
+	prefix := strings.TrimSuffix(filepath.Clean(path), string(filepath.Separator)) + string(filepath.Separator)
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+	for p := range o.m {
+		if strings.HasPrefix(p, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+// WalkDir walks the base tree and then visits the shadowed files the base
+// does not have (an unsaved new file), each after the directories that
+// lead to it and do not exist in the base either. A directory fn skipped
+// is skipped for shadowed files too.
+func (o *Overlay) WalkDir(root string, fn fs.WalkDirFunc) error {
+	root = filepath.Clean(root)
+	var extra []string
+	o.mu.RLock()
+	for p := range o.m {
+		if p == root || strings.HasPrefix(p, strings.TrimSuffix(root, string(filepath.Separator))+string(filepath.Separator)) {
+			extra = append(extra, p)
+		}
+	}
+	o.mu.RUnlock()
+	if len(extra) == 0 {
+		return o.base.WalkDir(root, fn)
+	}
+	sort.Strings(extra)
+
+	skipped := map[string]bool{} // directories fn asked to skip
+	stop := false
+	visit := func(p string, d fs.DirEntry, err error) error {
+		switch r := fn(p, d, err); {
+		case r == fs.SkipAll:
+			stop = true
+		case r == fs.SkipDir && d != nil && d.IsDir():
+			skipped[filepath.Clean(p)] = true
+		case r == fs.SkipDir:
+			skipped[filepath.Dir(filepath.Clean(p))] = true
+		case r != nil:
+			return r
+		}
+		return nil
+	}
+	if o.base.Exists(root) {
+		err := o.base.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+			if err := visit(p, d, err); err != nil {
+				return err
+			}
+			switch {
+			case stop:
+				return fs.SkipAll
+			case skipped[filepath.Clean(p)] || (d != nil && !d.IsDir() && skipped[filepath.Dir(filepath.Clean(p))]):
+				return fs.SkipDir
+			}
+			return nil
+		})
+		if err != nil {
+			return err
+		}
+	}
+	announced := map[string]bool{} // directories only the overlay has, already visited
+	for _, p := range extra {
+		if o.base.Exists(p) {
+			continue // the base walk visited it
+		}
+		// The directories from root down to p, outermost first.
+		var dirs []string
+		for d := p; d != root; {
+			d = filepath.Dir(d)
+			dirs = append([]string{d}, dirs...)
+		}
+		pruned := false
+		for _, d := range dirs {
+			if !skipped[d] && !announced[d] && !o.base.Exists(d) {
+				announced[d] = true
+				if err := visit(d, entry{name: filepath.Base(d), dir: true}, nil); err != nil {
+					return err
+				}
+			}
+			if pruned = skipped[d]; pruned || stop {
+				break
+			}
+		}
+		if stop {
+			return nil
+		}
+		if pruned {
+			continue
+		}
+		if err := visit(p, entry{name: filepath.Base(p)}, nil); err != nil {
+			return err
+		}
+		if stop {
+			return nil
+		}
+	}
+	return nil
+}
 
 // Mem is an in-memory FS for tests and embedding: a map from slash-separated
 // absolute path to content.
@@ -133,16 +234,25 @@ func (m Mem) WalkDir(root string, fn fs.WalkDirFunc) error {
 	}
 	sort.Strings(paths)
 	for _, p := range paths {
-		if err := fn(p, memEntry(p), nil); err != nil && err != fs.SkipDir {
+		if err := fn(p, entry{name: filepath.Base(p)}, nil); err != nil && err != fs.SkipDir {
 			return err
 		}
 	}
 	return nil
 }
 
-type memEntry string
+// entry is a directory entry of a file system that has no real ones.
+type entry struct {
+	name string
+	dir  bool
+}
 
-func (e memEntry) Name() string               { return filepath.Base(string(e)) }
-func (e memEntry) IsDir() bool                { return false }
-func (e memEntry) Type() fs.FileMode          { return 0 }
-func (e memEntry) Info() (fs.FileInfo, error) { return nil, fs.ErrInvalid }
+func (e entry) Name() string { return e.name }
+func (e entry) IsDir() bool  { return e.dir }
+func (e entry) Type() fs.FileMode {
+	if e.dir {
+		return fs.ModeDir
+	}
+	return 0
+}
+func (e entry) Info() (fs.FileInfo, error) { return nil, fs.ErrInvalid }
