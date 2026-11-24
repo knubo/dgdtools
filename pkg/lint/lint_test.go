@@ -212,9 +212,97 @@ func TestRuleSelection(t *testing.T) {
 	assert.ErrorContains(t, err, "lint.fail_on")
 	prj.Config.Lint.FailOn = ""
 
-	assert.Equal(t, diag.Error, lint.Threshold(prj.Config))
+	l, err = lint.New(prj, vfs.OS{})
+	require.NoError(t, err)
+	assert.Equal(t, diag.Error, l.FailOn())
 	prj.Config.Lint.FailOn = "warning"
-	assert.Equal(t, diag.Warning, lint.Threshold(prj.Config))
+	l, err = lint.New(prj, vfs.OS{})
+	require.NoError(t, err)
+	assert.Equal(t, diag.Warning, l.FailOn())
+}
+
+// A rule's mapping takes the options of that rule and no others, and a
+// rule is set once in a mapping.
+func TestRuleOptionsAreChecked(t *testing.T) {
+	load := func(rules string) error {
+		m := vfs.Mem{"/p/dgdtools.yml": "lint:\n  rules:\n" + rules, "/p/a.c": ""}
+		prj, err := config.Discover(m, []string{"/p"}, config.DiscoverOptions{})
+		if err != nil {
+			return err
+		}
+		_, err = lint.New(prj, m)
+		return err
+	}
+	require.NoError(t, load("    lifecycle-chain: {severity: error, names: [create, reset], max_per_file: 3}\n"))
+	require.NoError(t, load("    raw-inherit-path: {deny: [/std/]}\n    R006: {names: [create]}\n    syntax: {severity: warning, max_per_file: 5}\n"))
+
+	for rules, want := range map[string]string{
+		"    lifecycle-chain: {nmaes: [create]}\n": `line 3: lint.rules: rule lifecycle-chain has no option "nmaes" (its options: names)`,
+		"    lifecycle-chain: {deny: [/std/]}\n":   `rule lifecycle-chain has no option "deny" (its options: names)`,
+		"    syntax-error: {deny: [/std/]}\n":      `rule syntax-error has no option "deny" (it has no options)`,
+		"    lifecycle-chain: {names: create}\n":   "rule lifecycle-chain: option names: want a list of strings",
+		"    raw-inherit-path: {deny: {a: b}}\n":   "rule raw-inherit-path: option deny: want a list of strings",
+		"    runtime: {names: [create]}\n":         `"runtime" is a group of rules, and "names" is not a setting of a group`,
+		"    all: {deny: []}\n":                    `"all" is a group of rules`,
+		"    syntax-error: off\n    E001: error\n": `line 4: lint.rules: rule syntax-error is set twice, as "syntax-error" and as "E001"`,
+		"    e001: off\n    E001: error\n":         `rule syntax-error is set twice, as "e001" and as "E001"`,
+		"    no-such-rule: off\n":                  `line 3: lint.rules: unknown rule "no-such-rule"`,
+		"    syntax-error: loud\n":                 `line 3: lint.rules: syntax-error: unknown severity "loud" (want off, info, warning or error)`,
+		"    syntax-error: {severity: [a]}\n":      "severity: want off, info, warning or error",
+		"    syntax-error: {max_per_file: many}\n": "line 3: max_per_file: want a number",
+		"    syntax-error: {max_per_file: -1}\n":   "max_per_file: -1 is not a number of findings",
+		"    syntax-error: [error]\n":              "line 3: a rule is set to a severity (off, info, warning, error) or to a mapping",
+	} {
+		assert.ErrorContains(t, load(rules), want, rules)
+	}
+
+	// The same for overrides and for nested configuration files.
+	m := vfs.Mem{
+		"/p/dgdtools.yml":     "lint:\n  overrides:\n    - paths: [\"x/**\"]\n      rules: {lifecycle-chain: {deny: [a]}}\n",
+		"/q/dgdtools.yml":     "root: .\n",
+		"/q/sub/dgdtools.yml": "root: false\nlint:\n  rules: {raw-inherit-path: {names: [a]}}\n",
+		"/q/sub/a.c":          "",
+	}
+	prj, err := config.Discover(m, []string{"/p"}, config.DiscoverOptions{})
+	require.NoError(t, err)
+	_, err = lint.New(prj, m)
+	assert.ErrorContains(t, err, `lint.overrides[0].rules: rule lifecycle-chain has no option "deny"`)
+	prj, err = config.Discover(m, []string{"/q"}, config.DiscoverOptions{})
+	require.NoError(t, err)
+	l, err := lint.New(prj, m)
+	require.NoError(t, err)
+	_, err = l.Run(context.Background(), lint.Request{})
+	assert.ErrorContains(t, err, `/q/sub/dgdtools.yml: lint.rules: rule raw-inherit-path has no option "names" (its options: deny)`)
+}
+
+// Options set in several layers add up key by key; max_per_file may be
+// said for a group.
+func TestRuleSettingsLayer(t *testing.T) {
+	src := "inherit \"/std/base\";\ninherit \"/obj/x\";\nvoid a() { x == 1; y == 2; z == 3; }\n"
+	prj, m := memProject(map[string]string{"obj/t.c": src, "obj/x.c": "", "d/t.c": src})
+	prj.Config.Lint.Rules = map[string]config.RuleSettings{
+		"raw-inherit-path": {Severity: "warning", Options: map[string]any{"deny": []string{"/std/"}}},
+		"suspicious":       {MaxPerFile: 2},
+	}
+	prj.Config.Lint.Overrides = []config.Override{
+		{Paths: []string{"d/**"}, Rules: map[string]config.RuleSettings{
+			"raw-inherit-path":    {Severity: "info"},
+			"no-effect-statement": {MaxPerFile: 1},
+		}},
+		{Paths: []string{"d/**"}, Rules: map[string]config.RuleSettings{"C001": {Options: map[string]any{"deny": []string{"/obj/"}}}}},
+	}
+	res := run(t, prj, m, lint.Request{Paths: []string{"/lib/obj/t.c", "/lib/d/t.c"}})
+	var got []string
+	for _, d := range res.Diagnostics {
+		got = append(got, fmt.Sprintf("%s:%d %s %s", strings.TrimPrefix(d.Path, "/lib/"), d.Line, d.Severity, d.Rule))
+	}
+	assert.Equal(t, []string{
+		"d/t.c:2 info raw-inherit-path", // the override's severity, the later override's prefix
+		"d/t.c:3 warning no-effect-statement",
+		"obj/t.c:1 warning raw-inherit-path",
+		"obj/t.c:3 warning no-effect-statement",
+		"obj/t.c:3 warning no-effect-statement",
+	}, got)
 }
 
 // ------------------------------------------------------------ mem libs
@@ -682,7 +770,7 @@ func TestBaseline(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, res.Diagnostics, 1)
 
-	data, err := l.NewBaseline(res.Diagnostics).Marshal()
+	data, err := lint.NewBaseline(l.BaselinePath(), res.Diagnostics).Marshal()
 	require.NoError(t, err)
 	assert.Contains(t, string(data), `"path": "obj/a.c"`)
 	m[l.BaselinePath()] = string(data)
@@ -723,6 +811,20 @@ func TestBaseline(t *testing.T) {
 	assert.ErrorContains(t, err, "dgdtools-baseline.json")
 	_, err = l.Run(ctx, lint.Request{Options: lint.Options{NoBaseline: true}})
 	assert.NoError(t, err, "a broken baseline does not stop a run that ignores it")
+
+	// A run may name another baseline file; the project's is not read.
+	m["/elsewhere/known.json"] = strings.Replace(string(data), `"path": "obj/a.c"`, `"path": "../lib/obj/a.c"`, 1)
+	res, err = l.Run(ctx, lint.Request{Options: lint.Options{Baseline: "/elsewhere/known.json"}})
+	require.NoError(t, err)
+	require.Len(t, res.Diagnostics, 1, "paths in a baseline are relative to the baseline")
+	assert.Equal(t, 6, res.Diagnostics[0].Line)
+	res, err = l.Run(ctx, lint.Request{Options: lint.Options{Baseline: "/elsewhere/none.json"}})
+	require.NoError(t, err)
+	assert.Len(t, res.Diagnostics, 2, "no such file: nothing is known")
+	other, err := lint.NewBaseline("/elsewhere/known.json", res.Diagnostics).Marshal()
+	require.NoError(t, err)
+	assert.Contains(t, string(other), `"path": "../lib/obj/a.c"`)
+	assert.Empty(t, prj.Config.Lint.Baseline, "the project's configuration is not written to")
 }
 
 func TestRuleTableIsStable(t *testing.T) {
@@ -734,6 +836,11 @@ func TestRuleTableIsStable(t *testing.T) {
 		assert.NotEmpty(t, r.Doc, r.Name)
 		assert.NotEmpty(t, r.Explain, r.Name)
 		assert.Regexp(t, `^[ERSC]\d{3}$`, r.Code)
+		for _, o := range r.OptionList() {
+			assert.Regexp(t, `^[a-z_]+$`, o.Key, r.Name)
+			assert.NotEmpty(t, o.Doc, "%s: %s", r.Name, o.Key)
+			assert.NotContains(t, o.Takes, ".", "%s: %s takes a type the configuration can spell", r.Name, o.Key)
+		}
 	}
 	// Names that suppression comments in existing libs rely on.
 	for _, n := range []string{"callable-not-found", "static-crossobj", "undefined-prototype",
@@ -777,6 +884,6 @@ func TestConventionsComeFromTheConfiguration(t *testing.T) {
 	assert.Empty(t, find(prj, m, "spec.c"))
 	assert.Equal(t, []string{"lifecycle-chain child.c:3"}, find(prj, m, "child.c"), "the driver's create function")
 
-	prj.Config.Lint.Rules = map[string]config.RuleSettings{"lifecycle-chain": {Names: []string{"create", "setup"}}}
+	prj.Config.Lint.Rules = map[string]config.RuleSettings{"lifecycle-chain": {Options: map[string]any{"names": []string{"create", "setup"}}}}
 	assert.Equal(t, []string{"lifecycle-chain child.c:2", "lifecycle-chain child.c:3"}, find(prj, m, "child.c"), "the rule's own list wins")
 }

@@ -224,10 +224,13 @@ var ruleUnreachable = &Rule{
 var ruleRawInheritPath = &Rule{
 	Code: "C001", Name: "raw-inherit-path", Group: GroupConvention,
 	Doc: "inherit uses a literal path string where the lib mandates macros",
-	Explain: "Configure rules.raw-inherit-path.deny with path prefixes to restrict " +
-		"the rule to parts of the lib that must be inherited through macros.",
+	Explain: "For libs that name their inheritable objects with macros (inherit " +
+		"I_ROOM;), so that a moved file is one changed #define. The option deny " +
+		"restricts the rule to the parts of the lib that have such macros.",
 	Default: false, Severity: diag.Warning,
+	Options: func() any { return &inheritPathOptions{} },
 	Run: func(p *Pass) {
+		deny := p.Options.(*inheritPathOptions).Deny
 		for _, d := range p.Tree.Decls {
 			inh, ok := d.(*syntax.InheritDecl)
 			if !ok {
@@ -237,12 +240,17 @@ var ruleRawInheritPath = &Rule{
 			if !ok {
 				continue
 			}
-			if len(p.Settings.Deny) > 0 && !hasAnyPrefix(lit, p.Settings.Deny) {
+			if len(deny) > 0 && !hasAnyPrefix(lit, deny) {
 				continue
 			}
 			p.ReportNode(inh.Path, "inherit uses literal path %q; prefer the lib's path macro", lit)
 		}
 	},
+}
+
+// inheritPathOptions are the options of raw-inherit-path.
+type inheritPathOptions struct {
+	Deny []string `yaml:"deny" doc:"report only literal paths that begin with one of these (default: all of them)"`
 }
 
 // literalPath extracts a pure string-literal path (concatenation of

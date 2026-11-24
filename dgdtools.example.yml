@@ -65,7 +65,8 @@ conventions:
   specifier_macros: []
 
   # Override the class derived from a #define, for the rare macro that is
-  # read wrongly: type | specifier | statement | expression | opaque.
+  # read wrongly: expression | empty | specifier | type | string |
+  # statement | opaque.
   macros: {}
 
   # Names to treat as defined when choosing #ifdef branches (the
@@ -144,8 +145,9 @@ lint:
   # Rules: `dgdtools rules` lists them with their defaults. A key is a
   # rule name, a code (E001), or a group (all, syntax, runtime,
   # suspicious, convention); a value is off | info | warning | error, or
-  # a mapping with a severity and the rule's options. Rule beats group
-  # beats all. Giving a severity turns a rule on.
+  # a mapping: severity, max_per_file, and for one rule its own options
+  # (`dgdtools explain RULE`). Rule beats group beats all. Giving a
+  # severity turns a rule on.
   rules:
     unreachable-code: warning
     # The parts of the lib that must be inherited through path macros.

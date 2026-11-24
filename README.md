@@ -22,7 +22,7 @@ dgdtools lint [path ...]        lint files and directories (default: the project
 dgdtools format path ... | -    format files in place; --check and --diff only report
 dgdtools rules                  list the lint rules
 dgdtools explain RULE           what a rule means and why it fires
-dgdtools config [path]          the project of a path and the settings of a file
+dgdtools config [path]          check the configuration of a path and show what it comes to
 dgdtools profile build | show   mudlib profiles
 dgdtools version
 ```
@@ -130,7 +130,7 @@ only settings can differ from one directory to the next.
 | `dialect` | `slash_slash`, `closures`, and `typechecking` (the driver's level; the rules that depend on it are silent while it is unknown). |
 | `include_dirs`, `include_file`, `auto_objects`, `create` | What the driver's config says: the include search path, the header included into every file, the object every object inherits, and the function the driver calls in a new object. Usually read from `profile_build.driver_config` or the profile; set here they override both. |
 | `relative_object_paths` | What `"std/room"` (no leading slash) is relative to. DGD hands every `inherit` and every `call_other("path", …)` to the lib's driver object to resolve, so this is the lib's choice: `root` (the default, and what the driver's own functions such as `compile_object` do) or `file` (the directory of the file that says it, as in the kernel library). |
-| `conventions` | The lib's own habits; nothing here has a default. `specifier_macros: [public]` names empty macros that stand where a specifier does, and `macros: {FOREACH: statement}` says how to read a macro that cannot be classified from its `#define` (`type`, `specifier`, `statement`, `expression`, `opaque`); `defines:` lists names to treat as defined in `#ifdef`. `call_registry`: the lib's functions that take the name of a function to call later, each with the argument that names the `function`, optionally the argument that says in which `object` (without it: `this_object()`) and the first of the `args` passed on; a function called in several ways lists its forms. `object_registry`: functions whose string argument is an object path (`compile_object`, `find_object`, `clone_object` are built in). `format_registry`: scanf-style functions and the position of their format string (`sscanf` is built in). `autosave_markers`: names whose mention marks an object as one that saves itself with `save_object`. `virtual_paths`: lib-path globs served by virtual-object daemons. |
+| `conventions` | The lib's own habits; nothing here has a default. `specifier_macros: [public]` names empty macros that stand where a specifier does, and `macros: {FOREACH: statement}` says how to read a macro that cannot be classified from its `#define` (`expression`, `empty`, `specifier`, `type`, `string`, `statement`, `opaque`); `defines:` lists names to treat as defined in `#ifdef`. `call_registry`: the lib's functions that take the name of a function to call later, each with the argument that names the `function`, optionally the argument that says in which `object` (without it: `this_object()`) and the first of the `args` passed on; a function called in several ways lists its forms. `object_registry`: functions whose string argument is an object path (`compile_object`, `find_object`, `clone_object` are built in). `format_registry`: scanf-style functions and the position of their format string (`sscanf` is built in). `autosave_markers`: names whose mention marks an object as one that saves itself with `save_object`. `virtual_paths`: lib-path globs served by virtual-object daemons. |
 | `profile_build` | For whoever has the whole lib: `driver_config` (the DGD driver config), `share` (globs of shared code), `omit` (never put in a profile), `checkouts` (per-wizard tree patterns), `name`. Used by `dgdtools profile build`, and directly when linting the whole lib. |
 
 ### Settings
@@ -140,7 +140,7 @@ only settings can differ from one directory to the next.
 | `format.indent_style` | `space` (default) or `tab`. |
 | `format.indent_width` | Spaces per level, 1 to 16 (default 4). |
 | `format.line_endings` | `preserve` (default: every line break keeps its bytes), `lf` or `crlf`. |
-| `lint.rules` | Maps a rule name, code, or group (`all`, `syntax`, `runtime`, `suspicious`, `convention`) to `off`, `info`, `warning` or `error`, or to `{severity: …, options}`. Giving a severity turns the rule on. |
+| `lint.rules` | Maps a rule name, code, or group (`all`, `syntax`, `runtime`, `suspicious`, `convention`) to `off`, `info`, `warning` or `error`, or to a mapping: `severity`, `max_per_file` (report at most that many findings of a rule in one file; the rest are counted), and, for one rule, its own options (`dgdtools explain RULE` lists them). Giving a severity turns the rule on. An option the rule does not have is an error, and so is setting one rule twice, by name and by code. |
 | `lint.overrides` | `[{paths: [globs], rules: {…}}]`: different rule settings for parts of the lib. |
 | `lint.baseline` | Baseline file name (default `dgdtools-baseline.json` next to the config). Root config only. |
 | `lint.fail_on` | Exit-1 threshold: `info`, `warning` or `error` (default). Root config only. |
@@ -178,7 +178,11 @@ overrides, then each scope's from the outermost in, so the nearest file
 has the last word.
 
 `dgdtools config path/to/file.c` shows the result for a file and where
-each value comes from.
+each value comes from. It is also how a configuration is checked:
+`dgdtools config` in a project verifies its `dgdtools.yml` and every
+nested one below, and exits 2 with the file, the line and what is wrong
+when a key, a value, a rule name or a rule's option is not one the tools
+know.
 
 Without any project config, a `dgdtools.yml` in the user configuration
 directory (`~/.config/dgdtools/dgdtools.yml`) is used: the place for

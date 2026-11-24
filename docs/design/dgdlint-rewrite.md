@@ -273,7 +273,7 @@ line are designed in [config.md](config.md). What the linter adds:
   `dialect` (with `typechecking`), `include_dirs`, `include_file`,
   `auto_objects`, `create`, `relative_object_paths` and `conventions`
   (`specifier_macros`,
-  `macros: {NAME: type|specifier|statement|expression|opaque}`,
+  `macros: {NAME: expression|empty|specifier|type|string|statement|opaque}`,
   `defines`, the call/object/format registries, `autosave_markers`,
   `virtual_paths`). They are top-level keys, the same ones a profile's
   manifest has, and there is one set per run. How a file is linted is
@@ -323,8 +323,35 @@ line are designed in [config.md](config.md). What the linter adds:
   suspicious, `C…` convention), a group, a default severity and a default
   on/off. `lint.rules` maps a rule name, code, or group (`all`, `syntax`,
   `runtime`, `suspicious`, `convention`) to `off | info | warning | error`
-  or to a mapping `{severity: …, <options>}`. Rule entries beat group
-  entries beat `all`. Giving a severity enables the rule.
+  or to a mapping `{severity: …, max_per_file: …, <options>}`. Rule
+  entries beat group entries beat `all`. Giving a severity enables the
+  rule.
+- **Rule options are typed.** A rule that has options declares them as a
+  struct (`Rule.Options`); the keys of its mapping are checked against
+  that struct when the linter is made, and a rule's `Run` reads them as
+  that struct (`Pass.Options`). So `deny:` under `lifecycle-chain`, a
+  misspelled `nmaes:`, a string where a list belongs, or any option
+  under a group is an error that names the rule, the option and the
+  rule's real options. Options set in several layers add up key by key.
+- **A name and a code are one key.** `syntax-error` and `E001` in the
+  same mapping set the same rule twice; like a duplicate key in YAML it
+  is an error, not a precedence to remember.
+- **Who validates what.** `Config.Validate` is the one check of what the
+  configuration defines: enumerated values (`lint.fail_on`,
+  `relative_object_paths`, `conventions.macros` classes, severities,
+  the format keys), ranges (`dialect.typechecking`, argument indexes),
+  and the keys a settings scope may not have. `config.Load` runs it, so
+  every command refuses the same file. The rule table is the linter's,
+  so rule names and rule options are checked by `lint.New` and, for a
+  nested file, when the first file under it is linted. `dgdtools config`
+  runs all of it, for the path's own configuration and for every
+  `dgdtools.yml` below a directory, and exits 2 on the first error: it
+  is the `config verify` of golangci-lint, in the command that also
+  shows the result.
+- **What the command line says about a run is not written into the
+  configuration.** `--fail-on` is the front end's threshold over
+  `Linter.FailOn()`; `--baseline FILE` is `Options.Baseline`, a file the
+  linter reads once like the project's own.
 - **Per-path settings, two forms.** `lint.overrides: [{paths: [globs],
   rules: {…}}]` in the root config (lib-relative globs, `**` supported),
   which keeps a lib's policy in one place; and a settings scope, a

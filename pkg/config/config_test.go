@@ -141,8 +141,9 @@ lint:
 	// Scalar and mapping rule settings.
 	assert.Equal(t, "error", c.Lint.Rules["syntax"].Severity)
 	assert.Equal(t, "info", c.Lint.Rules["E001"].Severity)
-	assert.Equal(t, []string{"/std/"}, c.Lint.Rules["raw-inherit-path"].Deny)
-	assert.Equal(t, []string{"create", "reset"}, c.Lint.Rules["lifecycle-chain"].Names)
+	assert.Equal(t, map[string]any{"deny": []any{"/std/"}}, c.Lint.Rules["raw-inherit-path"].Options)
+	assert.Equal(t, map[string]any{"names": []any{"create", "reset"}}, c.Lint.Rules["lifecycle-chain"].Options)
+	assert.Equal(t, 9, c.Lint.Rules["lifecycle-chain"].Line, "the line in the file that says it")
 	require.Len(t, c.Lint.Overrides, 1)
 	assert.Equal(t, "off", c.Lint.Overrides[0].Rules["runtime"].Severity)
 	assert.Equal(t, "statement", c.Conventions.Macros["FOREACH"])
@@ -185,7 +186,7 @@ func TestExampleConfigsLoad(t *testing.T) {
 		"add_action": {{Function: 0}},
 		"store_fp":   {{Object: &zero, Function: 1}, {Function: 0}},
 	}, c.Conventions.CallRegistry)
-	assert.Equal(t, []string{"create"}, c.Lint.Rules["lifecycle-chain"].Names)
+	assert.Equal(t, map[string]any{"names": []any{"create"}}, c.Lint.Rules["lifecycle-chain"].Options)
 	assert.Contains(t, c.Exclude, "attic/**")
 }
 

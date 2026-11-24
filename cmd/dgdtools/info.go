@@ -4,11 +4,15 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"io/fs"
 	"path/filepath"
 	"slices"
 	"strings"
 
+	"github.com/mmcdole/dgdtools/pkg/config"
+	"github.com/mmcdole/dgdtools/pkg/fileset"
 	"github.com/mmcdole/dgdtools/pkg/lint"
+	"github.com/mmcdole/dgdtools/pkg/vfs"
 )
 
 // rulesCmd is `dgdtools rules`: the rule table.
@@ -64,8 +68,14 @@ func explainCmd(_ context.Context, args []string, _ io.Reader, stdout, stderr io
 		if r.CrossFile {
 			scope = "needs the lib index"
 		}
-		fmt.Fprintf(stdout, "%s  %s\n%s group, %s, %s, %s\n\n%s\n\n%s\n\nSuppress one occurrence with a comment on the line above:\n    /* dgdlint:disable-next-line %s */\n",
-			r.Code, r.Name, r.Group, r.Severity, def, scope, r.Doc, r.Explain, r.Name)
+		fmt.Fprintf(stdout, "%s  %s\n%s group, %s, %s, %s\n\n%s\n\n%s\n", r.Code, r.Name, r.Group, r.Severity, def, scope, r.Doc, r.Explain)
+		if opts := r.OptionList(); len(opts) > 0 {
+			fmt.Fprintf(stdout, "\nOptions, in lint.rules under %s:\n", r.Name)
+			for _, o := range opts {
+				fmt.Fprintf(stdout, "    %s: %s; %s\n", o.Key, o.Takes, o.Doc)
+			}
+		}
+		fmt.Fprintf(stdout, "\nSuppress one occurrence with a comment on the line above:\n    /* dgdlint:disable-next-line %s */\n", r.Name)
 		return 0
 	}
 	return failure(stderr, "explain", fmt.Errorf("unknown rule %q (see `dgdtools rules`)", pos[0]))
@@ -73,14 +83,20 @@ func explainCmd(_ context.Context, args []string, _ io.Reader, stdout, stderr io
 
 const configUsage = `usage: dgdtools config [flags] [path]
 
-Shows the project of a path (default: the working directory) and the
-settings a file there is formatted and linted by, with where each comes
-from. For a directory the settings are those of a .c file in it.
+Checks the configuration of a path (default: the working directory) and
+shows what it comes to: the project, and the settings a file there is
+formatted and linted by, with where each comes from. For a directory the
+settings are those of a .c file in it, and every dgdtools.yml below the
+directory is checked as well.
+
+Exit codes: 0 the configuration is valid; 2 it is not (an unknown key,
+value, rule or rule option, a project key in a settings scope, a profile
+that is not found), with what is wrong and where.
 `
 
 // configCmd is `dgdtools config [path]`: what discovery and settings
-// resolution make of a path.
-func configCmd(_ context.Context, args []string, _ io.Reader, stdout, stderr io.Writer) int {
+// resolution make of a path, or what is wrong with its configuration.
+func configCmd(ctx context.Context, args []string, _ io.Reader, stdout, stderr io.Writer) int {
 	var project projectFlags
 	fs := newFlags("config", configUsage, stderr)
 	project.register(fs)
@@ -101,7 +117,7 @@ func configCmd(_ context.Context, args []string, _ io.Reader, stdout, stderr io.
 	if len(pos) == 1 {
 		target = p.abs(pos[0])
 	}
-	l, err := newLinter(p, &project, []string{target}, "", "")
+	l, err := newLinter(p, &project, []string{target})
 	if err != nil {
 		return fail(err)
 	}
@@ -116,6 +132,19 @@ func configCmd(_ context.Context, args []string, _ io.Reader, stdout, stderr io.
 	rules, err := l.EffectiveRules(file)
 	if err != nil {
 		return fail(err)
+	}
+	// The configuration files further down are part of what is asked
+	// about: each is checked as the files next to it would meet it.
+	var nested []string
+	if p.fsys.IsDir(target) {
+		if nested, err = nestedConfigs(ctx, p.fsys, l.Project(), target); err != nil {
+			return fail(err)
+		}
+		for _, n := range nested {
+			if _, err := l.EffectiveRules(filepath.Join(filepath.Dir(n), "_.c")); err != nil {
+				return fail(err)
+			}
+		}
 	}
 
 	w, prj := stdout, l.Project()
@@ -160,7 +189,7 @@ func configCmd(_ context.Context, args []string, _ io.Reader, stdout, stderr io.
 	}
 	fmt.Fprintf(w, "typechecking:  %s\n", tc)
 	fmt.Fprintf(w, "baseline:      %s\n", orNone(l.BaselinePath()))
-	fmt.Fprintf(w, "fail on:       %s\n", lint.Threshold(cfg))
+	fmt.Fprintf(w, "fail on:       %s\n", l.FailOn())
 	for _, n := range slices.Concat(prj.Notes, l.Index().Notes()) {
 		fmt.Fprintf(w, "note: %s\n", n.Message)
 	}
@@ -168,6 +197,9 @@ func configCmd(_ context.Context, args []string, _ io.Reader, stdout, stderr io.
 	fmt.Fprintf(w, "\nsettings of %s\n", shown)
 	for _, sc := range settings.Scopes {
 		fmt.Fprintf(w, "scope:         %s\n", sc.Path)
+	}
+	for _, n := range nested {
+		fmt.Fprintf(w, "below:         %s (valid)\n", n)
 	}
 	f, from := settings.Format, settings.From
 	fmt.Fprintf(w, "indent style:  %-9s (%s)\n", f.IndentStyle, from.IndentStyle)
@@ -178,4 +210,31 @@ func configCmd(_ context.Context, args []string, _ io.Reader, stdout, stderr io.
 		fmt.Fprintf(w, "  %s %-28s %s\n", r.Code, r.Name, r.Severity)
 	}
 	return 0
+}
+
+// nestedConfigs lists the configuration files below dir, the project's
+// own aside, that a walk of dir meets: not those in directories the
+// project excludes.
+func nestedConfigs(ctx context.Context, fsys vfs.FS, prj *config.Project, dir string) ([]string, error) {
+	exclude, tree := fileset.NewMatcher(prj.Config.Exclude), prj.Tree()
+	var found []string
+	err := fsys.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
+		switch {
+		case ctx.Err() != nil:
+			return fs.SkipAll
+		case err != nil:
+			return nil
+		case d.IsDir():
+			if rel, inLib := tree.Rel(p); p != dir && inLib && (exclude.Match(rel) || exclude.MatchDir(rel)) {
+				return fs.SkipDir
+			}
+		case (d.Name() == config.FileName || d.Name() == config.AltFileName) && p != prj.ConfigPath:
+			found = append(found, p)
+		}
+		return nil
+	})
+	if err == nil {
+		err = ctx.Err()
+	}
+	return found, err
 }

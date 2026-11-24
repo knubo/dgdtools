@@ -69,8 +69,8 @@ type Conventions struct {
 	// and expand to nothing (a lib's `#define public`), for files read
 	// without the header that defines them.
 	SpecifierMacros []string `json:"specifier_macros,omitempty" yaml:"specifier_macros"`
-	// Macros overrides the class the parser derives for a macro:
-	// type | specifier | statement | expression | opaque.
+	// Macros overrides the class the parser derives for a macro, by the
+	// class's name (pp.ClassNames).
 	Macros map[string]string `json:"macros,omitempty" yaml:"macros"`
 	// Defines are names treated as defined when choosing #ifdef branches.
 	Defines []string `json:"defines,omitempty" yaml:"defines"`

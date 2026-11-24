@@ -61,7 +61,14 @@ type Rule struct {
 	// selection was a guess (the default for syntax and runtime rules is
 	// to stay silent there).
 	AnyBranch bool
-	Run       func(*Pass)
+	// Options returns the rule's options at their defaults: a pointer to
+	// a struct whose fields carry the option's key as yaml tag and what
+	// it is for as doc tag. Those are the keys the rule's mapping in
+	// lint.rules may have besides severity and max_per_file; a rule
+	// without Options has none. Run finds the file's options in
+	// Pass.Options.
+	Options func() any
+	Run     func(*Pass)
 }
 
 // Pass is the per-file, per-rule context handed to Rule.Run.
@@ -73,10 +80,12 @@ type Pass struct {
 	Env  *pp.Env
 	Unit *index.Unit
 	// Index answers cross-file questions on the file's behalf.
-	Index    *index.Query
-	LibPath  string // "" when the file has no lib path
-	Config   *config.Config
-	Settings config.RuleSettings
+	Index   *index.Query
+	LibPath string // "" when the file has no lib path
+	Config  *config.Config
+	// Options are the rule's options for this file: what Rule.Options
+	// returned, with what the configuration says set.
+	Options any
 	// Format are the formatter's options for this file.
 	Format format.Options
 
@@ -146,6 +155,9 @@ type Options struct {
 	Enable, Disable []string
 	// Local restricts the lint to file-local rules; the index is not used.
 	Local bool
+	// Baseline is the baseline file to subtract, an absolute path,
+	// instead of the project's (Linter.BaselinePath).
+	Baseline string
 	// NoBaseline reports findings recorded in the baseline too.
 	NoBaseline bool
 	// MaxPerFile caps findings per rule per file (0 = each rule's default).
@@ -248,38 +260,24 @@ type Linter struct {
 	fs      vfs.FS
 	index   *index.Index
 
-	rules    []*Rule
-	byKey    map[string][]*Rule // name, code, group, "all" -> rules
-	override []layer            // the project's lint.overrides
-	scopes   sync.Map           // *config.Scope -> *scopeLayers
-	format   format.Options     // the project's part of the formatter's options
-	registry *calls.Registry
+	rules     []*Rule
+	byKey     map[string][]*Rule // name, code, group, "all" -> rules
+	base      *layer             // the project's lint.rules
+	overrides []*layer           // the project's lint.overrides
+	scopes    sync.Map           // *config.Scope -> *scopeLayers
+	layerIDs  atomic.Int32
+	format    format.Options // the project's part of the formatter's options
+	registry  *calls.Registry
+	failOn    diag.Severity
 
-	baselineOnce sync.Once
-	baseline     *Baseline
-	baselineErr  error
+	baselines sync.Map // path -> *baselineFile
 }
 
-// layer is a set of rule settings and the files it is for.
-type layer struct {
-	// match selects the files: by lib-relative name for the project's
-	// overrides, by name relative to the scope's directory for a
-	// scope's. nil is every file.
-	match *fileset.Matcher
-	rules map[string]config.RuleSettings
-}
-
-// scopeLayers are the layers of one nested configuration file: its rules,
-// then its overrides.
-type scopeLayers struct {
-	layers []layer
-	err    error
-}
-
-// New creates a linter for the project. It fails on configuration that
-// names unknown rules or severities.
+// New creates a linter for the project. It fails on a configuration that
+// is not valid: what Config.Validate reports, and rule settings that name
+// unknown rules or options.
 func New(prj *config.Project, fsys vfs.FS) (*Linter, error) {
-	l := &Linter{project: prj, fs: fsys, rules: Rules(), byKey: map[string][]*Rule{}}
+	l := &Linter{project: prj, fs: fsys, rules: Rules(), byKey: map[string][]*Rule{}, failOn: diag.Error}
 	for _, r := range l.rules {
 		l.byKey[r.Name] = []*Rule{r}
 		l.byKey[strings.ToUpper(r.Code)] = []*Rule{r}
@@ -287,62 +285,27 @@ func New(prj *config.Project, fsys vfs.FS) (*Linter, error) {
 		l.byKey["all"] = append(l.byKey["all"], r)
 	}
 	cfg := prj.Config
-	l.format = format.OptionsFor(cfg, config.Format{})
-	if err := l.checkRules("lint.rules", cfg.Lint.Rules); err != nil {
+	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
-	if fo := cfg.Lint.FailOn; fo != "" {
-		if _, ok := diag.ParseSeverity(strings.ToLower(fo)); !ok {
-			return nil, fmt.Errorf("lint.fail_on: unknown severity %q", fo)
-		}
+	l.format = format.OptionsFor(cfg, config.Format{})
+	if cfg.Lint.FailOn != "" {
+		l.failOn, _ = diag.ParseSeverity(cfg.Lint.FailOn)
 	}
-	for _, o := range cfg.Lint.Overrides {
-		if err := l.checkRules("lint.overrides", o.Rules); err != nil {
+	var err error
+	if l.base, err = l.newLayer("lint.rules", nil, cfg.Lint.Rules); err != nil {
+		return nil, err
+	}
+	for i, o := range cfg.Lint.Overrides {
+		lay, err := l.newLayer(fmt.Sprintf("lint.overrides[%d].rules", i), fileset.NewMatcher(o.Paths), o.Rules)
+		if err != nil {
 			return nil, err
 		}
-		l.override = append(l.override, layer{fileset.NewMatcher(o.Paths), o.Rules})
+		l.overrides = append(l.overrides, lay)
 	}
 	l.registry = calls.NewRegistry(cfg.Conventions)
 	l.index = index.Open(prj, fsys)
 	return l, nil
-}
-
-// checkRules reports a rule setting that names an unknown rule or
-// severity.
-func (l *Linter) checkRules(where string, m map[string]config.RuleSettings) error {
-	for name, rs := range m {
-		if l.lookup(strings.TrimSpace(name)) == nil {
-			return fmt.Errorf("%s: unknown rule %q (see `dgdtools rules`)", where, name)
-		}
-		if rs.Severity != "" && rs.Severity != "off" {
-			if _, ok := diag.ParseSeverity(strings.ToLower(rs.Severity)); !ok {
-				return fmt.Errorf("%s: rule %q: unknown severity %q", where, name, rs.Severity)
-			}
-		}
-	}
-	return nil
-}
-
-// layersOf returns the layers of a nested configuration file, checked
-// once.
-func (l *Linter) layersOf(sc *config.Scope) ([]layer, error) {
-	if v, ok := l.scopes.Load(sc); ok {
-		sl := v.(*scopeLayers)
-		return sl.layers, sl.err
-	}
-	sl := &scopeLayers{}
-	if sl.err = l.checkRules(sc.Path+": lint.rules", sc.Rules); sl.err == nil {
-		sl.layers = append(sl.layers, layer{nil, sc.Rules})
-		for _, o := range sc.Overrides {
-			if sl.err = l.checkRules(sc.Path+": lint.overrides", o.Rules); sl.err != nil {
-				break
-			}
-			sl.layers = append(sl.layers, layer{fileset.NewMatcher(o.Paths), o.Rules})
-		}
-	}
-	v, _ := l.scopes.LoadOrStore(sc, sl)
-	sl = v.(*scopeLayers)
-	return sl.layers, sl.err
 }
 
 // Project returns the project the linter was made for.
@@ -378,127 +341,6 @@ func (l *Linter) Generation() uint64 { return l.index.Generation() }
 // Options.NoScan.
 func (l *Linter) Scan(ctx context.Context) bool { return l.index.Snapshot().Scan(ctx) }
 
-// active is the resolved state of one rule for one file.
-type active struct {
-	on       bool
-	severity diag.Severity
-	settings config.RuleSettings
-}
-
-// resolve computes which rules run on a file and with what severity. rel
-// is the file's lib-relative name ("" when it is outside the lib) and
-// set its settings (nil: the project's own).
-func (l *Linter) resolve(file, rel string, set *config.Settings, req *Options) (map[*Rule]*active, error) {
-	st := make(map[*Rule]*active, len(l.rules))
-	for _, r := range l.rules {
-		st[r] = &active{on: r.Default, severity: r.Severity}
-	}
-	apply := func(m map[string]config.RuleSettings) {
-		// Least specific first: all, groups, then individual rules.
-		for pass := 0; pass < 3; pass++ {
-			for key, rs := range m {
-				rules := l.lookup(key)
-				specificity := 2
-				if key == "all" {
-					specificity = 0
-				} else if len(rules) > 0 && rules[0].Group == key {
-					specificity = 1
-				}
-				if specificity != pass {
-					continue
-				}
-				for _, r := range rules {
-					a := st[r]
-					switch sev := strings.ToLower(rs.Severity); sev {
-					case "":
-					case "off":
-						a.on = false
-					default:
-						if s, ok := diag.ParseSeverity(sev); ok {
-							a.on, a.severity = true, s
-						}
-					}
-					if specificity == 2 {
-						if len(rs.Deny) > 0 {
-							a.settings.Deny = rs.Deny
-						}
-						if len(rs.Names) > 0 {
-							a.settings.Names = rs.Names
-						}
-						if rs.MaxPerFile > 0 {
-							a.settings.MaxPerFile = rs.MaxPerFile
-						}
-					}
-				}
-			}
-		}
-	}
-	turn := func(names []string, on bool) error {
-		for _, n := range names {
-			if n = strings.TrimSpace(n); n == "" {
-				continue
-			}
-			rules := l.lookup(n)
-			if rules == nil {
-				return fmt.Errorf("unknown rule %q (see `dgdtools rules`)", n)
-			}
-			for _, r := range rules {
-				st[r].on = on
-			}
-		}
-		return nil
-	}
-	apply(l.project.Config.Lint.Rules)
-	// Command line: --select names the candidate set, --enable adds to
-	// it. What is said about a path (the project's overrides, then each
-	// nested configuration file from the outermost in) is applied after,
-	// so a path that turns a rule off keeps it off; --ignore has the last
-	// word.
-	selected := map[*Rule]bool{}
-	for _, names := range [][]string{req.Select, req.Enable} {
-		if err := turn(names, true); err != nil {
-			return nil, err
-		}
-		for _, n := range names {
-			for _, r := range l.lookup(strings.TrimSpace(n)) {
-				selected[r] = true
-			}
-		}
-	}
-	if rel != "" {
-		for _, o := range l.override {
-			if o.match.Match(rel) {
-				apply(o.rules)
-			}
-		}
-	}
-	if set != nil {
-		for _, sc := range set.Scopes {
-			layers, err := l.layersOf(sc)
-			if err != nil {
-				return nil, err
-			}
-			in, _ := filepath.Rel(sc.Dir, file)
-			for _, o := range layers {
-				if o.match == nil || o.match.Match(filepath.ToSlash(in)) {
-					apply(o.rules)
-				}
-			}
-		}
-	}
-	if len(req.Select) > 0 {
-		for r, a := range st {
-			if !selected[r] {
-				a.on = false
-			}
-		}
-	}
-	if err := turn(req.Disable, false); err != nil {
-		return nil, err
-	}
-	return st, nil
-}
-
 // Run lints the requested paths against one generation of the index.
 // Cancelling ctx stops the run early; the partial result is returned with
 // ctx.Err().
@@ -511,14 +353,13 @@ func (l *Linter) Run(ctx context.Context, req Request) (*Result, error) {
 		res.Notes = append(res.Notes, diag.Note{Kind: diag.NoteNoLib,
 			Message: "no dgdtools.yml and no --root: running file-local rules only (cross-file rules need a lib root)"})
 	}
-	// Validate rule names and the baseline once, up front.
-	if _, err := l.resolve("", "", nil, &req.Options); err != nil {
+	// Rule names and the baseline are checked once, up front.
+	sel, err := l.selection(&req.Options)
+	if err != nil {
 		return nil, err
 	}
-	if !req.NoBaseline {
-		if _, err := l.Baseline(); err != nil {
-			return nil, err
-		}
+	if _, err := l.baselineFor(&req.Options); err != nil {
+		return nil, err
 	}
 
 	paths := req.Paths
@@ -590,7 +431,7 @@ func (l *Linter) Run(ctx context.Context, req Request) (*Result, error) {
 	// files would otherwise be linted by settings nobody chose.
 	var failed atomic.Pointer[error]
 	lintInto := func(i int, opt *Options) {
-		d, err := l.lintFile(ctx, s, files[i], opt)
+		d, err := l.lintFile(ctx, s, files[i], sel, opt)
 		switch {
 		case err != nil:
 			failed.CompareAndSwap(nil, &err)
@@ -657,15 +498,14 @@ func (l *Linter) Lint(ctx context.Context, path string, opt Options) (*Document,
 	if !filepath.IsAbs(path) {
 		return nil, fmt.Errorf("%s: not an absolute path", path)
 	}
-	if _, err := l.resolve("", "", nil, &opt); err != nil {
+	sel, err := l.selection(&opt)
+	if err != nil {
 		return nil, err
 	}
-	if !opt.NoBaseline {
-		if _, err := l.Baseline(); err != nil {
-			return nil, err
-		}
+	if _, err := l.baselineFor(&opt); err != nil {
+		return nil, err
 	}
-	d, err := l.lintFile(ctx, l.index.Snapshot(), filepath.Clean(path), &opt)
+	d, err := l.lintFile(ctx, l.index.Snapshot(), filepath.Clean(path), sel, &opt)
 	switch {
 	case err != nil:
 		return nil, err
@@ -678,7 +518,7 @@ func (l *Linter) Lint(ctx context.Context, path string, opt Options) (*Document,
 // lintFile lints one file against s, with the settings of that file; a
 // nil document when the file cannot be read. It fails when the file's
 // settings cannot be told: a configuration file above it is not valid.
-func (l *Linter) lintFile(ctx context.Context, s *index.Snapshot, file string, opt *Options) (*Document, error) {
+func (l *Linter) lintFile(ctx context.Context, s *index.Snapshot, file string, sel *selection, opt *Options) (*Document, error) {
 	parsed := s.Parse(file)
 	if parsed == nil {
 		return nil, nil
@@ -696,7 +536,7 @@ func (l *Linter) lintFile(ctx context.Context, s *index.Snapshot, file string, o
 	if u.LibPath != "" && path.Ext(rel) == "" {
 		rel += ".c"
 	}
-	st, err := l.resolve(file, rel, set, opt)
+	rules, err := sel.rules(file, rel, set)
 	if err != nil {
 		return nil, err
 	}
@@ -722,11 +562,8 @@ func (l *Linter) lintFile(ctx context.Context, s *index.Snapshot, file string, o
 	sup := scanSuppressions(parsed.Tok, l)
 	var found []*diag.Diagnostic
 	var unusedSup *active
-	for _, r := range l.rules {
-		a := st[r]
-		if !a.on {
-			continue
-		}
+	for i := range rules {
+		a, r := &rules[i], rules[i].rule
 		if r.Name == "unused-suppression" {
 			unusedSup = a
 			continue
@@ -741,13 +578,13 @@ func (l *Linter) lintFile(ctx context.Context, s *index.Snapshot, file string, o
 		pass := &Pass{
 			Ctx: ctx, File: parsed.Tok, Tree: parsed.Tree, Env: parsed.Env,
 			Unit: u, Index: query, LibPath: u.LibPath,
-			Config: l.project.Config, Settings: a.settings, Format: l.format.With(set.Format),
+			Config: l.project.Config, Options: a.options, Format: l.format.With(set.Format),
 			shared: shared, registry: l.registry, rule: r, severity: a.severity, out: &out,
 		}
 		r.Run(pass)
 		limit := opt.MaxPerFile
 		if limit == 0 {
-			limit = a.settings.MaxPerFile
+			limit = a.maxPerFile
 		}
 		if limit > 0 && len(out) > limit {
 			out = out[:limit]
@@ -788,7 +625,7 @@ func (l *Linter) lintFile(ctx context.Context, s *index.Snapshot, file string, o
 		}
 		return ds[i].Rule < ds[j].Rule
 	})
-	if bl, _ := l.Baseline(); bl != nil && !opt.NoBaseline {
+	if bl, _ := l.baselineFor(opt); bl != nil {
 		ds, stats.baselined = bl.Filter(ds)
 	}
 	doc.Diagnostics, doc.NeedsScan, doc.stats = ds, query.NeedsScan(), *stats
@@ -811,17 +648,19 @@ func (l *Linter) EffectiveRules(path string) ([]*Rule, error) {
 		}
 		rel, _ = l.project.Tree().Rel(path)
 	}
-	st, err := l.resolve(path, rel, set, &Options{})
+	sel, err := l.selection(&Options{})
+	if err != nil {
+		return nil, err
+	}
+	rules, err := sel.rules(path, rel, set)
 	if err != nil {
 		return nil, err
 	}
 	var out []*Rule
-	for _, r := range l.rules {
-		if a := st[r]; a.on {
-			c := *r
-			c.Severity = a.severity
-			out = append(out, &c)
-		}
+	for _, a := range rules {
+		c := *a.rule
+		c.Severity = a.severity
+		out = append(out, &c)
 	}
 	return out, nil
 }
@@ -835,10 +674,6 @@ func (l *Linter) RuleByName(key string) *Rule {
 	return nil
 }
 
-// Threshold returns the fail-on severity from config (default error).
-func Threshold(cfg *config.Config) diag.Severity {
-	if s, ok := diag.ParseSeverity(strings.ToLower(cfg.Lint.FailOn)); ok {
-		return s
-	}
-	return diag.Error
-}
+// FailOn returns the severity at and above which the project's findings
+// fail a run: lint.fail_on, error when the configuration does not say.
+func (l *Linter) FailOn() diag.Severity { return l.failOn }

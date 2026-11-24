@@ -25,9 +25,11 @@ func TestUTF16Col(t *testing.T) {
 	assert.Equal(t, 2, UTF16Col(latin, 3))
 	assert.Equal(t, 4, UTF16Col(latin, 5))
 
-	s, ok := ParseSeverity("warn")
+	s, ok := ParseSeverity("warning")
 	assert.True(t, ok)
 	assert.Equal(t, Warning, s)
-	_, ok = ParseSeverity("fatal")
-	assert.False(t, ok)
+	for _, not := range []string{"fatal", "warn", "Warning", ""} {
+		_, ok = ParseSeverity(not)
+		assert.False(t, ok, not)
+	}
 }

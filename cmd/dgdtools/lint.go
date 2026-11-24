@@ -68,15 +68,28 @@ func lintCmd(ctx context.Context, args []string, _ io.Reader, stdout, stderr io.
 	for i, path := range paths {
 		paths[i] = p.abs(path)
 	}
-	l, err := newLinter(p, &project, paths, failOn, baseline)
+	l, err := newLinter(p, &project, paths)
 	if err != nil {
 		return fail(err)
+	}
+	// What the command line says about the run wins over the project's
+	// configuration, which is not touched.
+	threshold := l.FailOn()
+	if failOn != "" {
+		var ok bool
+		if threshold, ok = diag.ParseSeverity(failOn); !ok {
+			return fail(fmt.Errorf("--fail-on: unknown severity %q (want info, warning or error)", failOn))
+		}
+	}
+	if baseline != "" {
+		baseline = p.abs(baseline)
 	}
 	res, err := l.Run(ctx, lint.Request{Paths: paths, Options: lint.Options{
 		Select:     split(sel),
 		Enable:     split(enable),
 		Disable:    split(ignore),
 		Local:      local,
+		Baseline:   baseline,
 		NoBaseline: noBaseline || writeBaseline,
 		MaxPerFile: maxPerFile,
 	}})
@@ -85,11 +98,14 @@ func lintCmd(ctx context.Context, args []string, _ io.Reader, stdout, stderr io.
 	}
 
 	if writeBaseline {
-		path := l.BaselinePath()
+		path := baseline
+		if path == "" {
+			path = l.BaselinePath()
+		}
 		if path == "" {
 			return fail(fmt.Errorf("--write-baseline needs a dgdtools.yml (or --baseline FILE) to anchor the baseline"))
 		}
-		data, err := l.NewBaseline(res.Diagnostics).Marshal()
+		data, err := lint.NewBaseline(path, res.Diagnostics).Marshal()
 		if err != nil {
 			return fail(err)
 		}
@@ -120,7 +136,6 @@ func lintCmd(ctx context.Context, args []string, _ io.Reader, stdout, stderr io.
 	if exit0 {
 		return 0
 	}
-	threshold := lint.Threshold(l.Project().Config)
 	for _, d := range res.Diagnostics {
 		if d.Severity >= threshold {
 			return 1
@@ -130,21 +145,10 @@ func lintCmd(ctx context.Context, args []string, _ io.Reader, stdout, stderr io.
 }
 
 // newLinter discovers the one project of the paths and makes its linter.
-// failOn and baseline, when given, are the command line's word on what
-// the config also says.
-func newLinter(p process, project *projectFlags, paths []string, failOn, baseline string) (*lint.Linter, error) {
+func newLinter(p process, project *projectFlags, paths []string) (*lint.Linter, error) {
 	prj, err := config.Discover(p.fsys, paths, project.discover(p))
 	if err != nil {
 		return nil, err
-	}
-	if failOn != "" {
-		if _, ok := diag.ParseSeverity(failOn); !ok {
-			return nil, fmt.Errorf("unknown severity %q for --fail-on", failOn)
-		}
-		prj.Config.Lint.FailOn = failOn
-	}
-	if baseline != "" {
-		prj.Config.Lint.Baseline = p.abs(baseline)
 	}
 	return lint.New(prj, p.fsys)
 }

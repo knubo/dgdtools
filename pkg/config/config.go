@@ -16,12 +16,15 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"maps"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/mmcdole/dgdtools/pkg/diag"
 	"github.com/mmcdole/dgdtools/pkg/pp"
 	"github.com/mmcdole/dgdtools/pkg/profile"
 	"github.com/mmcdole/dgdtools/pkg/token"
@@ -74,10 +77,11 @@ type Config struct {
 	// made (the driver config's create).
 	Create string `yaml:"create"`
 	// RelativeObjectPaths says what an object path without a leading
-	// slash is relative to: "root" (the default; DGD resolves object
-	// names from the lib root, so "std/room" is /std/room) or "file"
-	// (the directory of the referencing file, for libs whose auto object
-	// rewrites paths that way).
+	// slash is relative to. The driver leaves that to the lib (its driver
+	// object resolves every inherit and every call_other by path):
+	// ObjectPathsFromRoot, the default and what the driver's own
+	// functions do, or ObjectPathsFromFile, the directory of the file
+	// that says it.
 	RelativeObjectPaths string `yaml:"relative_object_paths"`
 	// Conventions are the lib's own habits: macro classes, registries.
 	Conventions profile.Conventions `yaml:"conventions"`
@@ -155,8 +159,7 @@ type DialectCfg struct {
 
 // Lint are the linter's settings.
 type Lint struct {
-	// Rules maps a rule name, code, or group to a severity
-	// (off|info|warning|error) or to a settings mapping.
+	// Rules maps a rule name, code, or group to its settings.
 	Rules map[string]RuleSettings `yaml:"rules"`
 	// Overrides adjust rules for path globs: lib-relative in a root
 	// config, relative to its directory in a settings scope.
@@ -169,24 +172,62 @@ type Lint struct {
 	Baseline string `yaml:"baseline"`
 }
 
-// RuleSettings configures one rule (or group). In YAML it is either a bare
-// severity string or a mapping.
+// RuleSettings is what a configuration says about one rule, or about a
+// group of rules. In YAML it is a severity, or a mapping that may give a
+// severity, max_per_file, and the options of the rule.
 type RuleSettings struct {
-	Severity   string   `yaml:"severity"` // off | info | warning | error
-	Deny       []string `yaml:"deny"`     // raw-inherit-path
-	Names      []string `yaml:"names"`    // lifecycle-chain
-	MaxPerFile int      `yaml:"max_per_file"`
+	// Severity is off, info, warning or error; a severity turns the rule
+	// on. Empty: the entry says nothing about it.
+	Severity string
+	// MaxPerFile reports at most that many findings of a rule in one
+	// file; 0 says nothing about it.
+	MaxPerFile int
+	// Options are the rule's own settings, by key. Which keys a rule has,
+	// and what values they take, is the rule's to say: the linter checks
+	// them (lint.Rule.Options).
+	Options map[string]any
+	// Line is the line of the entry in its file, 0 when it is not from
+	// one.
+	Line int
 }
 
 func (r *RuleSettings) UnmarshalYAML(n *yaml.Node) error {
-	if n.Kind == yaml.ScalarNode {
+	*r = RuleSettings{Line: n.Line}
+	switch n.Kind {
+	case yaml.ScalarNode:
 		r.Severity = n.Value
 		return nil
+	case yaml.MappingNode:
+	default:
+		return fmt.Errorf("line %d: a rule is set to a severity (off, info, warning, error) or to a mapping", n.Line)
 	}
-	type plain RuleSettings
-	return n.Decode((*plain)(r))
+	for i := 0; i+1 < len(n.Content); i += 2 {
+		key, val := n.Content[i], n.Content[i+1]
+		switch key.Value {
+		case "severity":
+			if val.Kind != yaml.ScalarNode {
+				return fmt.Errorf("line %d: severity: want off, info, warning or error", val.Line)
+			}
+			r.Severity = val.Value
+		case "max_per_file":
+			if err := val.Decode(&r.MaxPerFile); err != nil || val.Tag != "!!int" {
+				return fmt.Errorf("line %d: max_per_file: want a number", val.Line)
+			}
+		default:
+			var v any
+			if err := val.Decode(&v); err != nil {
+				return at(val, err)
+			}
+			if r.Options == nil {
+				r.Options = map[string]any{}
+			}
+			r.Options[key.Value] = v
+		}
+	}
+	return nil
 }
 
+// Override is rule settings for the files that match some globs.
 type Override struct {
 	Paths []string                `yaml:"paths"`
 	Rules map[string]RuleSettings `yaml:"rules"`
@@ -200,7 +241,7 @@ func Load(fs vfs.FS, path string) (*Config, error) {
 	}
 	c.Dir = filepath.Dir(path)
 	c.Path = path
-	if err := c.validate(); err != nil {
+	if err := c.Validate(); err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
 	return c, nil
@@ -295,18 +336,120 @@ func loadInto(fs vfs.FS, path string, c *Config, seen map[string]bool) error {
 	return nil
 }
 
-// validate checks what can be checked of a config by itself.
-func (c *Config) validate() error {
+// Validate reports what is wrong with the configuration, as far as the
+// configuration itself can tell: values that are not among the ones a key
+// takes, and keys that do not belong in a settings scope. Load calls it;
+// so does whoever is handed a Config that was not loaded. Rule names and
+// rule options are the linter's to check (lint.New).
+func (c *Config) Validate() error {
 	if n := c.Format.IndentWidth; n != 0 {
 		if err := CheckIndentWidth(n); err != nil {
 			return fmt.Errorf("format.indent_width: %w", err)
 		}
 	}
-	if !c.Scope {
-		return nil
+	if v := c.Format.IndentStyle; v != "" {
+		if _, err := ParseIndentStyle(string(v)); err != nil {
+			return fmt.Errorf("format.indent_style: %w", err)
+		}
 	}
-	// A settings scope holds settings. Everything else describes the
-	// project, of which there is one, or a run.
+	if v := c.Format.LineEndings; v != "" {
+		if _, err := ParseLineEndings(string(v)); err != nil {
+			return fmt.Errorf("format.line_endings: %w", err)
+		}
+	}
+	if err := checkRules("lint.rules", c.Lint.Rules); err != nil {
+		return err
+	}
+	for i, o := range c.Lint.Overrides {
+		where := fmt.Sprintf("lint.overrides[%d]", i)
+		if len(o.Paths) == 0 {
+			return fmt.Errorf("%s: no paths: an override says which files it is for", where)
+		}
+		if err := checkRules(where+".rules", o.Rules); err != nil {
+			return err
+		}
+	}
+	if c.Scope {
+		return c.validateScope()
+	}
+
+	if v := c.Lint.FailOn; v != "" {
+		if _, ok := diag.ParseSeverity(v); !ok {
+			return fmt.Errorf("lint.fail_on: unknown severity %q (want info, warning or error)", v)
+		}
+	}
+	switch c.RelativeObjectPaths {
+	case "", ObjectPathsFromRoot, ObjectPathsFromFile:
+	default:
+		return fmt.Errorf("relative_object_paths: unknown value %q (want %s or %s)", c.RelativeObjectPaths, ObjectPathsFromRoot, ObjectPathsFromFile)
+	}
+	if tc := c.Dialect.Typechecking; tc != nil && (*tc < 0 || *tc > 2) {
+		return fmt.Errorf("dialect.typechecking: %d is not a typechecking level (0, 1 or 2)", *tc)
+	}
+	if n := c.ProfileBuild.ShareMinOwners; n < -1 {
+		return fmt.Errorf("profile_build.share_min_owners: %d: want a number of owners, or -1 for no inference", n)
+	}
+	conv := c.Conventions
+	for _, name := range slices.Sorted(maps.Keys(conv.Macros)) {
+		if _, ok := pp.ParseClass(conv.Macros[name]); !ok {
+			return fmt.Errorf("conventions.macros: %s: unknown class %q (want %s)", name, conv.Macros[name], strings.Join(pp.ClassNames, ", "))
+		}
+	}
+	for _, reg := range []struct {
+		key string
+		m   map[string]int
+	}{{"object_registry", conv.ObjectRegistry}, {"format_registry", conv.FormatRegistry}} {
+		for _, name := range slices.Sorted(maps.Keys(reg.m)) {
+			if reg.m[name] < 0 {
+				return fmt.Errorf("conventions.%s: %s: %d is not an argument index (0 is the first argument)", reg.key, name, reg.m[name])
+			}
+		}
+	}
+	for _, name := range slices.Sorted(maps.Keys(conv.CallRegistry)) {
+		forms := conv.CallRegistry[name]
+		if len(forms) == 0 {
+			return fmt.Errorf("conventions.call_registry: %s: no form", name)
+		}
+		for _, f := range forms {
+			if f.Function < 0 || (f.Object != nil && *f.Object < 0) || (f.Args != nil && *f.Args < 0) {
+				return fmt.Errorf("conventions.call_registry: %s: an argument index is 0 or more", name)
+			}
+		}
+	}
+	return nil
+}
+
+// The values of relative_object_paths.
+const (
+	ObjectPathsFromRoot = "root"
+	ObjectPathsFromFile = "file"
+)
+
+// checkRules checks the severities of rule settings.
+func checkRules(where string, rules map[string]RuleSettings) error {
+	for _, name := range slices.Sorted(maps.Keys(rules)) {
+		rs := rules[name]
+		line := ""
+		if rs.Line > 0 {
+			line = fmt.Sprintf("line %d: ", rs.Line)
+		}
+		if _, ok := diag.ParseSeverity(rs.Severity); !ok && rs.Severity != "" && rs.Severity != SeverityOff {
+			return fmt.Errorf("%s%s: %s: unknown severity %q (want off, info, warning or error)", line, where, name, rs.Severity)
+		}
+		if rs.MaxPerFile < 0 {
+			return fmt.Errorf("%s%s: %s: max_per_file: %d is not a number of findings", line, where, name, rs.MaxPerFile)
+		}
+	}
+	return nil
+}
+
+// SeverityOff is the rule severity that turns a rule off.
+const SeverityOff = "off"
+
+// validateScope reports a key that a settings scope may not have. A scope
+// holds settings; everything else describes the project, of which there
+// is one, or a run.
+func (c *Config) validateScope() error {
 	for _, k := range []struct {
 		name string
 		set  bool
@@ -418,9 +561,7 @@ func (c *Config) MacroClasses() map[string]pp.Class {
 		m[s] = pp.ClassEmpty
 	}
 	for name, cls := range c.Conventions.Macros {
-		if class, ok := pp.ParseClass(cls); ok {
-			m[name] = class
-		}
+		m[name], _ = pp.ParseClass(cls) // Validate has seen to the spelling
 	}
 	return m
 }

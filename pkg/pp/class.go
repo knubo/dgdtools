@@ -1,7 +1,7 @@
 package pp
 
 import (
-	"strings"
+	"slices"
 
 	"github.com/mmcdole/dgdtools/pkg/token"
 )
@@ -30,35 +30,17 @@ const (
 	ClassFragment
 )
 
-var classNames = map[string]Class{
-	"expression": ClassExpr, "empty": ClassEmpty, "specifier": ClassSpecifier,
-	"type": ClassType, "string": ClassString, "statement": ClassStatement,
-	"opaque": ClassFragment, "fragment": ClassFragment,
-}
+// ClassNames are the spellings of the classes, as Class.String gives
+// them and ParseClass takes them.
+var ClassNames = []string{"expression", "empty", "specifier", "type", "string", "statement", "opaque"}
 
-// ParseClass maps a config spelling to a Class.
+// ParseClass maps a class's spelling to the Class.
 func ParseClass(s string) (Class, bool) {
-	c, ok := classNames[strings.ToLower(strings.TrimSpace(s))]
-	return c, ok
+	i := slices.Index(ClassNames, s)
+	return Class(max(i, 0)), i >= 0
 }
 
-func (c Class) String() string {
-	switch c {
-	case ClassExpr:
-		return "expression"
-	case ClassEmpty:
-		return "empty"
-	case ClassSpecifier:
-		return "specifier"
-	case ClassType:
-		return "type"
-	case ClassString:
-		return "string"
-	case ClassStatement:
-		return "statement"
-	}
-	return "opaque"
-}
+func (c Class) String() string { return ClassNames[c] }
 
 // Classify derives a macro's class from the tokens of its body.
 func Classify(body []Tok) Class {

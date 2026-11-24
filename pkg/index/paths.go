@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/mmcdole/dgdtools/pkg/config"
 	"github.com/mmcdole/dgdtools/pkg/fileset"
 	"github.com/mmcdole/dgdtools/pkg/pp"
 )
@@ -91,10 +92,11 @@ func (l *lib) IsVirtual(libPath string) bool {
 }
 
 // ObjectPath turns an object path as written in fromLib into an absolute
-// lib path. A path without a leading slash is resolved from the lib root,
-// as the driver does, unless the config says paths are file-relative.
+// lib path. A path without a leading slash is resolved from the lib root
+// unless the config says the lib resolves it from the file
+// (relative_object_paths).
 func (l *lib) ObjectPath(p, fromLib string) string {
-	if l.cfg.RelativeObjectPaths == "file" {
+	if l.cfg.RelativeObjectPaths == config.ObjectPathsFromFile {
 		return NormalizeLibPath(p, fromLib)
 	}
 	return NormalizeLibPath(p, "/")

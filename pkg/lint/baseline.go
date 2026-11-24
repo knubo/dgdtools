@@ -7,6 +7,7 @@ import (
 	"hash/fnv"
 	"path/filepath"
 	"sort"
+	"sync"
 
 	"github.com/mmcdole/dgdtools/pkg/diag"
 )
@@ -61,31 +62,55 @@ func (l *Linter) BaselinePath() string {
 	return filepath.Join(cfg.Dir, name)
 }
 
-// Baseline returns the project's baseline, nil when it has none. The file
-// is read once in the linter's life: a linter is rebuilt when its
-// baseline changes, as when its configuration does.
-func (l *Linter) Baseline() (*Baseline, error) {
-	l.baselineOnce.Do(func() {
-		p := l.BaselinePath()
-		if p == "" || !l.fs.Exists(p) {
+// baselineFile is a baseline file as the linter read it.
+type baselineFile struct {
+	once sync.Once
+	b    *Baseline
+	err  error
+}
+
+// Baseline returns the baseline in the file at path (absolute), nil when
+// there is no such file. A file is read once in the linter's life: a
+// linter is rebuilt when a baseline changes, as when its configuration
+// does.
+func (l *Linter) Baseline(path string) (*Baseline, error) {
+	if path == "" {
+		return nil, nil
+	}
+	v, _ := l.baselines.LoadOrStore(path, &baselineFile{})
+	f := v.(*baselineFile)
+	f.once.Do(func() {
+		if !l.fs.Exists(path) {
 			return
 		}
-		data, err := l.fs.ReadFile(p)
+		data, err := l.fs.ReadFile(path)
 		if err != nil {
-			l.baselineErr = err
+			f.err = err
 			return
 		}
-		b := &Baseline{dir: filepath.Dir(p), counts: map[baselineKey]int{}}
+		b := &Baseline{dir: filepath.Dir(path), counts: map[baselineKey]int{}}
 		if err := json.Unmarshal(data, b); err != nil {
-			l.baselineErr = fmt.Errorf("%s: %w", p, err)
+			f.err = fmt.Errorf("%s: %w", path, err)
 			return
 		}
 		for _, e := range b.Entries {
 			b.counts[baselineKey{e.Path, e.Rule, e.Line}] += e.Count
 		}
-		l.baseline = b
+		f.b = b
 	})
-	return l.baseline, l.baselineErr
+	return f.b, f.err
+}
+
+// baselineFor returns the baseline a lint with the given options
+// subtracts, nil for none.
+func (l *Linter) baselineFor(opt *Options) (*Baseline, error) {
+	switch {
+	case opt.NoBaseline:
+		return nil, nil
+	case opt.Baseline != "":
+		return l.Baseline(opt.Baseline)
+	}
+	return l.Baseline(l.BaselinePath())
 }
 
 func (b *Baseline) key(d diag.Diagnostic) baselineKey {
@@ -134,10 +159,10 @@ func (b *Baseline) Filter(ds []diag.Diagnostic) ([]diag.Diagnostic, int) {
 	return out, removed
 }
 
-// NewBaseline builds a baseline, to be written to BaselinePath, from the
-// findings of a run.
-func (l *Linter) NewBaseline(ds []diag.Diagnostic) *Baseline {
-	b := &Baseline{Version: 1, dir: filepath.Dir(l.BaselinePath())}
+// NewBaseline builds the baseline to be written to the file at path
+// (absolute) from the findings of a run.
+func NewBaseline(path string, ds []diag.Diagnostic) *Baseline {
+	b := &Baseline{Version: 1, dir: filepath.Dir(path)}
 	counts := map[baselineKey]*BaselineEntry{}
 	for _, d := range ds {
 		k := b.key(d)

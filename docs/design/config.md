@@ -201,7 +201,10 @@ Highest first:
 6. built-in defaults.
 
 `dgdtools config PATH` prints the project of a path and, for a file, its
-resolved settings and where each came from.
+resolved settings and where each came from. It is the tool's "verify":
+it checks the configuration that applies to the path, and every
+`dgdtools.yml` below a directory, and exits 2 with the first thing that
+is wrong.
 
 An editor's own settings carry only what a wizard with no file at all
 needs (a profile name, a lib path); they are the same fallback as the

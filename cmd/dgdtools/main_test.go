@@ -124,6 +124,9 @@ func TestRulesAndExplain(t *testing.T) {
 	assert.Equal(t, 0, code)
 	assert.Contains(t, out, "declaration-after-statement")
 	assert.Contains(t, out, "dgdlint:disable-next-line")
+	assert.NotContains(t, out, "Options")
+	_, opts, _ := dgdtools(t, "", "explain", "raw-inherit-path")
+	assert.Contains(t, opts, "Options, in lint.rules under raw-inherit-path:\n    deny: a list of strings; ")
 	code, out2, _ := dgdtools(t, "", "explain", "declaration-after-statement")
 	assert.Equal(t, 0, code)
 	assert.Equal(t, out, out2)
@@ -186,6 +189,52 @@ func TestConfigCommand(t *testing.T) {
 	assert.Contains(t, errs, "dgdtools config: "+scope+": profile belongs in the project's root config")
 	code, _, _ = dgdtools(t, "", "config", filepath.Join(dir, "lib/a.c"))
 	assert.Equal(t, 0, code)
+}
+
+// `dgdtools config` is how a configuration is verified: whatever is wrong
+// with the files that apply to the path, or lie below it, is said, with
+// exit code 2.
+func TestConfigVerifies(t *testing.T) {
+	dir := tree(t, map[string]string{
+		"dgdtools.yml":             "root: lib\nexclude: [\"attic/**\"]\n",
+		"lib/a.c":                  "",
+		"lib/d/x/dgdtools.yml":     "root: false\nlint:\n  rules: {lifecycle-chain: {names: [create, reset]}}\n",
+		"lib/d/x/a.c":              "",
+		"lib/attic/y/dgdtools.yml": "root: false\nnonsense: 1\n",
+	})
+	cfg, nested := filepath.Join(dir, "dgdtools.yml"), filepath.Join(dir, "lib/d/x/dgdtools.yml")
+	code, out, errs := dgdtools(t, "", "config", dir)
+	assert.Equal(t, 0, code, errs)
+	assert.Contains(t, out, "below:         "+nested+" (valid)")
+	assert.NotContains(t, out, "attic", "an excluded directory is not the project's")
+
+	bad := func(file, content, want string) {
+		t.Helper()
+		was := read(t, file)
+		write(t, "/", map[string]string{file: content})
+		code, out, errs := dgdtools(t, "", "config", dir)
+		assert.Equal(t, 2, code, content)
+		assert.Empty(t, out)
+		assert.Contains(t, errs, "dgdtools config: ", content)
+		assert.Contains(t, errs, want, content)
+		write(t, "/", map[string]string{file: was})
+	}
+	bad(cfg, "root: lib\nincldue_dirs: [/x]\n", "field incldue_dirs not found")
+	bad(cfg, "root: lib\nrelative_object_paths: here\n", cfg+": relative_object_paths: unknown value \"here\"")
+	bad(cfg, "root: lib\nconventions:\n  macros: {X: thing}\n", "conventions.macros: X: unknown class \"thing\"")
+	bad(cfg, "root: lib\nconventions:\n  call_registry: {f: 0}\n", "line 3: a call registry entry is {function: N}")
+	bad(cfg, "root: lib\nlint:\n  rules: {no-such: off}\n", "line 3: lint.rules: unknown rule \"no-such\"")
+	bad(cfg, "root: lib\nlint:\n  rules:\n    syntax-error: {deny: [x]}\n", "rule syntax-error has no option \"deny\"")
+	bad(cfg, "root: lib\nlint:\n  rules: {E001: off, syntax-error: error}\n", "rule syntax-error is set twice")
+	bad(cfg, "root: lib\nlint: {fail_on: never}\n", "lint.fail_on: unknown severity \"never\"")
+	bad(cfg, "root: lib\nformat: {indent_width: wide}\n", "line 2: cannot unmarshal")
+	bad(cfg, "root: lib\nprofile: nowhere\n", "profile \"nowhere\" not found")
+	bad(nested, "root: false\nlint:\n  rules: {lifecycle-chain: {nams: [create]}}\n", nested+": lint.rules: rule lifecycle-chain has no option \"nams\"")
+	bad(nested, "root: false\ninclude_dirs: [/x]\n", nested+": include_dirs belongs in the project's root config")
+
+	// Valid again; a file's own configuration is what is checked for a file.
+	code, _, errs = dgdtools(t, "", "config", filepath.Join(dir, "lib/a.c"))
+	assert.Equal(t, 0, code, errs)
 }
 
 func TestUserLevelConfig(t *testing.T) {

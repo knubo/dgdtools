@@ -159,6 +159,13 @@ func TestLintSelectionAndFailOn(t *testing.T) {
 
 	code, _, _ = dgdtools(t, "", "lint", "--fail-on", "warning", file)
 	assert.Equal(t, 1, code)
+	// The flag wins over the configuration, either way.
+	write(t, dir, map[string]string{"dgdtools.yml": "lint: {fail_on: warning}\n"})
+	code, _, _ = dgdtools(t, "", "lint", file)
+	assert.Equal(t, 1, code)
+	code, _, _ = dgdtools(t, "", "lint", "--fail-on", "error", file)
+	assert.Equal(t, 0, code)
+	write(t, dir, map[string]string{"dgdtools.yml": ""})
 
 	_, out, _ = dgdtools(t, "", "lint", "--select", "S002", file)
 	assert.NotContains(t, out, "assignment-in-condition")

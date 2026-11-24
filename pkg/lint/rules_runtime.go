@@ -206,10 +206,11 @@ var ruleLifecycleChain = &Rule{
 		"object: the driver config's create parameter (the project key create), " +
 		"and \"create\" when that is not known. A lib whose auto object receives " +
 		"that call and passes it on under another name, or that has more such " +
-		"functions, lists them in rules.lifecycle-chain.names.",
+		"functions, lists them in the option names.",
 	Default: true, Severity: diag.Warning, CrossFile: true,
+	Options: func() any { return &lifecycleOptions{} },
 	Run: func(p *Pass) {
-		names := p.Settings.Names
+		names := p.Options.(*lifecycleOptions).Names
 		if len(names) == 0 {
 			names = []string{defaultCreate}
 			if p.Config.Create != "" {
@@ -226,6 +227,11 @@ var ruleLifecycleChain = &Rule{
 			}
 		}
 	},
+}
+
+// lifecycleOptions are the options of lifecycle-chain.
+type lifecycleOptions struct {
+	Names []string `yaml:"names" doc:"the functions that must call what they override (default: the driver's create function)"`
 }
 
 // defaultCreate is the create function assumed when neither the driver's

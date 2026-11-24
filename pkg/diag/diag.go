@@ -26,12 +26,13 @@ func (s Severity) String() string {
 	return "unknown"
 }
 
-// ParseSeverity maps a config spelling to a Severity.
+// ParseSeverity maps a severity's spelling (info, warning, error) to the
+// Severity.
 func ParseSeverity(s string) (Severity, bool) {
 	switch s {
-	case "info", "note":
+	case "info":
 		return Info, true
-	case "warning", "warn":
+	case "warning":
 		return Warning, true
 	case "error":
 		return Error, true
