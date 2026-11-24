@@ -62,68 +62,6 @@ func Params(decl string) []string {
 	return out
 }
 
-// SourceText returns the significant tokens first..last of f joined into
-// one line: the text as written minus comments, directives and layout.
-func SourceText(f *token.File, first, last int) string {
-	var b strings.Builder
-	prev := token.EOF
-	for i := first; i <= last && i < len(f.Tokens); i++ {
-		t := f.Tokens[i]
-		if t.Kind.IsTrivia() || t.Kind == token.Directive || t.Kind == token.EOF {
-			continue
-		}
-		switch {
-		case b.Len() == 0, prev == token.LParen, prev == token.Star && t.Kind != token.Star && t.Kind != token.Comma && t.Kind != token.RParen,
-			t.Kind == token.Comma, t.Kind == token.RParen, t.Kind == token.Semicolon, t.Kind == token.Ellipsis,
-			t.Kind == token.LParen && prev == token.Ident:
-		default:
-			b.WriteByte(' ')
-		}
-		b.Write(f.Text(t))
-		prev = t.Kind
-	}
-	return b.String()
-}
-
-// DeclPrefix renders the specifiers and type of a declaration as written,
-// with a trailing space when non-empty.
-func DeclPrefix(f *token.File, specs []syntax.Spec, typ *syntax.TypeSpec) string {
-	var parts []string
-	for _, s := range specs {
-		parts = append(parts, string(f.Text(f.Tokens[s.Tok])))
-	}
-	if typ != nil {
-		parts = append(parts, SourceText(f, typ.First, typ.Last))
-	}
-	if len(parts) == 0 {
-		return ""
-	}
-	return strings.Join(parts, " ") + " "
-}
-
-// TypeText renders a declared type with its '*'s: "string *".
-func TypeText(f *token.File, typ *syntax.TypeSpec, stars int) string {
-	if typ == nil {
-		return ""
-	}
-	s := SourceText(f, typ.First, typ.Last)
-	if stars > 0 {
-		s += " " + strings.Repeat("*", stars)
-	}
-	return s
-}
-
-// FuncDeclText renders a function's declaration as written, without body
-// or terminator: specifiers, return type, name and parameter list.
-func FuncDeclText(f *token.File, fn *syntax.FuncDecl) string {
-	name := "operator"
-	if fn.Name != nil {
-		name = fn.Name.Name
-	}
-	return DeclPrefix(f, fn.Specs, fn.Type) + strings.Repeat("*", fn.Stars) + name +
-		"(" + SourceText(f, fn.LParen+1, fn.RParen-1) + ")"
-}
-
 // InheritRef is one inherit statement.
 type InheritRef struct {
 	Raw      string // source text of the path expression
@@ -200,7 +138,7 @@ func collectDecls(u *Unit, tree *syntax.File) {
 			PrototypeOnly: fn.Body == nil,
 			MinArgs:       minA, MaxArgs: maxA,
 			Loc:  loc(fn.Name),
-			Decl: FuncDeclText(tree.Tok, fn), Type: TypeText(tree.Tok, fn.Type, fn.Stars),
+			Decl: tree.FuncDeclText(fn), Type: tree.TypeText(fn.Type, fn.Stars),
 		}
 		if old, ok := u.Funcs[fn.Name.Name]; !ok || (old.PrototypeOnly && !fi.PrototypeOnly) {
 			u.Funcs[fn.Name.Name] = fi
@@ -212,7 +150,7 @@ func collectDecls(u *Unit, tree *syntax.File) {
 			for _, v := range vd.Vars {
 				u.Vars[v.Name.Name] = VarInfo{
 					Static: vd.Has(token.KwStatic), Private: vd.Has(token.KwPrivate),
-					Type: TypeText(tree.Tok, vd.Type, v.Stars), Loc: loc(v.Name),
+					Type: tree.TypeText(vd.Type, v.Stars), Loc: loc(v.Name),
 				}
 			}
 		}

@@ -153,7 +153,7 @@ func (l *Linter) BuildProfile(ctx context.Context) (*profile.Profile, error) {
 		add(filepath.Join(prj.Root, filepath.FromSlash(f)))
 	}
 	for _, a := range cfg.AutoObjects {
-		add(fileset.FSPath(prj.Root, a))
+		add(ix.ObjectFile(index.NormalizeLibPath(a, "/")))
 	}
 
 	// Closure: everything a shared file includes or inherits is needed to
@@ -175,7 +175,7 @@ func (l *Linter) BuildProfile(ctx context.Context) (*profile.Profile, error) {
 		}
 		for _, inh := range parsed.Unit.Inherits {
 			if inh.Resolved {
-				add(fileset.FSPath(prj.Root, inh.Path))
+				add(ix.ObjectFile(inh.Path))
 			}
 		}
 	}
@@ -231,7 +231,7 @@ func (l *Linter) sharedByUse(ctx context.Context, ix *index.Snapshot, minOwners 
 		refs := append([]string{}, u.Deps[1:]...)
 		for _, inh := range u.Inherits {
 			if inh.Resolved {
-				refs = append(refs, fileset.FSPath(root, inh.Path))
+				refs = append(refs, ix.ObjectFile(inh.Path))
 			}
 		}
 		var out []*diag.Diagnostic
@@ -241,11 +241,11 @@ func (l *Linter) sharedByUse(ctx context.Context, ix *index.Snapshot, minOwners 
 		cf := pass.calls()
 		for _, c := range cf.strings {
 			if c.Target == targetPath {
-				refs = append(refs, fileset.FSPath(root, c.TargetPath))
+				refs = append(refs, ix.ObjectFile(c.TargetPath))
 			}
 		}
 		for _, r := range cf.paths {
-			refs = append(refs, fileset.FSPath(root, r.Path))
+			refs = append(refs, ix.ObjectFile(r.Path))
 		}
 		me := owner(u.LibPath)
 		mu.Lock()
@@ -301,14 +301,14 @@ func Stub(p *index.Parsed, header bool) string {
 	for _, d := range tree.Decls {
 		switch d := d.(type) {
 		case *syntax.InheritDecl:
-			decls = append(decls, piece{d, index.SourceText(f, d.First, d.Last) + "\n"})
+			decls = append(decls, piece{d, tree.SourceText(d.First, d.Last) + "\n"})
 		case *syntax.FuncDecl:
 			if d.Name != nil && !d.Has(token.KwPrivate) {
 				end := " {}\n"
 				if d.Body == nil {
 					end = ";\n"
 				}
-				decls = append(decls, piece{d, index.FuncDeclText(f, d) + end})
+				decls = append(decls, piece{d, tree.FuncDeclText(d) + end})
 			}
 		case *syntax.VarDecl:
 			if d.Has(token.KwPrivate) {
@@ -320,11 +320,11 @@ func Stub(p *index.Parsed, header bool) string {
 				for _, v := range d.Vars {
 					names = append(names, strings.Repeat("*", v.Stars)+v.Name.Name)
 				}
-				text = index.DeclPrefix(f, d.Specs, d.Type) + strings.Join(names, ", ") + ";\n"
+				text = tree.DeclPrefix(d.Specs, d.Type) + strings.Join(names, ", ") + ";\n"
 			}
 			for _, proto := range d.Protos {
 				if proto.Name != nil {
-					text += index.FuncDeclText(f, proto) + ";\n"
+					text += tree.FuncDeclText(proto) + ";\n"
 				}
 			}
 			if text != "" {

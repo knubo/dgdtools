@@ -103,16 +103,17 @@ func (s *Snapshot) locate(libFile string) (p string, absent []string) {
 	return disk, absent
 }
 
-// objectFile returns where the source of the object at libPath is read
-// from.
-func (s *Snapshot) objectFile(libPath string) string {
+// ObjectFile returns where the source of the object at libPath is read
+// from: a path on disk or a stub's location; "" when nothing could hold
+// it.
+func (s *Snapshot) ObjectFile(libPath string) string {
 	p, _ := s.locate(withC(libPath))
 	return p
 }
 
 // ObjectExists reports whether libPath is backed by a file or a stub.
 func (s *Snapshot) ObjectExists(libPath string) bool {
-	return s.exists(s.objectFile(libPath))
+	return s.exists(s.ObjectFile(libPath))
 }
 
 // ResolveInclude maps an include to the file the driver would read:
@@ -496,7 +497,7 @@ func (s *Snapshot) Unit(libPath string) *Unit {
 	if !s.HasLib() || libPath == "" {
 		return nil
 	}
-	return s.UnitAt(s.objectFile(libPath))
+	return s.UnitAt(s.ObjectFile(libPath))
 }
 
 // UnitAt returns the indexed facts for the file at p, or nil if it

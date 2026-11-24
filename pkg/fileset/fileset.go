@@ -178,13 +178,3 @@ func LibPath(rel string) string {
 	rel = "/" + strings.Trim(filepath.ToSlash(rel), "/")
 	return strings.TrimSuffix(rel, ".c")
 }
-
-// FSPath converts a lib-absolute path to a filesystem path under root.
-// The .c extension is appended when the path has no extension.
-func FSPath(root, libPath string) string {
-	p := strings.TrimPrefix(libPath, "/")
-	if filepath.Ext(p) == "" {
-		p += ".c"
-	}
-	return filepath.Join(root, filepath.FromSlash(p))
-}

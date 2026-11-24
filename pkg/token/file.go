@@ -4,8 +4,6 @@ import (
 	"fmt"
 	"iter"
 	"sort"
-
-	"github.com/mmcdole/dgdtools/pkg/diag"
 )
 
 // Dialect selects the compile-time language variants of the target driver.
@@ -24,7 +22,14 @@ type File struct {
 	Dialect Dialect
 	Tokens  []Token  // contiguous; last element is a zero-length EOF token
 	Lines   []uint32 // byte offset of each line start; Lines[0] == 0
-	Errs    []diag.Diagnostic
+	Errs    []Error  // one for each Illegal token
+}
+
+// Error is a lexical error: what is wrong with the Illegal token that
+// starts at byte offset Off.
+type Error struct {
+	Off uint32
+	Msg string
 }
 
 // Text returns the token's bytes as a zero-copy subslice of Src.

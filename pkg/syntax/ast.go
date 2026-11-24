@@ -24,7 +24,10 @@ type Node interface {
 
 type span struct{ First, Last int }
 
-func (s span) Span() (int, int) { return s.First, s.Last }
+func (s span) Span() (int, int)        { return s.First, s.Last }
+func (p *Param) Span() (int, int)      { return p.First, p.Last }
+func (d *Declarator) Span() (int, int) { return d.First, d.Last }
+func (f *File) Span() (int, int)       { return 0, len(f.Tok.Tokens) - 1 }
 
 // Expr, Stmt and Decl are the three node families.
 type (

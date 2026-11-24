@@ -3,7 +3,7 @@
 // The scanner is byte-oriented and never transcodes: bytes >= 0x80 pass
 // through untouched inside strings, char constants, and comments, and become
 // Illegal tokens elsewhere. Lexing never fails and never panics; malformed
-// input produces Illegal tokens plus diagnostics, and the round-trip
+// input produces Illegal tokens plus errors, and the round-trip
 // invariant (every byte belongs to exactly one token) holds regardless.
 //
 // Dialect notes (DGD 1.7): "//" comments exist only when Dialect.SlashSlash
@@ -16,7 +16,6 @@ package lexer
 import (
 	"fmt"
 
-	"github.com/mmcdole/dgdtools/pkg/diag"
 	"github.com/mmcdole/dgdtools/pkg/token"
 )
 
@@ -73,20 +72,7 @@ func (lx *lexer) emit(k token.Kind, start int) {
 }
 
 func (lx *lexer) errorf(off int, format string, args ...any) {
-	p := lx.posOf(off)
-	lx.f.Errs = append(lx.f.Errs, diag.Diagnostic{
-		Path: lx.f.Path, Line: p.Line, Col: p.Col,
-		Severity: diag.Error, Message: fmt.Sprintf(format, args...),
-	})
-}
-
-// posOf computes a position from the line starts recorded so far.
-func (lx *lexer) posOf(off int) token.Pos {
-	line := len(lx.f.Lines)
-	for line > 1 && lx.f.Lines[line-1] > uint32(off) {
-		line--
-	}
-	return token.Pos{Line: line, Col: off - int(lx.f.Lines[line-1]) + 1}
+	lx.f.Errs = append(lx.f.Errs, token.Error{Off: uint32(off), Msg: fmt.Sprintf(format, args...)})
 }
 
 func (lx *lexer) peek(ahead int) byte {
