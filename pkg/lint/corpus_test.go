@@ -12,7 +12,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/mmcdole/dgdtools/pkg/config"
-	"github.com/mmcdole/dgdtools/pkg/diag"
 	"github.com/mmcdole/dgdtools/pkg/lint"
 	"github.com/mmcdole/dgdtools/pkg/vfs"
 )
@@ -47,11 +46,15 @@ func TestCorpusLint(t *testing.T) {
 	res, err := l.Run(context.Background(), lint.Request{Paths: paths, Options: lint.Options{NoBaseline: true}})
 	require.NoError(t, err)
 
-	for _, n := range res.Notes {
-		if n.Kind == diag.NoteInternalError {
-			t.Error(n.Message)
+	unreadable := 0
+	for _, e := range res.Errors {
+		if e.Kind == lint.Internal {
+			t.Error(e)
+		} else {
+			unreadable++
 		}
 	}
+	t.Logf("%d file(s) could not be read", unreadable)
 	byGroup := map[string]int{}
 	group := map[string]string{}
 	for _, r := range lint.Rules() {

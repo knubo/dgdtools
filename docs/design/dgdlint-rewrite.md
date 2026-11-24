@@ -543,11 +543,44 @@ Properties the core guarantees (each has a test in `pkg/lint` or
   column to an LSP UTF-16 column; bytes that are not valid UTF-8 (the
   corpus's Latin-1) count as one unit each, matching how editors decode
   them.
+- **The diagnostics model is the one editors and CI already have.** A
+  fix has an `Applicability`: `safe` (keeps what the code means; a tool
+  may apply every safe fix at once) or `unsafe` (offered, applied when
+  asked for by name), the two levels of ruff and Biome; the zero value
+  is `unsafe`, so a fix is safe only when its rule says so. A diagnostic
+  has `Tags`, `unnecessary` and `deprecated`, the two an editor renders
+  specially (LSP `DiagnosticTag`: faded, struck through); a rule states
+  its tags once (`Rule.Tags`). Every rule has a documentation address
+  (`Rule.URL`, a section of `docs/rules.md`, which is written from the
+  rule table and checked by a test), for LSP `codeDescription`, SARIF
+  `helpUri` and the JSON report.
+- **What a rule finds is filtered in one place, in one order.**
+  `Pass.Report` always records the finding and returns it. The engine
+  then (1) withholds the findings of a `CompiledOnly` rule that lie in a
+  conditional branch chosen by guess: such a rule claims that code does
+  not compile or fails when it runs, which nobody can say of code that
+  may not be compiled at all (a property each rule states; it does not
+  follow from its group: `bad-directive` is a syntax rule that does
+  report there, because the preprocessor reads directives in skipped
+  branches too); (2) drops what a suppression comment covers; (3)
+  subtracts the baseline; (4) applies `max_per_file`, last, so that a
+  limit counts what would be shown and cannot hide a new finding behind
+  suppressed or baselined ones. What (4) holds back is counted
+  (`Stats.Capped`, in the summary); `--max-per-file -1` lifts the
+  limits, and `--write-baseline` always does.
 - **Notes** about a run as a whole are `diag.Note` values with a stable
   `Kind` (`no-lib`, `incomplete-lib`, `outside-lib`, `profile`,
-  `unplaced-checkout`, `internal-error`).
-- **One bad file cannot take down a run:** a panic while analyzing a file
-  is caught, reported as a note, and the file is skipped.
+  `unplaced-checkout`).
+- **One bad file cannot take down a run, and is not silent.** A file
+  that could not be linted is a `FileError` in `Result.Errors` (the
+  error of `Linter.Lint`) with its kind. `unreadable`: the file system
+  refused; the rest of the run stands, the front end warns. `internal`:
+  the tools crashed on it, in the analysis (`index.InternalError`,
+  recorded per generation, also for a file read on another's behalf) or
+  in a rule (the message names it); the run goes on, what depends on
+  that file is unknown, and `dgdtools lint` exits 2 whatever else it
+  found, because a result with a hole in it must not pass for a clean
+  one. `dgdtools profile build` refuses to write a profile then.
 
 Measured on the 108,116-file lib (`TestCorpusEdit`, 681 single-file
 edits after a whole-lib run): `Invalidate` 1.5 ms median (2.9 ms at the

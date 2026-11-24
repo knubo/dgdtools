@@ -350,7 +350,9 @@ dgdtools config [path]                 # the resolved project, and the rules tha
 ```
 
 Exit codes: `0` no findings at or above `fail_on`, `1` findings, `2`
-usage, configuration or I/O error.
+usage or configuration error, or an internal error of the linter on
+some file (which is reported, with the file). A file that cannot be read
+is a warning: the rest of the run stands.
 
 The linter parses every file with its own error-tolerant parser for the DGD
 1.7 grammar, on source as written: macros are classified from their

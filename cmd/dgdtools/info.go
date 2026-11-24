@@ -76,6 +76,7 @@ func explainCmd(_ context.Context, args []string, _ io.Reader, stdout, stderr io
 			}
 		}
 		fmt.Fprintf(stdout, "\nSuppress one occurrence with a comment on the line above:\n    /* dgdlint:disable-next-line %s */\n", r.Name)
+		fmt.Fprintf(stdout, "\n%s\n", r.URL())
 		return 0
 	}
 	return failure(stderr, "explain", fmt.Errorf("unknown rule %q (see `dgdtools rules`)", pos[0]))

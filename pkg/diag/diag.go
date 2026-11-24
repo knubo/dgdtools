@@ -59,8 +59,11 @@ type Diagnostic struct {
 	Message  string
 	Rule     string // stable rule name, e.g. "syntax-error"
 	Code     string // stable short code, e.g. "E001"
-	Related  []Related
-	Fixes    []Fix
+	// Tags say what kind of thing the finding is about, for a client
+	// that shows such code differently.
+	Tags    []Tag
+	Related []Related
+	Fixes   []Fix
 	// Fingerprint identifies the finding by the text of the source line
 	// it is on rather than by its position, so that it survives edits
 	// elsewhere in the file. Baselines match on it.
@@ -77,11 +80,58 @@ type Related struct {
 	Message string
 }
 
+// Tag classifies what a finding is about. The values are those an editor
+// renders specially (LSP DiagnosticTag).
+type Tag uint8
+
+const (
+	// Unnecessary: code or a comment that does nothing and can go
+	// (unreachable code, a comment that suppresses nothing). Editors
+	// fade it.
+	Unnecessary Tag = iota + 1
+	// Deprecated: a use of something that should no longer be used.
+	// Editors strike it through.
+	Deprecated
+)
+
+func (t Tag) String() string {
+	switch t {
+	case Unnecessary:
+		return "unnecessary"
+	case Deprecated:
+		return "deprecated"
+	}
+	return "unknown"
+}
+
 // Fix is a suggested change, expressed as text edits against the file the
 // diagnostic is in. The linter never applies fixes itself.
 type Fix struct {
 	Title string
-	Edits []TextEdit
+	// Applicability says whether the fix can be applied without
+	// somebody looking at it.
+	Applicability Applicability
+	Edits         []TextEdit
+}
+
+// Applicability says how far a fix can be trusted. The zero value is the
+// careful one.
+type Applicability uint8
+
+const (
+	// Unsafe: the fix may change what the code means, or may not be what
+	// was meant. It is offered, and applied only when asked for by name.
+	Unsafe Applicability = iota
+	// Safe: the fix keeps what the code means. A tool may apply all safe
+	// fixes at once.
+	Safe
+)
+
+func (a Applicability) String() string {
+	if a == Safe {
+		return "safe"
+	}
+	return "unsafe"
 }
 
 // TextEdit replaces the bytes [Start, End) with NewText.
@@ -118,9 +168,6 @@ const (
 	// NoteUnplacedCheckout: a partial checkout whose place in the lib is
 	// not known; references between its own files are not checked.
 	NoteUnplacedCheckout NoteKind = "unplaced-checkout"
-	// NoteInternalError: the analysis of a file crashed; the file was
-	// skipped.
-	NoteInternalError NoteKind = "internal-error"
 )
 
 func (d Diagnostic) String() string {

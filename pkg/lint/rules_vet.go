@@ -133,7 +133,7 @@ var ruleSscanfFormat = &Rule{
 	Explain: "Fewer variables than conversions is the legal idiom for discarding " +
 		"trailing matches; more variables than conversions means some are never " +
 		"assigned. sscanf is built in; add mudlib scanf-style functions with " +
-		"lint.format_registry.",
+		"conventions.format_registry.",
 	Default: true, Severity: diag.Warning,
 	Run: func(p *Pass) {
 		registry := map[string]int{"sscanf": 1}
@@ -183,7 +183,7 @@ var ruleUnreachable = &Rule{
 	Explain: "Code after an unconditional jump in the same block never runs. " +
 		"Labels and case labels restart reachability. Off by default: legal, and " +
 		"common as leftover debugging in old code.",
-	Default: false, Severity: diag.Warning,
+	Default: false, Severity: diag.Warning, Tags: []diag.Tag{diag.Unnecessary},
 	Run: func(p *Pass) {
 		syntax.Inspect(p.Tree, func(n syntax.Node) bool {
 			b, ok := n.(*syntax.BlockStmt)

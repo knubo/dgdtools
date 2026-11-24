@@ -9,6 +9,9 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/mmcdole/dgdtools/pkg/diag"
+	"github.com/mmcdole/dgdtools/pkg/lint"
 )
 
 const castle = `mapping c;
@@ -334,4 +337,25 @@ func TestProfileCommands(t *testing.T) {
 	code, _, errs = dgdtools(t, "", "profile", "build", "--profile", prof)
 	assert.Equal(t, 2, code)
 	assert.Contains(t, errs, "needs the whole lib")
+}
+
+// What a run comes to as an exit code.
+func TestLintExitCode(t *testing.T) {
+	warn := diag.Diagnostic{Severity: diag.Warning}
+	crash := &lint.FileError{Path: "/x.c", Kind: lint.Internal, Message: "boom"}
+	locked := &lint.FileError{Path: "/y.c", Kind: lint.Unreadable, Message: "cannot be read"}
+
+	clean := &lint.Result{}
+	assert.Equal(t, 0, exitCode(clean, diag.Error, false))
+	found := &lint.Result{Diagnostics: []diag.Diagnostic{warn}}
+	assert.Equal(t, 0, exitCode(found, diag.Error, false))
+	assert.Equal(t, 1, exitCode(found, diag.Warning, false))
+	assert.Equal(t, 0, exitCode(found, diag.Warning, true))
+	// A file that cannot be read does not change it; a crash does,
+	// whatever else.
+	assert.Equal(t, 0, exitCode(&lint.Result{Errors: []*lint.FileError{locked}}, diag.Error, false))
+	crashed := &lint.Result{Diagnostics: []diag.Diagnostic{warn}, Errors: []*lint.FileError{locked, crash}}
+	assert.Equal(t, 2, exitCode(crashed, diag.Warning, false))
+	assert.Equal(t, 2, exitCode(crashed, diag.Error, true))
+	assert.Same(t, crash, internalError(crashed).(*lint.FileError))
 }

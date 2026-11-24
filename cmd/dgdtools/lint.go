@@ -22,7 +22,8 @@ only file-local rules run. A wizard with only their own folder puts
 "profile: NAME" in a dgdtools.yml there (or passes --profile).
 
 Exit codes: 0 no findings at or above the fail-on severity, 1 findings,
-2 usage, configuration or I/O error.
+2 usage or configuration error, or an internal error on some file. A file
+that cannot be read is a warning.
 `
 
 // lintCmd is `dgdtools lint`: pkg/lint run over the paths, pkg/report
@@ -51,7 +52,7 @@ func lintCmd(ctx context.Context, args []string, _ io.Reader, stdout, stderr io.
 	fs.BoolVar(&noBaseline, "no-baseline", false, "report findings that are in the baseline too")
 	fs.BoolVar(&local, "local", false, "file-local rules only; do not use the lib index")
 	fs.BoolVar(&stats, "stats", false, "print per-rule counts and what could not be verified")
-	fs.IntVar(&maxPerFile, "max-per-file", 0, "report at most `n` findings per rule per file")
+	fs.IntVar(&maxPerFile, "max-per-file", 0, "report at most `n` findings per rule per file; -1 lifts the limits of the configuration")
 	fs.BoolVar(&quiet, "quiet", false, "no summary on standard error")
 	fs.BoolVar(&quiet, "q", false, "short for --quiet")
 	fs.BoolVar(&exit0, "exit-zero", false, "exit 0 even when there are findings")
@@ -84,6 +85,9 @@ func lintCmd(ctx context.Context, args []string, _ io.Reader, stdout, stderr io.
 	if baseline != "" {
 		baseline = p.abs(baseline)
 	}
+	if writeBaseline {
+		maxPerFile = -1 // a baseline holds every finding
+	}
 	res, err := l.Run(ctx, lint.Request{Paths: paths, Options: lint.Options{
 		Select:     split(sel),
 		Enable:     split(enable),
@@ -98,6 +102,9 @@ func lintCmd(ctx context.Context, args []string, _ io.Reader, stdout, stderr io.
 	}
 
 	if writeBaseline {
+		if crash := internalError(res); crash != nil {
+			return fail(fmt.Errorf("%w; no baseline written", crash))
+		}
 		path := baseline
 		if path == "" {
 			path = l.BaselinePath()
@@ -133,7 +140,31 @@ func lintCmd(ctx context.Context, args []string, _ io.Reader, stdout, stderr io.
 	if !quiet {
 		report.Summary(stderr, res, stats)
 	}
-	if exit0 {
+	if crash := internalError(res); crash != nil && quiet {
+		fail(crash) // the summary would have said it
+	}
+	return exitCode(res, threshold, exit0)
+}
+
+// internalError returns the first file the tools crashed on, nil when
+// there is none.
+func internalError(res *lint.Result) error {
+	for _, e := range res.Errors {
+		if e.Kind == lint.Internal {
+			return e
+		}
+	}
+	return nil
+}
+
+// exitCode is what a run comes to. A crash of the tools is an error of
+// the run whatever was found and whatever was asked; a file that could
+// not be read is a warning, and the rest of the run stands.
+func exitCode(res *lint.Result, threshold diag.Severity, exitZero bool) int {
+	if internalError(res) != nil {
+		return 2
+	}
+	if exitZero {
 		return 0
 	}
 	for _, d := range res.Diagnostics {

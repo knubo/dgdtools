@@ -31,7 +31,7 @@ var ruleCallableNotFound = &Rule{
 		"a macro that evaluates to one, or this_object()) and the target's whole " +
 		"inherit chain was resolved and parsed; for a file that other objects " +
 		"inherit or #include, the function is also looked for in those users.",
-	Default: true, Severity: diag.Error, CrossFile: true,
+	Default: true, Severity: diag.Error, CrossFile: true, CompiledOnly: true,
 	Run: func(p *Pass) {
 		for i, c := range p.calls().Named {
 			lk, desc := p.lookup(i)
@@ -60,7 +60,7 @@ var ruleStaticCrossObj = &Rule{
 	Doc: "call_other to an unreachable function: private always, static from another object",
 	Explain: "call_other cannot reach private functions at all, and reaches static " +
 		"functions only from the same object. The call silently returns nil.",
-	Default: true, Severity: diag.Error, CrossFile: true,
+	Default: true, Severity: diag.Error, CrossFile: true, CompiledOnly: true,
 	Run: func(p *Pass) {
 		for i, c := range p.calls().Named {
 			if c.Kind != calls.CrossObject {
@@ -93,7 +93,7 @@ var ruleUndefinedPrototype = &Rule{
 	Explain: "DGD compiles a call to a function that only has a prototype and " +
 		"raises \"Undefined function\" when the call runs. Not reported when an " +
 		"inheritor or includer of the file provides the definition.",
-	Default: true, Severity: diag.Error, CrossFile: true,
+	Default: true, Severity: diag.Error, CrossFile: true, CompiledOnly: true,
 	Run: func(p *Pass) {
 		for i, c := range p.calls().Named {
 			lk, _ := p.lookup(i)
@@ -135,9 +135,9 @@ var ruleTargetObjectMissing = &Rule{
 	Doc: "literal object path (inherit, clone_object, call target) with no backing file",
 	Explain: "Loading an object whose file does not exist is a runtime error (for " +
 		"an inherit, a compile error). Paths served by virtual-object daemons " +
-		"belong in lint.virtual_paths. Not reported when the lib on disk is " +
+		"belong in conventions.virtual_paths. Not reported when the lib on disk is " +
 		"incomplete.",
-	Default: true, Severity: diag.Error, CrossFile: true,
+	Default: true, Severity: diag.Error, CrossFile: true, CompiledOnly: true,
 	Run: func(p *Pass) {
 		missing := func(lib string) bool {
 			return p.Index.Covers(lib) && !p.Index.IsVirtual(lib) && !p.Index.ObjectExists(lib)
@@ -167,7 +167,7 @@ var ruleCallbackArity = &Rule{
 	Explain: "Under non-strict typechecking DGD silently pads missing call_other " +
 		"arguments with nil and drops extras; under strict typechecking it is a " +
 		"runtime error.",
-	Default: true, Severity: diag.Warning, CrossFile: true,
+	Default: true, Severity: diag.Warning, CrossFile: true, CompiledOnly: true,
 	Run: func(p *Pass) {
 		for i, c := range p.calls().Named {
 			if c.NArgs < 0 {
@@ -207,7 +207,7 @@ var ruleLifecycleChain = &Rule{
 		"and \"create\" when that is not known. A lib whose auto object receives " +
 		"that call and passes it on under another name, or that has more such " +
 		"functions, lists them in the option names.",
-	Default: true, Severity: diag.Warning, CrossFile: true,
+	Default: true, Severity: diag.Warning, CrossFile: true, CompiledOnly: true,
 	Options: func() any { return &lifecycleOptions{} },
 	Run: func(p *Pass) {
 		names := p.Options.(*lifecycleOptions).Names

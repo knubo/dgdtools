@@ -225,22 +225,22 @@ func TestConditionsSeeIncludes(t *testing.T) {
 	})
 	s := l.ix.Snapshot()
 
-	a := s.Parse("/lib/obj/a.c")
-	require.NotNil(t, a)
+	a, err := s.Parse("/lib/obj/a.c")
+	require.NoError(t, err)
 	assert.Equal(t, []string{"always", "high", "log"}, slices.Sorted(maps.Keys(a.Unit.Funcs)))
 	for _, i := range a.Tree.Sel.Sig {
 		assert.False(t, a.Tree.Sel.Guessed(i), "every branch of a.c is decided")
 	}
 	assert.True(t, a.Env.Complete)
 
-	b := s.Parse("/lib/obj/b.c")
-	require.NotNil(t, b)
+	b, err := s.Parse("/lib/obj/b.c")
+	require.NoError(t, err)
 	assert.Contains(t, b.Unit.Funcs, "maybe", "undecided: the first branch, as a guess")
 	first, _ := b.Tree.Decls[0].Span()
 	assert.True(t, b.Tree.Sel.Guessed(first))
 
-	c := s.Parse("/lib/obj/c.c")
-	require.NotNil(t, c)
+	c, err := s.Parse("/lib/obj/c.c")
+	require.NoError(t, err)
 	assert.Contains(t, c.Unit.Funcs, "uses")
 	first, _ = c.Tree.Decls[0].Span()
 	assert.True(t, c.Tree.Sel.Guessed(first), "LOGGER is defined under a condition its header could not decide")
@@ -260,14 +260,14 @@ func TestHeadersReadAsUnits(t *testing.T) {
 	s := l.ix.Snapshot()
 
 	for _, p := range []string{"/lib/sys/forced.h", "/lib/include/std.h"} {
-		h := s.Parse(p)
-		require.NotNil(t, h, p)
+		h, err := s.Parse(p)
+		require.NoError(t, err, p)
 		assert.Len(t, h.Tree.Decls, 1, "%s: its include guard is not already defined", p)
 		assert.Empty(t, h.Tree.Errors, p)
 	}
 
-	opt := s.Parse("/lib/include/opt.h")
-	require.NotNil(t, opt)
+	opt, err := s.Parse("/lib/include/opt.h")
+	require.NoError(t, err)
 	assert.Equal(t, []string{"quiet", "sure"}, slices.Sorted(maps.Keys(opt.Unit.Funcs)))
 	quiet, _ := opt.Tree.Decls[0].Span()
 	sure, _ := opt.Tree.Decls[1].Span()
@@ -286,8 +286,8 @@ func TestParse(t *testing.T) {
 	})
 	s := l.ix.Snapshot()
 
-	p := s.Parse("/lib/obj/a.c")
-	require.NotNil(t, p)
+	p, err := s.Parse("/lib/obj/a.c")
+	require.NoError(t, err)
 	require.NotNil(t, p.Tree)
 	assert.Equal(t, "/lib/obj/a.c", p.Tok.Path)
 	assert.NotNil(t, p.Env.Lookup("TRUE"), "the force-included header is in view")
@@ -297,12 +297,61 @@ func TestParse(t *testing.T) {
 	// A file the generation already knows is parsed for its tree only.
 	base := s.Unit("/std/base")
 	require.NotNil(t, s.Chain("/obj/a").Funcs["create"])
-	p = s.Parse("/lib/std/base.c")
-	require.NotNil(t, p)
+	p, err = s.Parse("/lib/std/base.c")
+	require.NoError(t, err)
 	assert.Same(t, base, p.Unit, "the facts are not rebuilt")
 	assert.Equal(t, 2, l.fs.count("/lib/std/base.c"))
 
-	assert.Nil(t, s.Parse("/lib/obj/none.c"))
+	// A file that cannot be read: the file system's word for it.
+	p, err = s.Parse("/lib/obj/none.c")
+	assert.Nil(t, p)
+	assert.ErrorIs(t, err, fs.ErrNotExist)
+	assert.Empty(t, s.Crashed())
+}
+
+// crashFS panics when one file is read: a stand-in for a bug in the
+// analysis.
+type crashFS struct {
+	vfs.FS
+	path string
+}
+
+func (c crashFS) ReadFile(p string) ([]byte, error) {
+	if p == c.path {
+		panic("boom")
+	}
+	return c.FS.ReadFile(p)
+}
+
+// A crash while a file is analyzed is that file's, is remembered for the
+// generation, and makes whatever is built on the file unknown.
+func TestCrashIsRecorded(t *testing.T) {
+	m := vfs.Mem{
+		"/lib/std/base.c": "void create() { }\n",
+		"/lib/obj/a.c":    "inherit \"/std/base\";\nvoid f() { }\n",
+	}
+	ix := New(&config.Config{}, Layout{Tree: fileset.Tree{Root: "/lib"}}, crashFS{m, "/lib/std/base.c"})
+	s := ix.Snapshot()
+
+	p, err := s.Parse("/lib/std/base.c")
+	assert.Nil(t, p)
+	var crash *InternalError
+	require.ErrorAs(t, err, &crash)
+	assert.Equal(t, InternalError{Path: "/lib/std/base.c", Panic: "boom"}, *crash)
+	assert.EqualError(t, err, "internal error analyzing /lib/std/base.c (please report): boom")
+
+	assert.Nil(t, s.Unit("/std/base"))
+	assert.True(t, s.Chain("/obj/a").Partial, "nothing is concluded from a parent that could not be analyzed")
+	assert.Equal(t, LookupUnknown, s.LookupCallable(context.Background(), "/obj/a", "nowhere", false).State)
+	require.Len(t, s.Crashed(), 1)
+	assert.Equal(t, "/lib/std/base.c", s.Crashed()[0].Path)
+
+	// The next generation keeps what it knows of files that did not
+	// change, and looks again at the one that did.
+	ix.Invalidate("/lib/obj/a.c")
+	assert.Len(t, ix.Snapshot().Crashed(), 1)
+	ix.Invalidate("/lib/std/base.c")
+	assert.Empty(t, ix.Snapshot().Crashed())
 }
 
 // ------------------------------------------------------------ chains

@@ -164,8 +164,8 @@ func Build(ctx context.Context, prj *config.Project, fsys vfs.FS) (*profile.Prof
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		parsed := ix.Parse(queue[i])
-		if parsed == nil {
+		parsed, err := ix.Parse(queue[i])
+		if err != nil {
 			continue
 		}
 		for _, dep := range parsed.Unit.Deps[1:] {
@@ -179,8 +179,8 @@ func Build(ctx context.Context, prj *config.Project, fsys vfs.FS) (*profile.Prof
 		}
 	}
 	for _, fsPath := range queue {
-		parsed := ix.Parse(fsPath)
-		if parsed == nil {
+		parsed, err := ix.Parse(fsPath)
+		if err != nil {
 			continue
 		}
 		rel, _ := filepath.Rel(prj.Root, fsPath)
@@ -190,6 +190,11 @@ func Build(ctx context.Context, prj *config.Project, fsys vfs.FS) (*profile.Prof
 		p.Covered = append(p.Covered, c)
 	}
 	sort.Strings(p.Covered)
+	// A file the tools crashed on is missing from the profile, or from
+	// what was counted as shared: not a profile to publish.
+	if crashed := ix.Crashed(); len(crashed) > 0 {
+		return nil, fmt.Errorf("profile build: %d file(s) could not be analyzed; the first: %w", len(crashed), crashed[0])
+	}
 	return p, nil
 }
 
@@ -221,8 +226,8 @@ func sharedByUse(ctx context.Context, ix *index.Snapshot, reg *calls.Registry, r
 	var mu sync.Mutex
 	owners := map[string]map[string]bool{}
 	par.Each(ctx, files, func(f string) {
-		parsed := ix.Parse(f)
-		if parsed == nil || parsed.Unit.LibPath == "" {
+		parsed, err := ix.Parse(f)
+		if err != nil || parsed.Unit.LibPath == "" {
 			return
 		}
 		u := parsed.Unit

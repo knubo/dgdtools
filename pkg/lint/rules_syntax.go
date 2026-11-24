@@ -24,7 +24,7 @@ var ruleSyntaxError = &Rule{
 		"resolved, an error next to an unknown identifier. After an error that " +
 		"leaves the file's structure in doubt (unbalanced braces) later errors in " +
 		"the file are dropped as likely consequences.",
-	Default: true, Severity: diag.Error,
+	Default: true, Severity: diag.Error, CompiledOnly: true,
 	Run: func(p *Pass) {
 		// A missing #include is fatal to the compile, as in C: errors
 		// after it are consequences and are not reported.
@@ -63,7 +63,7 @@ var ruleAdjacentStrings = &Rule{
 		"does not: it is a syntax error and the object will not compile. Join the " +
 		"strings with '+' (DGD folds constant concatenation at compile time). The " +
 		"diagnostic carries a fix that inserts the '+'.",
-	Default: true, Severity: diag.Error,
+	Default: true, Severity: diag.Error, CompiledOnly: true,
 	Run: func(p *Pass) {
 		syntax.Inspect(p.Tree, func(n syntax.Node) bool {
 			a, ok := n.(*syntax.AdjacentStrings)
@@ -71,7 +71,9 @@ var ruleAdjacentStrings = &Rule{
 				return true
 			}
 			d := p.ReportNode(a.Parts[1], "adjacent string literals are a syntax error in DGD; join them with '+'")
-			fix := diag.Fix{Title: "insert '+' between the strings"}
+			// DGD folds the concatenation of constants when it compiles:
+			// the '+' costs nothing and means what adjacency meant.
+			fix := diag.Fix{Title: "insert '+' between the strings", Applicability: diag.Safe}
 			for _, part := range a.Parts[:len(a.Parts)-1] {
 				end := p.Tree.End(part)
 				fix.Edits = append(fix.Edits, diag.TextEdit{Start: end, End: end, NewText: " +"})
@@ -87,7 +89,7 @@ var ruleLegacyClosure = &Rule{
 	Doc: `(: ob, "fn" :) function-pointer literal; not DGD syntax`,
 	Explain: "The (: ... :) literal comes from other LPC dialects. DGD rejects it " +
 		"as a syntax error. Use the lib's function-pointer constructor instead.",
-	Default: true, Severity: diag.Error,
+	Default: true, Severity: diag.Error, CompiledOnly: true,
 	Run: func(p *Pass) {
 		syntax.Inspect(p.Tree, func(n syntax.Node) bool {
 			if c, ok := n.(*syntax.LegacyClosure); ok {
@@ -104,7 +106,7 @@ var ruleDeclInit = &Rule{
 	Explain: "DGD 1.7 declarations cannot carry an initializer, for globals or " +
 		"locals. It is a syntax error. Declare first and assign in a statement " +
 		"(globals: in create()).",
-	Default: true, Severity: diag.Error,
+	Default: true, Severity: diag.Error, CompiledOnly: true,
 	Run: func(p *Pass) {
 		syntax.Inspect(p.Tree, func(n syntax.Node) bool {
 			if d, ok := n.(*syntax.Declarator); ok && d.Init != nil {
@@ -124,7 +126,7 @@ var ruleDeclAfterStmt = &Rule{
 		"the compile error \"declaration after statement\". Blocks in which a " +
 		"macro stands as a statement before the declaration are not reported, " +
 		"since the macro may expand to declarations.",
-	Default: true, Severity: diag.Error,
+	Default: true, Severity: diag.Error, CompiledOnly: true,
 	Run: func(p *Pass) {
 		syntax.Inspect(p.Tree, func(n syntax.Node) bool {
 			b, ok := n.(*syntax.BlockStmt)
@@ -160,7 +162,7 @@ var ruleIncludeNotFound = &Rule{
 		"force-included header exist); in a partial checkout the target is " +
 		"unknown, not missing. Like a C compiler's fatal \"file not found\", it " +
 		"stops syntax reporting for the rest of the file.",
-	Default: true, Severity: diag.Error, CrossFile: true,
+	Default: true, Severity: diag.Error, CrossFile: true, CompiledOnly: true,
 	Run: func(p *Pass) {
 		for _, bi := range p.Unit.BadIncludes {
 			p.Report(bi.Off, bi.End, "cannot find include file %s", bi.Raw)
@@ -179,7 +181,7 @@ var ruleBadDirective = &Rule{
 	Explain: "DGD's preprocessor rejects tokens after #else and #endif (\"bad token " +
 		"in control\"; write them as a comment) and unknown directive names " +
 		"(\"undefined control\"), even inside a skipped #if block.",
-	Default: true, Severity: diag.Error, AnyBranch: true,
+	Default: true, Severity: diag.Error,
 	Run: func(p *Pass) {
 		active := map[uint32]bool{}
 		for _, i := range p.Tree.Sel.Dirs {
@@ -233,7 +235,7 @@ var ruleInheritOrder = &Rule{
 		"must precede all declarations\"). That includes declarations that " +
 		"arrive through an #include placed before the inherit: a header with a " +
 		"prototype or a variable must be included after the inherit statements.",
-	Default: true, Severity: diag.Error,
+	Default: true, Severity: diag.Error, CompiledOnly: true,
 	Run: func(p *Pass) {
 		var first syntax.Decl
 		// A header included before an inherit that declares something.
@@ -310,8 +312,8 @@ var ruleParamType = &Rule{
 	Explain: "With typechecking >= 1 in the driver config, a function written " +
 		"without a return type is still type-checked, and a parameter without a " +
 		"type is the compile error \"missing type for parameter\". Silent when the " +
-		"typechecking level is unknown (set lint.typechecking or driver_config).",
-	Default: true, Severity: diag.Error,
+		"typechecking level is unknown (set dialect.typechecking or profile_build.driver_config).",
+	Default: true, Severity: diag.Error, CompiledOnly: true,
 	Run: func(p *Pass) {
 		if !p.typechecked() {
 			return
@@ -338,7 +340,7 @@ var ruleReturnValue = &Rule{
 		"(\"function must return value\"). Under typechecking >= 1 a function " +
 		"declared without a return type is void, which makes this the most common " +
 		"reason old LPmud code does not compile on DGD: give the function a type.",
-	Default: true, Severity: diag.Error,
+	Default: true, Severity: diag.Error, CompiledOnly: true,
 	Run: func(p *Pass) {
 		p.Tree.Funcs(func(fn *syntax.FuncDecl) bool {
 			if fn.Body == nil || fn.Name == nil {

@@ -78,8 +78,12 @@ func Summary(w io.Writer, res *lint.Result, verbose bool) {
 	for _, n := range res.Notes {
 		fmt.Fprintf(w, "note: %s\n", n.Message)
 	}
-	for _, s := range res.Skipped {
-		fmt.Fprintf(w, "warning: could not read %s\n", s)
+	for _, e := range res.Errors {
+		if e.Kind == lint.Internal {
+			fmt.Fprintf(w, "error: %s: %s\n", e.Path, e.Message)
+		} else {
+			fmt.Fprintf(w, "warning: %s: %s\n", e.Path, e.Message)
+		}
 	}
 	st := res.Stats
 	fmt.Fprintf(w, "%d file(s): %d error(s), %d warning(s), %d info", st.Files,
@@ -89,6 +93,9 @@ func Summary(w io.Writer, res *lint.Result, verbose bool) {
 	}
 	if st.Suppressed > 0 {
 		fmt.Fprintf(w, "; %d suppressed by comments", st.Suppressed)
+	}
+	if st.Capped > 0 {
+		fmt.Fprintf(w, "; %d more over a per-file limit", st.Capped)
 	}
 	fmt.Fprintln(w)
 	if !verbose {
@@ -154,12 +161,18 @@ type jsonDiag struct {
 }
 
 type jsonOut struct {
-	Version     int        `json:"version"`
-	Tool        string     `json:"tool"`
-	Diagnostics []jsonDiag `json:"diagnostics"`
-	Summary     jsonSum    `json:"summary"`
-	Notes       []jsonNote `json:"notes,omitempty"`
-	Skipped     []string   `json:"skipped,omitempty"`
+	Version     int         `json:"version"`
+	Tool        string      `json:"tool"`
+	Diagnostics []jsonDiag  `json:"diagnostics"`
+	Summary     jsonSum     `json:"summary"`
+	Notes       []jsonNote  `json:"notes,omitempty"`
+	Errors      []jsonError `json:"errors,omitempty"`
+}
+
+type jsonError struct {
+	Path    string `json:"path"`
+	Kind    string `json:"kind"` // unreadable | internal
+	Message string `json:"message"`
 }
 
 type jsonNote struct {
@@ -178,8 +191,10 @@ type jsonSum struct {
 // JSON writes a versioned JSON document. line and col are 1-based byte
 // positions; offsets are byte offsets into the file.
 func JSON(w io.Writer, res *lint.Result, o Options) error {
-	out := jsonOut{Version: 1, Tool: "dgdtools " + o.Version, Diagnostics: []jsonDiag{},
-		Skipped: res.Skipped}
+	out := jsonOut{Version: 1, Tool: "dgdtools " + o.Version, Diagnostics: []jsonDiag{}}
+	for _, e := range res.Errors {
+		out.Errors = append(out.Errors, jsonError{o.rel(e.Path), e.Kind.String(), e.Message})
+	}
 	for _, n := range res.Notes {
 		out.Notes = append(out.Notes, jsonNote{n.Kind, n.Message, n.Path})
 	}

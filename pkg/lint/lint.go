@@ -19,7 +19,9 @@ package lint
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
 	"path"
 	"path/filepath"
 	"sort"
@@ -57,10 +59,14 @@ type Rule struct {
 	// CrossFile rules need the lib index and do not run in file-local
 	// mode.
 	CrossFile bool
-	// AnyBranch rules also report inside conditional branches whose
-	// selection was a guess (the default for syntax and runtime rules is
-	// to stay silent there).
-	AnyBranch bool
+	// CompiledOnly says the rule's findings are claims about code the
+	// driver compiles: this does not compile, this fails when it runs.
+	// In a conditional branch that was chosen by guess, where it is not
+	// known whether the code is compiled at all, they are withheld. A
+	// rule about the text as it stands says false.
+	CompiledOnly bool
+	// Tags are put on every finding of the rule.
+	Tags []diag.Tag
 	// Options returns the rule's options at their defaults: a pointer to
 	// a struct whose fields carry the option's key as yaml tag and what
 	// it is for as doc tag. Those are the keys the rule's mapping in
@@ -70,6 +76,12 @@ type Rule struct {
 	Options func() any
 	Run     func(*Pass)
 }
+
+// DocsURL is where the rules are documented, one section each.
+const DocsURL = "https://github.com/mmcdole/dgdtools/blob/main/docs/rules.md"
+
+// URL returns the address of the rule's documentation.
+func (r *Rule) URL() string { return DocsURL + "#" + r.Name }
 
 // Pass is the per-file, per-rule context handed to Rule.Run.
 type Pass struct {
@@ -103,23 +115,17 @@ type fileShared struct {
 	stats fileStats
 }
 
-// Report records a finding covering the byte range [start, end). The
-// returned diagnostic may be extended with related locations and fixes.
+// Report records a finding covering the byte range [start, end) and
+// returns it, for the rule to add related locations and fixes to.
 func (p *Pass) Report(start, end uint32, format string, args ...any) *diag.Diagnostic {
 	if end < start {
 		end = start
-	}
-	if !p.rule.AnyBranch && (p.rule.Group == GroupSyntax || p.rule.Group == GroupRuntime) && p.guessed(start) {
-		// Code in a conditional branch we could not decide: whether it
-		// is compiled at all is unknown, so nothing is claimed about it.
-		p.shared.stats.guessed++
-		return &diag.Diagnostic{}
 	}
 	a, b := p.File.Pos(start), p.File.Pos(end)
 	d := &diag.Diagnostic{
 		Path: p.File.Path, Line: a.Line, Col: a.Col, EndLine: b.Line, EndCol: b.Col,
 		Start: start, End: end,
-		Severity: p.severity, Rule: p.rule.Name, Code: p.rule.Code,
+		Severity: p.severity, Rule: p.rule.Name, Code: p.rule.Code, Tags: p.rule.Tags,
 		Message: fmt.Sprintf(format, args...),
 	}
 	*p.out = append(*p.out, d)
@@ -128,10 +134,10 @@ func (p *Pass) Report(start, end uint32, format string, args ...any) *diag.Diagn
 
 // guessed reports whether byte offset off lies in a conditional branch
 // chosen by the first-branch rule.
-func (p *Pass) guessed(off uint32) bool {
-	toks := p.File.Tokens
+func guessed(tree *syntax.File, off uint32) bool {
+	toks := tree.Tok.Tokens
 	i := sort.Search(len(toks), func(i int) bool { return toks[i].End > off })
-	return i < len(toks) && p.Tree.Sel.Guessed(i)
+	return i < len(toks) && tree.Sel.Guessed(i)
 }
 
 // ReportNode records a finding covering a syntax node.
@@ -160,7 +166,10 @@ type Options struct {
 	Baseline string
 	// NoBaseline reports findings recorded in the baseline too.
 	NoBaseline bool
-	// MaxPerFile caps findings per rule per file (0 = each rule's default).
+	// MaxPerFile reports at most that many findings of one rule in one
+	// file, whatever the configuration says; 0 leaves it to the
+	// configuration (max_per_file), and a negative number lifts every
+	// limit. What a limit holds back is counted (Stats.Capped).
 	MaxPerFile int
 	// NoScan keeps the lint from starting the whole-lib scan, which the
 	// first question about who inherits a file needs and which takes
@@ -184,6 +193,7 @@ type Stats struct {
 	Files      int `json:"files"`
 	Suppressed int `json:"suppressed"` // by dgdlint: comments
 	Baselined  int `json:"baselined"`
+	Capped     int `json:"capped"` // over a max_per_file limit; not reported
 
 	// Unknowns: facts the linter could not establish and therefore drew
 	// no conclusions from.
@@ -198,15 +208,17 @@ type Stats struct {
 
 // fileStats are one file's contribution to Stats.
 type fileStats struct {
-	suppressed, baselined, callSites, unknownReceivers int
-	tainted, guessed                                   int
-	unresolvedInherits, unknownIncludes, partial       int
+	suppressed, baselined, capped                int
+	callSites, unknownReceivers                  int
+	tainted, guessed                             int
+	unresolvedInherits, unknownIncludes, partial int
 }
 
 func (st *Stats) add(f fileStats) {
 	st.Files++
 	st.Suppressed += f.suppressed
 	st.Baselined += f.baselined
+	st.Capped += f.capped
 	st.CallSites += f.callSites
 	st.UnknownReceivers += f.unknownReceivers
 	st.TaintedSyntax += f.tainted
@@ -223,13 +235,58 @@ type Result struct {
 	// Notes are remarks about the run as a whole (no lib, incomplete lib,
 	// ...).
 	Notes []diag.Note
-	// Skipped lists paths that could not be read.
-	Skipped []string
+	// Errors are the files that were not linted, and the files whose
+	// analysis crashed while another was being linted, in path order.
+	Errors []*FileError
 	// Generation is the index generation the run read; see
 	// Linter.Generation.
 	Generation uint64
 	// NeedsScan is set when Options.NoScan left questions unanswered.
 	NeedsScan bool
+}
+
+// FileError says why a file was not linted.
+type FileError struct {
+	Path string
+	Kind ErrorKind
+	// Message says what happened, without the path.
+	Message string
+}
+
+func (e *FileError) Error() string { return e.Path + ": " + e.Message }
+
+// ErrorKind tells what went wrong with a file.
+type ErrorKind uint8
+
+const (
+	// Unreadable: the file could not be read. The run is otherwise
+	// good.
+	Unreadable ErrorKind = iota
+	// Internal: the tools crashed on the file. That is a bug in them;
+	// what the run says about the rest of the lib may be missing
+	// something.
+	Internal
+)
+
+func (k ErrorKind) String() string {
+	if k == Internal {
+		return "internal"
+	}
+	return "unreadable"
+}
+
+// fileError makes the FileError of an error met while linting file.
+func fileError(file string, err error) *FileError {
+	var crash *index.InternalError
+	if errors.As(err, &crash) {
+		return &FileError{Path: crash.Path, Kind: Internal, Message: "internal error (please report): " + crash.Panic}
+	}
+	msg := err.Error()
+	var pe *fs.PathError
+	if errors.As(err, &pe) {
+		msg = pe.Err.Error()
+	}
+	return &FileError{Path: file, Kind: Unreadable, Message: "cannot be read: " + msg}
 }
 
 // Document is one linted file: its diagnostics together with what they
@@ -427,16 +484,21 @@ func (l *Linter) Run(ctx context.Context, req Request) (*Result, error) {
 	for i := range order {
 		order[i] = i
 	}
-	// A nested configuration file that is not valid fails the run: its
-	// files would otherwise be linted by settings nobody chose.
+	// A file that cannot be linted is the file's error, and the run goes
+	// on. A nested configuration file that is not valid fails the run:
+	// its files would otherwise be linted by settings nobody chose.
+	errs := make([]*FileError, len(files))
 	var failed atomic.Pointer[error]
 	lintInto := func(i int, opt *Options) {
 		d, err := l.lintFile(ctx, s, files[i], sel, opt)
+		var fe *FileError
 		switch {
+		case errors.As(err, &fe):
+			docs[i], errs[i] = nil, fe
 		case err != nil:
 			failed.CompareAndSwap(nil, &err)
-		case d != nil:
-			docs[i] = d.release()
+		default:
+			docs[i], errs[i] = d.release(), nil
 		}
 	}
 	first := req.Options
@@ -457,16 +519,25 @@ func (l *Linter) Run(ctx context.Context, req Request) (*Result, error) {
 	}
 	res.NeedsScan = len(again) > 0
 
+	reported := map[string]bool{}
 	for i, d := range docs {
-		if d == nil {
-			if ctx.Err() == nil {
-				res.Skipped = append(res.Skipped, files[i])
-			}
-			continue
+		if e := errs[i]; e != nil {
+			res.Errors = append(res.Errors, e)
+			reported[e.Path] = true
 		}
-		res.Diagnostics = append(res.Diagnostics, d.Diagnostics...)
-		res.Stats.add(d.stats)
+		if d != nil {
+			res.Diagnostics = append(res.Diagnostics, d.Diagnostics...)
+			res.Stats.add(d.stats)
+		}
 	}
+	// A file that crashed while it was read on another's behalf (a
+	// parent, a call target) made that other's answers unknown.
+	for _, crash := range s.Crashed() {
+		if !reported[crash.Path] {
+			res.Errors = append(res.Errors, fileError(crash.Path, crash))
+		}
+	}
+	sort.SliceStable(res.Errors, func(i, j int) bool { return res.Errors[i].Path < res.Errors[j].Path })
 	sort.SliceStable(res.Diagnostics, func(i, j int) bool {
 		a, b := res.Diagnostics[i], res.Diagnostics[j]
 		if a.Path != b.Path {
@@ -477,7 +548,6 @@ func (l *Linter) Run(ctx context.Context, req Request) (*Result, error) {
 		}
 		return a.Rule < b.Rule
 	})
-	sort.Strings(res.Skipped)
 	if prj.HasLib() && !req.Local {
 		res.Notes = append(res.Notes, s.Notes()...)
 	}
@@ -492,8 +562,9 @@ func (d *Document) release() *Document {
 
 // Lint lints the file at path (absolute) against the current generation
 // of the index and returns its diagnostics together with its tree. It
-// fails when the file cannot be read. Cancelling ctx stops the lint
-// early; what was found until then is returned with ctx.Err().
+// fails with a *FileError when the file cannot be read or the tools crash
+// on it. Cancelling ctx stops the lint early; what was found until then
+// is returned with ctx.Err().
 func (l *Linter) Lint(ctx context.Context, path string, opt Options) (*Document, error) {
 	if !filepath.IsAbs(path) {
 		return nil, fmt.Errorf("%s: not an absolute path", path)
@@ -506,29 +577,39 @@ func (l *Linter) Lint(ctx context.Context, path string, opt Options) (*Document,
 		return nil, err
 	}
 	d, err := l.lintFile(ctx, l.index.Snapshot(), filepath.Clean(path), sel, &opt)
-	switch {
-	case err != nil:
+	if err != nil {
 		return nil, err
-	case d == nil:
-		return nil, fmt.Errorf("%s: cannot be read", path)
 	}
 	return d, ctx.Err()
 }
 
-// lintFile lints one file against s, with the settings of that file; a
-// nil document when the file cannot be read. It fails when the file's
-// settings cannot be told: a configuration file above it is not valid.
-func (l *Linter) lintFile(ctx context.Context, s *index.Snapshot, file string, sel *selection, opt *Options) (*Document, error) {
-	parsed := s.Parse(file)
-	if parsed == nil {
-		return nil, nil
+// lintFile lints one file against s, with the settings of that file. It
+// fails with a *FileError when the file itself cannot be linted, and with
+// another error when the file's settings cannot be told: a configuration
+// file above it is not valid.
+func (l *Linter) lintFile(ctx context.Context, s *index.Snapshot, file string, sel *selection, opt *Options) (doc *Document, err error) {
+	// A bug met on one file must not take down a run over a hundred
+	// thousand.
+	running := ""
+	defer func() {
+		if r := recover(); r != nil {
+			where := ""
+			if running != "" {
+				where = " in rule " + running
+			}
+			doc, err = nil, &FileError{Path: file, Kind: Internal, Message: fmt.Sprintf("internal error%s (please report): %v", where, r)}
+		}
+	}()
+	parsed, err := s.Parse(file)
+	if err != nil {
+		return nil, fileError(file, err)
 	}
 	set, err := l.project.Settings(file)
 	if err != nil {
 		return nil, err
 	}
 	u := parsed.Unit
-	doc := &Document{
+	doc = &Document{
 		Path: file, Generation: s.Generation(),
 		File: parsed.Tok, Tree: parsed.Tree, Env: parsed.Env, Unit: u,
 	}
@@ -558,10 +639,16 @@ func (l *Linter) lintFile(ctx context.Context, s *index.Snapshot, file string, s
 		}
 	}
 
+	// What a rule finds is not yet what is reported. In this order: a
+	// finding about code that may not be compiled is withheld; one that a
+	// comment suppresses is dropped; the rest is what the file has. From
+	// that the baseline is subtracted, and only then is a rule's limit
+	// per file applied, so that a limit counts what would be shown.
 	local := opt.Local || !l.project.HasLib() || u.LibPath == ""
 	sup := scanSuppressions(parsed.Tok, l)
 	var found []*diag.Diagnostic
 	var unusedSup *active
+	limits := map[string]int{}
 	for i := range rules {
 		a, r := &rules[i], rules[i].rule
 		if r.Name == "unused-suppression" {
@@ -574,6 +661,9 @@ func (l *Linter) lintFile(ctx context.Context, s *index.Snapshot, file string, s
 		if ctx.Err() != nil {
 			break
 		}
+		if limits[r.Name] = opt.MaxPerFile; opt.MaxPerFile == 0 {
+			limits[r.Name] = a.maxPerFile
+		}
 		var out []*diag.Diagnostic
 		pass := &Pass{
 			Ctx: ctx, File: parsed.Tok, Tree: parsed.Tree, Env: parsed.Env,
@@ -581,16 +671,16 @@ func (l *Linter) lintFile(ctx context.Context, s *index.Snapshot, file string, s
 			Config: l.project.Config, Options: a.options, Format: l.format.With(set.Format),
 			shared: shared, registry: l.registry, rule: r, severity: a.severity, out: &out,
 		}
+		running = r.Name
 		r.Run(pass)
-		limit := opt.MaxPerFile
-		if limit == 0 {
-			limit = a.maxPerFile
-		}
-		if limit > 0 && len(out) > limit {
-			out = out[:limit]
-		}
+		running = ""
 		for _, d := range out {
-			if d.Rule != "" { // dropped findings are zero values
+			switch {
+			case r.CompiledOnly && guessed(parsed.Tree, d.Start):
+				stats.guessed++
+			case sup.suppressed(d.Rule, d.Line):
+				stats.suppressed++
+			default:
 				found = append(found, d)
 			}
 		}
@@ -598,10 +688,6 @@ func (l *Linter) lintFile(ctx context.Context, s *index.Snapshot, file string, s
 
 	ds := make([]diag.Diagnostic, 0, len(found))
 	for _, d := range found {
-		if sup.suppressed(d.Rule, d.Line) {
-			stats.suppressed++
-			continue
-		}
 		ds = append(ds, *d)
 	}
 	if unusedSup != nil {
@@ -628,7 +714,16 @@ func (l *Linter) lintFile(ctx context.Context, s *index.Snapshot, file string, s
 	if bl, _ := l.baselineFor(opt); bl != nil {
 		ds, stats.baselined = bl.Filter(ds)
 	}
-	doc.Diagnostics, doc.NeedsScan, doc.stats = ds, query.NeedsScan(), *stats
+	shown, kept := map[string]int{}, ds[:0]
+	for _, d := range ds {
+		if limit := limits[d.Rule]; limit > 0 && shown[d.Rule] == limit {
+			stats.capped++
+			continue
+		}
+		shown[d.Rule]++
+		kept = append(kept, d)
+	}
+	doc.Diagnostics, doc.NeedsScan, doc.stats = kept, query.NeedsScan(), *stats
 	return doc, nil
 }
 

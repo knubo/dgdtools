@@ -2,7 +2,9 @@ package index
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
 	"maps"
 	"path"
 	"path/filepath"
@@ -10,7 +12,6 @@ import (
 	"strings"
 
 	"github.com/mmcdole/dgdtools/internal/par"
-	"github.com/mmcdole/dgdtools/pkg/diag"
 	"github.com/mmcdole/dgdtools/pkg/lexer"
 	"github.com/mmcdole/dgdtools/pkg/pp"
 	"github.com/mmcdole/dgdtools/pkg/syntax"
@@ -53,19 +54,29 @@ func newSnapshot(ix *Index, gen uint64) *Snapshot {
 // Generation returns the snapshot's generation number.
 func (s *Snapshot) Generation() uint64 { return s.gen }
 
-// Notes are the remarks about the lib and about files whose analysis
-// failed in this generation.
-func (s *Snapshot) Notes() []diag.Note {
-	notes := s.lib.Notes()
+// InternalError says that the analysis of a file crashed: a bug in the
+// tools, not in the file.
+type InternalError struct {
+	Path string
+	// Panic is what the analysis panicked with.
+	Panic string
+}
+
+func (e *InternalError) Error() string {
+	return fmt.Sprintf("internal error analyzing %s (please report): %s", e.Path, e.Panic)
+}
+
+// Crashed returns the files whose analysis crashed in this generation,
+// in path order. Their facts are unknown, like those of a file that
+// cannot be read.
+func (s *Snapshot) Crashed() []*InternalError {
 	s.ix.mu.RLock()
 	defer s.ix.mu.RUnlock()
+	var out []*InternalError
 	for _, p := range slices.Sorted(maps.Keys(s.failed)) {
-		notes = append(notes, diag.Note{
-			Kind: diag.NoteInternalError, Path: p,
-			Message: fmt.Sprintf("internal error analyzing %s (please report): %s", p, s.failed[p]),
-		})
+		out = append(out, &InternalError{Path: p, Panic: s.failed[p]})
 	}
-	return notes
+	return out
 }
 
 // ----------------------------------------------------------------- files
@@ -513,20 +524,31 @@ type Parsed struct {
 }
 
 // Parse lexes and parses the file at p for linting and returns its tree
-// together with its facts, or nil if it cannot be read. The tree is not
-// kept by the index. The facts are built at most once per generation: a
-// file this generation already knows is parsed for its tree only.
-func (s *Snapshot) Parse(p string) *Parsed {
+// together with its facts. The tree is not kept by the index. The facts
+// are built at most once per generation: a file this generation already
+// knows is parsed for its tree only. It fails when the file cannot be
+// read, with the file system's error, and when its analysis crashes,
+// with an *InternalError.
+func (s *Snapshot) Parse(p string) (*Parsed, error) {
 	p = s.clean(p)
 	var a *analysis
 	u := s.unit(p, &a)
-	if u == nil {
-		return nil
+	if u != nil && a == nil {
+		s.guard(p, func() { a = s.analyze(p) })
 	}
-	if a == nil && (!s.guard(p, func() { a = s.analyze(p) }) || a == nil) {
-		return nil
+	if u != nil && a != nil {
+		return &Parsed{Unit: u, Tok: a.tok, Tree: a.tree, Env: a.env}, nil
 	}
-	return &Parsed{Unit: u, Tok: a.tok, Tree: a.tree, Env: a.env}
+	s.ix.mu.RLock()
+	crash, crashed := s.failed[p]
+	s.ix.mu.RUnlock()
+	if crashed {
+		return nil, &InternalError{Path: p, Panic: crash}
+	}
+	if _, err := s.fs.ReadFile(p); err != nil {
+		return nil, err
+	}
+	return nil, &fs.PathError{Op: "read", Path: p, Err: errors.New("the file changed while it was being read")}
 }
 
 // IncludeDeclares reports whether the file an #include resolves to, or
