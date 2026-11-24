@@ -609,10 +609,11 @@ func (s *Snapshot) Scanned() bool {
 // What an earlier scan indexed and no change has touched is not read
 // again, so after the first scan this is as cheap as the edits since.
 //
-// It reports false when the scan did not complete for this generation:
-// there is no lib, ctx was cancelled, or the index has moved on to a newer
-// generation. A scan that did not complete is not an answer; it leaves
-// what it did index for the next one.
+// It reports whether the scan is complete for this generation. It is not
+// when there is no lib, when ctx was cancelled with files still to index,
+// or when the index has moved on to a newer generation. A scan that did
+// not complete is not an answer; it leaves what it did index for the next
+// one.
 func (s *Snapshot) Scan(ctx context.Context) bool {
 	ix := s.ix
 	root := s.scanRoot()
@@ -645,5 +646,5 @@ func (s *Snapshot) Scan(ctx context.Context) bool {
 	todo := slices.Collect(maps.Keys(ix.todo))
 	ix.mu.RUnlock()
 	par.Each(ctx, todo, func(p string) { s.UnitAt(p) })
-	return ctx.Err() == nil && s.Scanned()
+	return s.Scanned()
 }

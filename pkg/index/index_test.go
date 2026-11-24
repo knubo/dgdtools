@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/fs"
 	"maps"
+	"runtime"
 	"slices"
 	"sync"
 	"testing"
@@ -18,17 +19,26 @@ import (
 	"github.com/mmcdole/dgdtools/pkg/vfs"
 )
 
-// probeFS counts reads and walks, and can hold one file's read open.
+// probeFS counts reads and walks, and can hold reads open.
 type probeFS struct {
 	vfs.FS
 	mu    sync.Mutex
 	reads map[string]int
+	total int
 	walks int
-	// gate, when set, blocks reads of that path: entered is closed when
-	// the first one arrives and the read continues when release is closed.
-	gate             string
+	// hold, when set, picks the reads that block, by path and by how many
+	// reads came before: entered is closed when the first of them arrives
+	// and they all continue when release is closed.
+	hold             func(name string, before int) bool
 	entered, release chan struct{}
-	once             sync.Once
+	arrived          bool
+}
+
+// holdReads arms hold.
+func (p *probeFS) holdReads(hold func(name string, before int) bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.hold, p.entered, p.release, p.arrived = hold, make(chan struct{}), make(chan struct{}), false
 }
 
 func (p *probeFS) ReadFile(name string) ([]byte, error) {
@@ -37,11 +47,16 @@ func (p *probeFS) ReadFile(name string) ([]byte, error) {
 		p.reads = map[string]int{}
 	}
 	p.reads[name]++
-	gated := name == p.gate
+	held := p.hold != nil && p.hold(name, p.total)
+	p.total++
+	release := p.release
+	if held && !p.arrived {
+		p.arrived = true
+		close(p.entered)
+	}
 	p.mu.Unlock()
-	if gated {
-		p.once.Do(func() { close(p.entered) })
-		<-p.release
+	if held {
+		<-release
 	}
 	return p.FS.ReadFile(name)
 }
@@ -61,7 +76,7 @@ func (p *probeFS) count(name string) int {
 
 func (p *probeFS) reset() {
 	p.mu.Lock()
-	p.reads, p.walks = nil, 0
+	p.reads, p.total, p.walks = nil, 0, 0
 	p.mu.Unlock()
 }
 
@@ -663,7 +678,7 @@ func TestInvalidateForceIncludeAndAutoObject(t *testing.T) {
 // generation that started it and is not handed to the next.
 func TestBuildInFlightIsNotCarried(t *testing.T) {
 	l := newLib(t, map[string]string{"obj/a.c": "void old_fn() { }\n"})
-	l.fs.gate, l.fs.entered, l.fs.release = "/lib/obj/a.c", make(chan struct{}), make(chan struct{})
+	l.fs.holdReads(func(name string, _ int) bool { return name == "/lib/obj/a.c" })
 	s1 := l.ix.Snapshot()
 	built := make(chan *Unit)
 	go func() { built <- s1.Unit("/obj/a") }()
@@ -739,8 +754,14 @@ func TestScan(t *testing.T) {
 }
 
 func TestScanCancelled(t *testing.T) {
+	// The scan below is cancelled while it is held at its reads: a few
+	// have passed, and each worker can be inside one more. With more
+	// files than that, some are left however the workers are scheduled
+	// and in whatever order the scan takes the files.
+	const passed = 20
+	n := passed + 2*runtime.GOMAXPROCS(0) + 20
 	files := map[string]string{"std/mod.c": "void m() { }\n"}
-	for i := range 200 {
+	for i := range n {
 		files[fmt.Sprintf("obj/o%d.c", i)] = "inherit \"/std/mod\";\n"
 	}
 	l := newLib(t, files)
@@ -751,10 +772,11 @@ func TestScanCancelled(t *testing.T) {
 	assert.False(t, s.Scan(ctx))
 	_, ok := s.UsersOf(ctx, "/std/mod")
 	assert.False(t, ok, "a cancelled scan is not an answer")
+	assert.Empty(t, l.fs.reads)
 
 	// Cancelled part-way: what was indexed is kept, the rest is done by
 	// the next scan.
-	l.fs.gate, l.fs.entered, l.fs.release = "/lib/obj/o7.c", make(chan struct{}), make(chan struct{})
+	l.fs.holdReads(func(_ string, before int) bool { return before >= passed })
 	ctx, cancel = context.WithCancel(bg)
 	done := make(chan bool)
 	go func() { done <- s.Scan(ctx) }()
@@ -766,10 +788,26 @@ func TestScanCancelled(t *testing.T) {
 
 	users, ok := s.UsersOf(bg, "/std/mod")
 	require.True(t, ok)
-	assert.Len(t, users, 200)
-	for i := range 200 {
+	assert.Len(t, users, n)
+	for i := range n {
 		assert.Equal(t, 1, l.fs.count(fmt.Sprintf("/lib/obj/o%d.c", i)), "each file is read once across both scans")
 	}
+
+	// Cancelled with the last file in hand: the scan completes, and says
+	// so.
+	l.set(t, "obj/o0.c", "void f() { }\n")
+	s = l.ix.Snapshot()
+	l.fs.holdReads(func(name string, _ int) bool { return name == "/lib/obj/o0.c" })
+	ctx, cancel = context.WithCancel(bg)
+	go func() { done <- s.Scan(ctx) }()
+	<-l.fs.entered
+	cancel()
+	close(l.fs.release)
+	assert.True(t, <-done)
+	assert.True(t, s.Scanned())
+	users, ok = s.UsersOf(ctx, "/std/mod")
+	require.True(t, ok)
+	assert.Len(t, users, n-1)
 }
 
 // ------------------------------------------------------------- query
