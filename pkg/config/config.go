@@ -1,8 +1,15 @@
-// Package config loads dgdtools.yml, the shared configuration for dgdfmt
-// and dgdlint, and discovers the project a path belongs to. Every field is
-// optional; the zero config gives working defaults. Everything
-// mudlib-specific — include dirs, the auto object, call registries, lint
-// conventions — lives here, never in the tools.
+// Package config loads dgdtools.yml, the one configuration file of the
+// dgdtools, discovers the project a path belongs to, and resolves the
+// settings each file is formatted and linted by. Every field is optional;
+// the zero config gives working defaults. Everything mudlib-specific
+// (include dirs, the auto object, call registries, conventions) lives
+// here or in a profile, never in the tools.
+//
+// A file is one of two things (docs/design/config.md). A root config
+// defines a project: its top-level keys say what the project is, and its
+// lint: and format: sections are the project's settings. A settings scope
+// (`root: false`) holds only lint: and format:, and adjusts them for the
+// files under its directory.
 package config
 
 import (
@@ -10,11 +17,13 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"reflect"
 	"strings"
 
 	"gopkg.in/yaml.v3"
 
 	"github.com/mmcdole/dgdtools/pkg/pp"
+	"github.com/mmcdole/dgdtools/pkg/profile"
 	"github.com/mmcdole/dgdtools/pkg/token"
 	"github.com/mmcdole/dgdtools/pkg/vfs"
 )
@@ -26,32 +35,63 @@ const (
 )
 
 type Config struct {
-	// Extends names config files to inherit from, resolved relative to
+	// Extends names config files to start from, resolved relative to
 	// this file. Later entries win; this file wins over all of them.
 	// Scalars and lists replace, maps merge.
 	Extends StringList `yaml:"extends"`
 
-	Dialect DialectCfg `yaml:"dialect"`
-	// Root is the filesystem directory that is the lib's "/". Relative
-	// paths are resolved against the config file's directory.
+	// Project keys: what the project is. They are the facts a profile's
+	// manifest carries, under the same names; what is set here wins over
+	// the profile. A settings scope has none of them.
+
+	// Root is the filesystem directory that is the lib's "/" (default:
+	// the config file's directory). Relative paths are resolved against
+	// the config file's directory. In YAML the key also takes the value
+	// false, which makes the file a settings scope; see Scope.
 	Root string `yaml:"root"`
-	// Profile names the mudlib profile to lint against: a name, looked
+	// Profile names the mudlib profile to work against: a name, looked
 	// up as NAME.profile next to this file, in $DGDTOOLS_PROFILE_PATH and
-	// in the user config directory (profile.UserDirs), or a file path. A profile supplies what
-	// the checkout does not contain: the driver's settings, the shared
-	// headers, and the signatures of the shared objects.
+	// in the user config directory (profile.UserDirs), or a file path. A
+	// profile supplies what the checkout does not contain: the driver's
+	// settings, the shared headers, and the signatures of the shared
+	// objects.
 	Profile string `yaml:"profile"`
 	// LibPath says where this checkout sits in the lib when it is not
 	// the whole lib: the lib path of Root, e.g. "/players/drake".
 	LibPath string `yaml:"lib_path"`
-	// ProfileBuild are the inputs of `dgdlint profile build`, for whoever
-	// has the whole lib. They also serve a whole-lib lint directly.
+	// Exclude are globs (lib-relative) of files directory walks skip.
+	Exclude []string `yaml:"exclude"`
+
+	Dialect DialectCfg `yaml:"dialect"`
+	// IncludeDirs are lib-absolute search paths for #include <...> and
+	// "..." resolution (the driver config's include_dirs).
+	IncludeDirs []string `yaml:"include_dirs"`
+	// IncludeFile is force-included into every compile by the driver.
+	IncludeFile string `yaml:"include_file"`
+	// AutoObjects are lib paths implicitly inherited by every object.
+	AutoObjects []string `yaml:"auto_objects"`
+	// RelativeObjectPaths says what an object path without a leading
+	// slash is relative to: "root" (the default; DGD resolves object
+	// names from the lib root, so "std/room" is /std/room) or "file"
+	// (the directory of the referencing file, for libs whose auto object
+	// rewrites paths that way).
+	RelativeObjectPaths string `yaml:"relative_object_paths"`
+	// Conventions are the lib's own habits: macro classes, registries.
+	Conventions profile.Conventions `yaml:"conventions"`
+	// ProfileBuild are the inputs of `dgdtools profile build`, for
+	// whoever has the whole lib. They also serve a whole-lib lint
+	// directly.
 	ProfileBuild ProfileBuild `yaml:"profile_build"`
 
-	Exclude []string `yaml:"exclude"`
-	Format  Format   `yaml:"format"`
-	Lint    Lint     `yaml:"lint"`
+	// Settings: how files are formatted and linted. A settings scope may
+	// set them for its directory; see Project.Settings.
 
+	Format Format `yaml:"format"`
+	Lint   Lint   `yaml:"lint"`
+
+	// Scope is set by `root: false`: the file is a settings scope, not a
+	// project's root config.
+	Scope bool `yaml:"-"`
 	// Dir is the directory the config was loaded from, and Path the config
 	// file; both are empty for a project without one.
 	Dir  string `yaml:"-"`
@@ -105,60 +145,23 @@ const DefaultShareMinOwners = 5
 type DialectCfg struct {
 	SlashSlash *bool `yaml:"slash_slash"` // default true
 	Closures   bool  `yaml:"closures"`    // default false
-}
-
-type Lint struct {
-	// IncludeDirs are lib-absolute search paths for #include <...> and
-	// "..." resolution (the driver config's include_dirs).
-	IncludeDirs []string `yaml:"include_dirs"`
-	// IncludeFile is force-included into every compile by the driver.
-	IncludeFile string `yaml:"include_file"`
-	// AutoObjects are lib paths implicitly inherited by every object.
-	AutoObjects []string `yaml:"auto_objects"`
 	// Typechecking is the driver's typechecking level (0, 1, 2). Rules
 	// that only hold under typechecking stay silent when it is unknown.
 	Typechecking *int `yaml:"typechecking"`
+}
 
-	// SpecifierMacros are empty-macro visibility markers ("public").
-	SpecifierMacros []string `yaml:"specifier_macros"`
-	// Defines are names treated as defined when choosing #ifdef branches.
-	Defines []string `yaml:"defines"`
-	// Macros overrides the class the parser derives for a macro:
-	// type | specifier | statement | expression | opaque.
-	Macros map[string]string `yaml:"macros"`
-
-	// CallRegistry maps function names to the argument index (0-based)
-	// holding a callback function name targeting this_object().
-	CallRegistry map[string]int `yaml:"call_registry"`
-	// AutosaveMarkers are function or macro names whose presence marks an
-	// object as persisting via save_object/restore_object.
-	AutosaveMarkers []string `yaml:"autosave_markers"`
-	// ObjectRegistry maps path-taking functions to the argument index.
-	ObjectRegistry map[string]int `yaml:"object_registry"`
-	// RelativeObjectPaths says what an object path without a leading
-	// slash is relative to: "root" (the default; DGD resolves object
-	// names from the lib root, so "std/room" is /std/room) or "file"
-	// (the directory of the referencing file, for libs whose auto object
-	// rewrites paths that way).
-	RelativeObjectPaths string `yaml:"relative_object_paths"`
-	// VirtualPaths are lib-path globs served by virtual-object daemons.
-	VirtualPaths []string `yaml:"virtual_paths"`
-	// FormatRegistry maps scanf-style functions to their format argument.
-	FormatRegistry map[string]int `yaml:"format_registry"`
-
+// Lint are the linter's settings.
+type Lint struct {
 	// Rules maps a rule name, code, or group to a severity
 	// (off|info|warning|error) or to a settings mapping.
 	Rules map[string]RuleSettings `yaml:"rules"`
-	// Enable/Disable are the legacy on/off lists (additive over defaults).
-	Enable  []string `yaml:"enable"`
-	Disable []string `yaml:"disable"`
-	// Overrides adjust rules for lib-relative path globs.
+	// Overrides adjust rules for path globs: lib-relative in a root
+	// config, relative to its directory in a settings scope.
 	Overrides []Override `yaml:"overrides"`
-	// PathRules is the legacy form of Overrides (disable lists only).
-	PathRules []PathRule `yaml:"path_rules"`
 
+	// FailOn and Baseline describe a run, not a file: root config only.
 	FailOn string `yaml:"fail_on"` // info | warning | error
-	// Baseline is the baseline file (default dgdlint-baseline.json next
+	// Baseline is the baseline file (default lint.BaselineFileName next
 	// to the config).
 	Baseline string `yaml:"baseline"`
 }
@@ -186,12 +189,7 @@ type Override struct {
 	Rules map[string]RuleSettings `yaml:"rules"`
 }
 
-type PathRule struct {
-	Paths   []string `yaml:"paths"`
-	Disable []string `yaml:"disable"`
-}
-
-// Load reads a config file, applying extends.
+// Load reads and validates a config file, applying extends.
 func Load(fs vfs.FS, path string) (*Config, error) {
 	c := &Config{}
 	if err := loadInto(fs, path, c, map[string]bool{}); err != nil {
@@ -199,10 +197,46 @@ func Load(fs vfs.FS, path string) (*Config, error) {
 	}
 	c.Dir = filepath.Dir(path)
 	c.Path = path
-	if c.Root == "" {
-		c.Root = "."
+	if err := c.validate(); err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
 	}
 	return c, nil
+}
+
+// header is what is read of a config file before the rest: what it
+// extends, and whether it is a settings scope.
+type header struct {
+	Extends StringList `yaml:"extends"`
+	Root    yaml.Node  `yaml:"root"`
+}
+
+// scope reports whether the file says `root: false`. A boolean is told
+// from a directory named like one by how it is written: `root: "false"`
+// is a path.
+func (h *header) scope() (bool, error) {
+	if h.Root.Kind != yaml.ScalarNode || h.Root.Tag != "!!bool" {
+		return false, nil
+	}
+	var v bool
+	if err := h.Root.Decode(&v); err != nil {
+		return false, err
+	}
+	if v {
+		return false, fmt.Errorf("line %d: root: true is not a setting: a dgdtools.yml is a root config unless it says root: false; give the lib root's directory, or leave root out", h.Root.Line)
+	}
+	return true, nil
+}
+
+func readHeader(fs vfs.FS, path string) (*header, []byte, error) {
+	data, err := fs.ReadFile(path)
+	if err != nil {
+		return nil, nil, err
+	}
+	h := &header{}
+	if err := yaml.Unmarshal(data, h); err != nil {
+		return nil, nil, fmt.Errorf("%s: %w", path, err)
+	}
+	return h, data, nil
 }
 
 func loadInto(fs vfs.FS, path string, c *Config, seen map[string]bool) error {
@@ -211,15 +245,9 @@ func loadInto(fs vfs.FS, path string, c *Config, seen map[string]bool) error {
 		return fmt.Errorf("%s: extends cycle", path)
 	}
 	seen[key] = true
-	data, err := fs.ReadFile(path)
+	head, data, err := readHeader(fs, path)
 	if err != nil {
 		return err
-	}
-	var head struct {
-		Extends StringList `yaml:"extends"`
-	}
-	if err := yaml.Unmarshal(data, &head); err != nil {
-		return fmt.Errorf("%s: %w", path, err)
 	}
 	for _, base := range head.Extends {
 		if !filepath.IsAbs(base) {
@@ -228,7 +256,8 @@ func loadInto(fs vfs.FS, path string, c *Config, seen map[string]bool) error {
 		if err := loadInto(fs, base, c, seen); err != nil {
 			return fmt.Errorf("%s: extends: %w", path, err)
 		}
-		// Relative paths in a base are relative to the base.
+		// Relative paths in a base are relative to the base. A base
+		// that leaves root out says nothing about it.
 		abs := func(p *string) {
 			if *p != "" && !filepath.IsAbs(*p) {
 				*p = filepath.Join(filepath.Dir(base), *p)
@@ -249,7 +278,12 @@ func loadInto(fs vfs.FS, path string, c *Config, seen map[string]bool) error {
 	if err := dec.Decode(c); err != nil && err != io.EOF {
 		return fmt.Errorf("%s: %w", path, err)
 	}
-	if c.Root == "" {
+	// What this file says about being a scope is what counts, whatever
+	// the files it extends are.
+	if c.Scope, err = head.scope(); err != nil {
+		return fmt.Errorf("%s: %w", path, err)
+	}
+	if c.Scope || c.Root == "" {
 		c.Root = root
 	}
 	if c.ProfileBuild.DriverConfig == "" {
@@ -258,26 +292,90 @@ func loadInto(fs vfs.FS, path string, c *Config, seen map[string]bool) error {
 	return nil
 }
 
-// FindPath returns the nearest config file at or above dir (an absolute
-// path), or "".
-func FindPath(fs vfs.FS, dir string) string {
+// validate checks what can be checked of a config by itself.
+func (c *Config) validate() error {
+	if n := c.Format.IndentWidth; n != 0 {
+		if err := CheckIndentWidth(n); err != nil {
+			return fmt.Errorf("format.indent_width: %w", err)
+		}
+	}
+	if !c.Scope {
+		return nil
+	}
+	// A settings scope holds settings. Everything else describes the
+	// project, of which there is one, or a run.
+	for _, k := range []struct {
+		name string
+		set  bool
+	}{
+		{"root", c.Root != ""},
+		{"profile", c.Profile != ""},
+		{"lib_path", c.LibPath != ""},
+		{"exclude", len(c.Exclude) > 0},
+		{"dialect", c.Dialect != DialectCfg{}},
+		{"include_dirs", len(c.IncludeDirs) > 0},
+		{"include_file", c.IncludeFile != ""},
+		{"auto_objects", len(c.AutoObjects) > 0},
+		{"relative_object_paths", c.RelativeObjectPaths != ""},
+		{"conventions", !reflect.DeepEqual(c.Conventions, profile.Conventions{})},
+		{"profile_build", !reflect.DeepEqual(c.ProfileBuild, ProfileBuild{})},
+		{"lint.fail_on", c.Lint.FailOn != ""},
+		{"lint.baseline", c.Lint.Baseline != ""},
+	} {
+		if k.set {
+			return fmt.Errorf("%s belongs in the project's root config; this file is a settings scope (root: false) and holds only lint.rules, lint.overrides and format", k.name)
+		}
+	}
+	return nil
+}
+
+// FindRoot returns the nearest root config at or above dir (an absolute
+// path), or "". Settings scopes on the way are passed over: they belong
+// to whatever project is above them.
+func FindRoot(fs vfs.FS, dir string) (string, error) {
 	for {
-		for _, name := range []string{FileName, AltFileName} {
-			p := filepath.Join(dir, name)
-			if fs.Exists(p) && !fs.IsDir(p) {
-				return p
-			}
+		if p, err := rootIn(fs, dir); p != "" || err != nil {
+			return p, err
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
-			return ""
+			return "", nil
 		}
 		dir = parent
 	}
 }
 
+// fileIn returns the config file in dir, or "".
+func fileIn(fs vfs.FS, dir string) string {
+	for _, name := range []string{FileName, AltFileName} {
+		if p := filepath.Join(dir, name); fs.Exists(p) && !fs.IsDir(p) {
+			return p
+		}
+	}
+	return ""
+}
+
+// rootIn returns the root config in dir: its config file, unless that is
+// a settings scope.
+func rootIn(fs vfs.FS, dir string) (string, error) {
+	p := fileIn(fs, dir)
+	if p == "" {
+		return "", nil
+	}
+	head, _, err := readHeader(fs, p)
+	if err != nil {
+		return "", err
+	}
+	if scope, err := head.scope(); err != nil {
+		return "", fmt.Errorf("%s: %w", p, err)
+	} else if scope {
+		return "", nil
+	}
+	return p, nil
+}
+
 // AbsRoot returns the lib root: Root as given when it is absolute, else
-// relative to the config file's directory.
+// relative to the config file's directory, which is the default.
 func (c *Config) AbsRoot() string {
 	if filepath.IsAbs(c.Root) {
 		return filepath.Clean(c.Root)
@@ -295,31 +393,31 @@ func (c *Config) TokenDialect() token.Dialect {
 }
 
 // Predefined returns the names that are defined before the first line of
-// every file: the preprocessor's own and lint.defines.
+// every file: the preprocessor's own and conventions.defines.
 func (c *Config) Predefined() map[string]bool {
 	m := map[string]bool{}
 	for _, d := range pp.Predefined {
 		m[d] = true
 	}
-	for _, d := range c.Lint.Defines {
+	for _, d := range c.Conventions.Defines {
 		m[d] = true
 	}
 	return m
 }
 
 // MacroClasses returns the macro classes the configuration gives:
-// lint.specifier_macros (default: public) are empty macros, lint.macros
-// names a class.
+// conventions.specifier_macros (default: public) are empty macros,
+// conventions.macros names a class.
 func (c *Config) MacroClasses() map[string]pp.Class {
 	m := map[string]pp.Class{}
-	specifiers := c.Lint.SpecifierMacros
+	specifiers := c.Conventions.SpecifierMacros
 	if len(specifiers) == 0 {
 		specifiers = []string{"public"}
 	}
 	for _, s := range specifiers {
 		m[s] = pp.ClassEmpty
 	}
-	for name, cls := range c.Lint.Macros {
+	for name, cls := range c.Conventions.Macros {
 		if class, ok := pp.ParseClass(cls); ok {
 			m[name] = class
 		}

@@ -94,14 +94,15 @@ type Options struct {
 }
 
 // OptionsFor returns the options for a file of the project configured by
-// c whose format settings are s (config.Settings.Format, or c.Format for
-// the project's own).
+// c whose format settings are s (config.Settings.Format; unset keys are
+// the defaults).
 func OptionsFor(c *config.Config, s config.Format) Options {
-	o := Options{
-		IndentWidth: s.IndentWidth,
-		Defined:     c.Predefined(),
-		Macros:      c.MacroClasses(),
-	}
+	return Options{Defined: c.Predefined(), Macros: c.MacroClasses()}.With(s)
+}
+
+// With returns o with its three settings replaced by s.
+func (o Options) With(s config.Format) Options {
+	o.IndentStyle, o.IndentWidth, o.LineEndings = Spaces, s.IndentWidth, Preserve
 	if s.IndentStyle == config.IndentTab {
 		o.IndentStyle = Tabs
 	}

@@ -42,19 +42,21 @@ type BaselineEntry struct {
 
 type baselineKey struct{ path, rule, line string }
 
-// BaselinePath returns where the project's baseline lives, or "" when the
-// project has no config file to anchor it.
+// BaselinePath returns where the project's baseline lives: lint.baseline
+// when that is an absolute path; else that name, or BaselineFileName,
+// next to the project's config file. It is "" when the project has no
+// config file of its own to anchor it (the user-level configuration is
+// not one).
 func (l *Linter) BaselinePath() string {
 	cfg := l.project.Config
-	if cfg.Path == "" {
-		return ""
-	}
 	name := cfg.Lint.Baseline
-	if name == "" {
-		name = BaselineFileName
-	}
-	if filepath.IsAbs(name) {
+	switch {
+	case filepath.IsAbs(name):
 		return name
+	case cfg.Path == "" || l.project.UserConfig:
+		return ""
+	case name == "":
+		name = BaselineFileName
 	}
 	return filepath.Join(cfg.Dir, name)
 }

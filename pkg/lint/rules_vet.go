@@ -136,7 +136,7 @@ var ruleSscanfFormat = &Rule{
 	Default: true, Severity: diag.Warning,
 	Run: func(p *Pass) {
 		registry := map[string]int{"sscanf": 1}
-		for name, idx := range p.Config.Lint.FormatRegistry {
+		for name, idx := range p.Config.Conventions.FormatRegistry {
 			registry[name] = idx
 		}
 		for _, dc := range p.calls().direct {

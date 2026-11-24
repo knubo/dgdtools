@@ -94,7 +94,7 @@ func (l *lib) IsVirtual(libPath string) bool {
 // lib path. A path without a leading slash is resolved from the lib root,
 // as the driver does, unless the config says paths are file-relative.
 func (l *lib) ObjectPath(p, fromLib string) string {
-	if l.cfg.Lint.RelativeObjectPaths == "file" {
+	if l.cfg.RelativeObjectPaths == "file" {
 		return NormalizeLibPath(p, fromLib)
 	}
 	return NormalizeLibPath(p, "/")
@@ -179,7 +179,7 @@ func (l *lib) includeProvablyMissing(from string, inc pp.Include) bool {
 			cands = append(cands, path.Join("/", path.Dir(rel), inc.Name))
 		}
 	}
-	for _, dir := range l.cfg.Lint.IncludeDirs {
+	for _, dir := range l.cfg.IncludeDirs {
 		cands = append(cands, path.Join(dir, inc.Name))
 	}
 	for _, c := range cands {

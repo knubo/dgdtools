@@ -289,7 +289,7 @@ var ruleInheritOrder = &Rule{
 // typechecked reports whether the driver compiles typeless functions with
 // type checking (config typechecking >= 1). Unknown means no.
 func (p *Pass) typechecked() bool {
-	tc := p.Config.Lint.Typechecking
+	tc := p.Config.Dialect.Typechecking
 	return tc != nil && *tc >= 1
 }
 

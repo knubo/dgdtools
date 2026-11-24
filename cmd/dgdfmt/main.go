@@ -228,7 +228,10 @@ func (c *command) settingsFor(dir string) (*settings, error) {
 	}
 	found := c.o.configPath
 	if found == "" && !c.o.noConfig {
-		found = config.FindPath(c.fsys, dir)
+		var err error
+		if found, err = config.FindRoot(c.fsys, dir); err != nil {
+			return nil, err
+		}
 	}
 	st, ok := c.byConfig[found]
 	if !ok {

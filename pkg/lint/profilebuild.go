@@ -52,7 +52,7 @@ func (l *Linter) BuildProfile(ctx context.Context) (*profile.Profile, error) {
 	omit := fileset.NewMatcher(pb.Omit)
 	exclude := fileset.NewMatcher(cfg.Exclude)
 	incDirs := map[string]bool{}
-	for _, d := range cfg.Lint.IncludeDirs {
+	for _, d := range cfg.IncludeDirs {
 		incDirs[strings.Trim(d, "/")] = true
 	}
 	underInc := func(rel string) bool {
@@ -75,16 +75,16 @@ func (l *Linter) BuildProfile(ctx context.Context) (*profile.Profile, error) {
 	p.Dialect = profile.Dialect{
 		Language: "lpc", Driver: "dgd", Version: "1.7",
 		SlashSlash: d.SlashSlash, Closures: d.Closures,
-		Typechecking: cfg.Lint.Typechecking, Predefined: pp.Predefined,
+		Typechecking: cfg.Dialect.Typechecking, Predefined: pp.Predefined,
 	}
-	p.IncludeDirs, p.IncludeFile, p.AutoObjects = cfg.Lint.IncludeDirs, cfg.Lint.IncludeFile, cfg.Lint.AutoObjects
-	p.RelativeObjectPaths = cfg.Lint.RelativeObjectPaths
+	p.IncludeDirs, p.IncludeFile, p.AutoObjects = cfg.IncludeDirs, cfg.IncludeFile, cfg.AutoObjects
+	p.RelativeObjectPaths = cfg.RelativeObjectPaths
 	p.Checkouts = pb.Checkouts
 	p.Conventions = profile.Conventions{
-		SpecifierMacros: cfg.Lint.SpecifierMacros, Macros: cfg.Lint.Macros, Defines: cfg.Lint.Defines,
-		CallRegistry: cfg.Lint.CallRegistry, ObjectRegistry: cfg.Lint.ObjectRegistry,
-		FormatRegistry: cfg.Lint.FormatRegistry, AutosaveMarkers: cfg.Lint.AutosaveMarkers,
-		VirtualPaths: cfg.Lint.VirtualPaths,
+		SpecifierMacros: cfg.Conventions.SpecifierMacros, Macros: cfg.Conventions.Macros, Defines: cfg.Conventions.Defines,
+		CallRegistry: cfg.Conventions.CallRegistry, ObjectRegistry: cfg.Conventions.ObjectRegistry,
+		FormatRegistry: cfg.Conventions.FormatRegistry, AutosaveMarkers: cfg.Conventions.AutosaveMarkers,
+		VirtualPaths: cfg.Conventions.VirtualPaths,
 	}
 
 	// Seeds: shared files and include dirs, by walking the lib once.
@@ -149,10 +149,10 @@ func (l *Linter) BuildProfile(ctx context.Context) (*profile.Profile, error) {
 	for d := range incDirs {
 		covered["/"+d+"/"] = true
 	}
-	if f := cfg.Lint.IncludeFile; f != "" {
+	if f := cfg.IncludeFile; f != "" {
 		add(filepath.Join(prj.Root, filepath.FromSlash(f)))
 	}
-	for _, a := range cfg.Lint.AutoObjects {
+	for _, a := range cfg.AutoObjects {
 		add(fileset.FSPath(prj.Root, a))
 	}
 

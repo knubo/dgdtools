@@ -59,16 +59,28 @@ type Dialect struct {
 	Predefined   []string `json:"predefined,omitempty"`   // macros the driver defines
 }
 
-// Conventions are the lib's own habits that rules need to be told.
+// Conventions are the lib's own habits that the tools need to be told.
+// The same keys are the `conventions:` section of dgdtools.yml.
 type Conventions struct {
-	SpecifierMacros []string          `json:"specifier_macros,omitempty"`
-	Macros          map[string]string `json:"macros,omitempty"`
-	Defines         []string          `json:"defines,omitempty"`
-	CallRegistry    map[string]int    `json:"call_registry,omitempty"`
-	ObjectRegistry  map[string]int    `json:"object_registry,omitempty"`
-	FormatRegistry  map[string]int    `json:"format_registry,omitempty"`
-	AutosaveMarkers []string          `json:"autosave_markers,omitempty"`
-	VirtualPaths    []string          `json:"virtual_paths,omitempty"`
+	// SpecifierMacros are empty-macro visibility markers ("public").
+	SpecifierMacros []string `json:"specifier_macros,omitempty" yaml:"specifier_macros"`
+	// Macros overrides the class the parser derives for a macro:
+	// type | specifier | statement | expression | opaque.
+	Macros map[string]string `json:"macros,omitempty" yaml:"macros"`
+	// Defines are names treated as defined when choosing #ifdef branches.
+	Defines []string `json:"defines,omitempty" yaml:"defines"`
+	// CallRegistry maps function names to the argument index (0-based)
+	// holding a callback function name targeting this_object().
+	CallRegistry map[string]int `json:"call_registry,omitempty" yaml:"call_registry"`
+	// ObjectRegistry maps path-taking functions to the argument index.
+	ObjectRegistry map[string]int `json:"object_registry,omitempty" yaml:"object_registry"`
+	// FormatRegistry maps scanf-style functions to their format argument.
+	FormatRegistry map[string]int `json:"format_registry,omitempty" yaml:"format_registry"`
+	// AutosaveMarkers are function or macro names whose presence marks an
+	// object as persisting via save_object/restore_object.
+	AutosaveMarkers []string `json:"autosave_markers,omitempty" yaml:"autosave_markers"`
+	// VirtualPaths are lib-path globs served by virtual-object daemons.
+	VirtualPaths []string `json:"virtual_paths,omitempty" yaml:"virtual_paths"`
 }
 
 // Manifest is the non-source part of a profile.

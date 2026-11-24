@@ -87,11 +87,11 @@ func (p *Pass) extractCalls() *callFacts {
 		"call_other": {arg: 1, kind: crossObject, targetArg0: true},
 		"call_out":   {arg: 0, kind: selfCallback},
 	}
-	for name, arg := range p.Config.Lint.CallRegistry {
+	for name, arg := range p.Config.Conventions.CallRegistry {
 		regs[name] = registrar{arg: arg, kind: selfCallback}
 	}
 	objRegs := map[string]int{"clone_object": 0, "compile_object": 0, "find_object": 0}
-	for name, arg := range p.Config.Lint.ObjectRegistry {
+	for name, arg := range p.Config.Conventions.ObjectRegistry {
 		objRegs[name] = arg
 	}
 	t := p.Tree

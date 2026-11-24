@@ -383,9 +383,9 @@ func TestErrorRegions(t *testing.T) {
 
 func TestOptionsFor(t *testing.T) {
 	c := &config.Config{}
-	c.Lint.SpecifierMacros = []string{"visible"}
-	c.Lint.Defines = []string{"DEBUG"}
-	c.Lint.Macros = map[string]string{"STATUS": "type"}
+	c.Conventions.SpecifierMacros = []string{"visible"}
+	c.Conventions.Defines = []string{"DEBUG"}
+	c.Conventions.Macros = map[string]string{"STATUS": "type"}
 	o := OptionsFor(c, config.Format{IndentStyle: config.IndentTab, IndentWidth: 8, LineEndings: config.LineEndingsLF})
 	assert.Equal(t, Tabs, o.IndentStyle)
 	assert.Equal(t, 8, o.IndentWidth)

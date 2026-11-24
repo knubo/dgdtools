@@ -1,6 +1,6 @@
-# dgdtools.yml -- shared configuration for dgdfmt and dgdlint.
-# Place it at your project root; every field is optional. Both find it
-# by walking up from the path they are given.
+# dgdtools.yml -- the configuration of dgdtools (lint, format).
+# Place it at your project root; every key is optional. It is found by
+# walking up from each path the tools are given.
 #
 # This file is the setup for someone who has the WHOLE lib (here:
 # VikingMUD). A wizard with only their own folder needs one line instead:
@@ -9,48 +9,26 @@
 #
 # in a dgdtools.yml in that folder (plus `lib_path: /players/<name>` if
 # the folder's path does not end in players/<name> or d/<Domain>).
+#
+# The top-level keys say what the project is. The two sections at the
+# end, `format:` and `lint:`, are settings; a dgdtools.yml further down
+# the tree that says `root: false` can adjust them for its directory
+# (see the end of this file).
 
-# extends: ../shared/dgdtools.yml   # layer on another config: scalars and
+# extends: ../shared/dgdtools.yml   # start from another file: scalars and
 #                                   # lists replace, maps merge
 
-dialect:
-  slash_slash: true          # // comments (DGD SLASHSLASH build flag)
-  closures: false            # `function` keyword, &f(), (*f)() (CLOSURES flag)
-
 root: lib                    # filesystem directory that is the lib's "/"
+                             # (default: this file's directory)
 
-# Inputs of `dgdlint profile build`, which captures this lib as a profile
-# (dgdlint.profile) for people who do not have all of it. They also serve
-# linting the whole lib directly.
-profile_build:
-  name: viking
-  # The DGD driver's own config file: include_dirs, include_file,
-  # auto_object and typechecking are read from it.
-  driver_config: etc/config.viking
-  # The code every wizard builds on. Its headers and the signatures of
-  # its objects go into the profile (never function bodies), together
-  # with everything it inherits or includes.
-  # Shared code is found by use: any file referenced (inherit, #include,
-  # call/clone/find target) from at least this many distinct owners (a
-  # wizard's tree, a domain, or another top-level directory) is shared.
-  share_min_owners: 5        # the default; -1 = only what share: lists
-  # Added to what inference finds. A whole directory listed here is also
-  # marked complete, so a path missing under it is known not to exist.
-  share: ["std/**", "obj/**", "room/**", "secure/**", "dgd/**"]
-  # Never put these in a profile, even when referenced.
-  omit: []
-  # Where wizards' own trees live; lets dgdlint recognize a checkout of
-  # one of them by its path.
-  checkouts: ["players/*", "d/*"]
-
-# profile: viking            # lint against a profile instead: viking.profile
+# profile: viking            # work against a profile instead: viking.profile
 #                            # next to this file, in $DGDTOOLS_PROFILE_PATH or
 #                            # in ~/.config/dgdtools/profiles; or a file path.
 #                            # Real files on disk always win.
 # lib_path: /players/name    # where a partial checkout sits in the lib
 
 exclude:                     # pruned from directory walks; a file named on
-  - "**/attic/**"            # the command line is always linted
+  - "**/attic/**"            # the command line is always taken
   - "**/old/**"
   - "**/OLD/**"
   - "**/.old/**"
@@ -58,31 +36,33 @@ exclude:                     # pruned from directory walks; a file named on
   - "**/*.retired"
   - "**/var/**"              # generated runtime data (maps, save state)
 
-format:
-  indent_style: space        # space | tab
-  indent_width: 4            # spaces per level
-  line_endings: preserve     # preserve | lf | crlf
+dialect:
+  slash_slash: true          # // comments (DGD SLASHSLASH build flag)
+  closures: false            # `function` keyword, &f(), (*f)() (CLOSURES flag)
+  # typechecking: 1          # the driver's level; unknown = the rules that
+  #                          # depend on it are silent
 
-lint:
-  # Only needed without a profile or driver_config, or to override them:
-  # include_dirs: ["/dgd/include", "/std/include"]
-  # include_file: "/dgd/include/Std.h"   # force-included everywhere
-  # auto_objects: ["/dgd/lib/object"]    # implicitly inherited by everything
-  # typechecking: 1                      # unknown = typechecking rules silent
+# What the driver's config says. Only needed without a profile or
+# profile_build.driver_config, or to override them:
+# include_dirs: ["/dgd/include", "/std/include"]
+# include_file: "/dgd/include/Std.h"   # force-included everywhere
+# auto_objects: ["/dgd/lib/object"]    # implicitly inherited by everything
 
-  # What "std/room" (no leading slash) is relative to. DGD resolves object
-  # names from the lib root; "file" is for libs that rewrite paths.
-  relative_object_paths: root
+# What "std/room" (no leading slash) is relative to. DGD resolves object
+# names from the lib root; "file" is for libs that rewrite paths.
+relative_object_paths: root
 
+# The lib's own habits.
+conventions:
   # Identifiers accepted in specifier position (empty visibility macros).
   specifier_macros: [public]
 
-  # Override the class dgdlint derives from a #define, for the rare macro
-  # it reads wrongly: type | specifier | statement | expression | opaque.
+  # Override the class derived from a #define, for the rare macro that is
+  # read wrongly: type | specifier | statement | expression | opaque.
   macros: {}
 
   # Names to treat as defined when choosing #ifdef branches (__DGD__ is
-  # built in). Code in a branch dgdlint cannot decide is not judged.
+  # built in). Code in a branch that cannot be decided is not judged.
   defines: []
 
   # Functions whose string argument names a callback on this_object();
@@ -106,11 +86,46 @@ lint:
   # backing .c file).
   virtual_paths: []
 
-  # Rules: `dgdlint rules` lists them with their defaults. A key is a rule
-  # name, a code (E001), or a group (all, syntax, runtime, suspicious,
-  # convention); a value is off | info | warning | error, or a mapping
-  # with a severity and the rule's options. Rule beats group beats all.
-  # Giving a severity turns a rule on.
+# Inputs of `dgdtools profile build`, which captures this lib as a
+# profile for people who do not have all of it. They also serve linting
+# the whole lib directly.
+profile_build:
+  name: viking
+  # The DGD driver's own config file: include_dirs, include_file,
+  # auto_object and typechecking are read from it.
+  driver_config: etc/config.viking
+  # The code every wizard builds on. Its headers and the signatures of
+  # its objects go into the profile (never function bodies), together
+  # with everything it inherits or includes.
+  # Shared code is found by use: any file referenced (inherit, #include,
+  # call/clone/find target) from at least this many distinct owners (a
+  # wizard's tree, a domain, or another top-level directory) is shared.
+  share_min_owners: 5        # the default; -1 = only what share: lists
+  # Added to what inference finds. A whole directory listed here is also
+  # marked complete, so a path missing under it is known not to exist.
+  share: ["std/**", "obj/**", "room/**", "secure/**", "dgd/**"]
+  # Never put these in a profile, even when referenced.
+  omit: []
+  # Where wizards' own trees live; lets a checkout of one of them be
+  # recognized by its path.
+  checkouts: ["players/*", "d/*"]
+
+# ---------------------------------------------------------------- settings
+
+# The formatter has one style and these three settings. Where a key is
+# not set here, the file's .editorconfig is asked (indent_style,
+# indent_size, end_of_line), then the default applies.
+format:
+  indent_style: space        # space | tab
+  indent_width: 4            # spaces per level
+  line_endings: preserve     # preserve | lf | crlf
+
+lint:
+  # Rules: `dgdtools rules` lists them with their defaults. A key is a
+  # rule name, a code (E001), or a group (all, syntax, runtime,
+  # suspicious, convention); a value is off | info | warning | error, or
+  # a mapping with a severity and the rule's options. Rule beats group
+  # beats all. Giving a severity turns a rule on.
   rules:
     raw-inherit-path: { severity: warning, deny: ["/std/", "/obj/"] }
     # Resolved explicit parents defining these functions must be chained.
@@ -123,14 +138,21 @@ lint:
     - paths: ["players/**"]
       rules: { lifecycle-chain: off }
 
-  # Legacy spellings, still read: enable/disable lists and path_rules.
-  # enable: []
-  # disable: []
-  # path_rules:
-  #   - paths: ["legacy/**"]
-  #     disable: [lifecycle-chain]
-
-  # Known findings to subtract (written by `dgdlint --write-baseline`).
-  baseline: dgdlint-baseline.json
+  # Known findings to subtract (written by `dgdtools lint --write-baseline`).
+  baseline: dgdtools-baseline.json
 
   fail_on: error             # exit 1 at this severity or above
+
+# ------------------------------------------------------- a settings scope
+#
+# A dgdtools.yml below this one that says `root: false` adjusts format:
+# and lint: for the files under its directory, and may hold nothing else:
+#
+#     # players/drake/dgdtools.yml
+#     root: false
+#     format: { indent_style: tab }
+#     lint:
+#       rules: { missing-visibility: warning }
+#       overrides:
+#         - paths: ["attic/**"]          # relative to this directory
+#           rules: { all: off }

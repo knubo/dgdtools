@@ -231,7 +231,7 @@ func TestProfileCommands(t *testing.T) {
 	assert.Contains(t, out, filepath.Join("dgdtools", "profiles"))
 
 	dir := lib(t, map[string]string{
-		"dgdtools.yml":            "root: lib\nprofile_build:\n  name: tiny\n  share: [\"std/**\"]\n  checkouts: [\"players/*\"]\nlint:\n  include_dirs: [/std/include]\n",
+		"dgdtools.yml":            "root: lib\nprofile_build:\n  name: tiny\n  share: [\"std/**\"]\n  checkouts: [\"players/*\"]\ninclude_dirs: [/std/include]\n",
 		"lib/std/include/m.h":     "#define I_BASE \"/std/base\"\n",
 		"lib/std/base.c":          "void create() { }\nint query(int a) { return a; }\n",
 		"lib/players/x/ignored.c": "void f() { }\n",
@@ -292,7 +292,7 @@ func TestInformationalCommands(t *testing.T) {
 	assert.Equal(t, 2, code)
 
 	dir := lib(t, map[string]string{
-		"dgdtools.yml": "root: lib\nlint:\n  typechecking: 1\n  include_dirs: [/include]\n",
+		"dgdtools.yml": "root: lib\ndialect: {typechecking: 1}\ninclude_dirs: [/include]\n",
 		"lib/a.c":      "",
 	})
 	code, out, _ = dgdlint(t, "config", filepath.Join(dir, "lib/a.c"))

@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/mmcdole/dgdtools/pkg/diag"
 	"github.com/mmcdole/dgdtools/pkg/fileset"
@@ -14,7 +15,7 @@ import (
 	"github.com/mmcdole/dgdtools/pkg/vfs"
 )
 
-// Project is a resolved lint target: a config (possibly the default),
+// Project is a resolved project: a config (possibly the empty one),
 // optionally a profile, and where the lib is.
 //
 // Three shapes exist:
@@ -25,10 +26,17 @@ import (
 //     (both empty when the checkout's place in the lib is not known). The
 //     rest of the lib is known as far as the profile describes it.
 //   - no lib: neither; only file-local analysis is possible.
+//
+// A Project is made by Discover or by a Workspace and is safe for
+// concurrent use.
 type Project struct {
 	Config *Config
 	// ConfigPath is the config file used, "" when none.
 	ConfigPath string
+	// UserConfig says ConfigPath is the user-level configuration, used
+	// because no project config was found: it defines the project, but
+	// its directory is not the project's.
+	UserConfig bool
 	// Root is the absolute path of the lib on disk, or "" when the whole
 	// lib is not there.
 	Root string
@@ -38,11 +46,18 @@ type Project struct {
 	Partial                  bool
 	CheckoutDir, CheckoutLib string
 	// Base is the directory the project is anchored at: the config's
-	// root, or the first linted path's directory. It is what a run with
-	// no path arguments lints when there is no whole lib.
+	// root, or the first path's directory. It is what a run with no path
+	// arguments works on when there is no whole lib.
 	Base string
 	// Notes are remarks about how the project was resolved.
 	Notes []diag.Note
+
+	// What Settings reads the per-directory files with, and how.
+	fs       vfs.FS
+	format   Format // set by the caller: wins over every file
+	explicit bool   // the config was named by the caller: nested files are not looked for
+	noFiles  bool   // no configuration file of any kind is read
+	settingsCache
 }
 
 // HasLib reports whether cross-file analysis is possible: the lib is on
@@ -59,11 +74,14 @@ func (prj *Project) Tree() fileset.Tree {
 // of the process environment discovery depends on. Discover itself reads
 // neither the working directory nor the environment.
 type DiscoverOptions struct {
-	ConfigPath string // use this config file
+	ConfigPath string // use this config file, and no nested one
 	Root       string // use this lib root
-	NoConfig   bool   // do not look for a config file
+	NoConfig   bool   // read no configuration file of any kind
 	Profile    string // use this profile (name or file)
 	LibPath    string // the checkout's lib path
+	// Format are format settings that win over every configuration file
+	// (command-line flags).
+	Format Format
 
 	// WorkDir is the absolute directory that relative paths (the paths
 	// to discover from, ConfigPath, Root, a Profile file) are relative
@@ -74,31 +92,57 @@ type DiscoverOptions struct {
 	// name, after the directory of the config that names it; see
 	// profile.UserDirs.
 	ProfileDirs []string
+	// UserConfig is the user-level configuration file (UserConfigPath):
+	// the root config of a path that has no project config. It need not
+	// exist.
+	UserConfig string
 }
 
-// Discover resolves the project for the given paths. The nearest config
-// file at or above each path is used (WorkDir when there are no paths);
-// paths that resolve to different config files are an error, because a
-// lint run has exactly one lib. A root is never guessed, and a profile is
-// never assumed: without a config file or explicit options the project
-// has neither.
-func Discover(fs vfs.FS, paths []string, opt DiscoverOptions) (*Project, error) {
-	prj := &Project{}
-	abs := func(p string) (string, error) {
-		switch {
-		case filepath.IsAbs(p):
-			return filepath.Clean(p), nil
-		case opt.WorkDir == "":
-			return "", fmt.Errorf("%s: a relative path needs a working directory", p)
-		}
-		return filepath.Join(opt.WorkDir, p), nil
+// UserConfigPath returns where the user-level configuration is looked
+// for, given os.UserConfigDir() and the home directory (either may be
+// empty): the first of userConfigDir/dgdtools/dgdtools.yml and
+// home/.config/dgdtools/dgdtools.yml that exists, or "".
+func UserConfigPath(fs vfs.FS, userConfigDir, home string) string {
+	var dirs []string
+	if userConfigDir != "" {
+		dirs = append(dirs, userConfigDir)
 	}
+	if home != "" {
+		dirs = append(dirs, filepath.Join(home, ".config"))
+	}
+	for _, d := range dirs {
+		if p := filepath.Join(d, "dgdtools", FileName); fs.Exists(p) && !fs.IsDir(p) {
+			return p
+		}
+	}
+	return ""
+}
+
+func (opt *DiscoverOptions) abs(p string) (string, error) {
+	switch {
+	case filepath.IsAbs(p):
+		return filepath.Clean(p), nil
+	case opt.WorkDir == "":
+		return "", fmt.Errorf("%s: a relative path needs a working directory", p)
+	}
+	return filepath.Join(opt.WorkDir, p), nil
+}
+
+// Discover resolves the project for the given paths. The nearest root
+// config at or above each path is used (WorkDir when there are no
+// paths); settings scopes (`root: false`) are passed over. Paths that
+// resolve to different root configs are an error, because a lint run has
+// exactly one lib. Without a root config the user-level configuration is
+// the project's, when there is one. A root is never guessed, and a
+// profile is never assumed: without a config file or explicit options
+// the project has neither.
+func Discover(fs vfs.FS, paths []string, opt DiscoverOptions) (*Project, error) {
 	var starts []string // the directories discovery starts from
 	if len(paths) == 0 && opt.WorkDir != "" {
 		paths = []string{opt.WorkDir}
 	}
 	for _, p := range paths {
-		p, err := abs(p)
+		p, err := opt.abs(p)
 		if err != nil {
 			return nil, err
 		}
@@ -107,42 +151,73 @@ func Discover(fs vfs.FS, paths []string, opt DiscoverOptions) (*Project, error) 
 		}
 		starts = append(starts, p)
 	}
-	switch {
-	case opt.ConfigPath != "":
-		p, err := abs(opt.ConfigPath)
-		if err != nil {
-			return nil, err
-		}
-		prj.ConfigPath = p
-	case opt.NoConfig:
-	default:
-		for _, dir := range starts {
-			found := FindPath(fs, dir)
-			if found == "" {
-				continue
-			}
-			if prj.ConfigPath != "" && prj.ConfigPath != found {
-				return nil, fmt.Errorf("paths belong to different projects (%s and %s); lint them separately or pass --config",
-					prj.ConfigPath, found)
-			}
-			prj.ConfigPath = found
-		}
-	}
-
-	base := "" // where a config-less project is anchored
+	base := "" // where a project without a config of its own is anchored
 	if len(starts) > 0 {
 		base = starts[0]
 	}
+	found := ""
+	if opt.ConfigPath == "" && !opt.NoConfig {
+		for _, dir := range starts {
+			p, err := FindRoot(fs, dir)
+			if err != nil {
+				return nil, err
+			}
+			if p == "" {
+				continue
+			}
+			if found != "" && found != p {
+				return nil, fmt.Errorf("paths belong to different projects (%s and %s); run them separately or pass --config",
+					found, p)
+			}
+			found = p
+		}
+	}
+	return resolve(fs, opt, found, base)
+}
+
+// resolve builds the project of the root config at found ("" when the
+// search found none), anchored at base when it has no config of its own.
+func resolve(fs vfs.FS, opt DiscoverOptions, found, base string) (*Project, error) {
+	prj := &Project{fs: fs, format: opt.Format, noFiles: opt.NoConfig}
+	if n := opt.Format.IndentWidth; n != 0 {
+		if err := CheckIndentWidth(n); err != nil {
+			return nil, err
+		}
+	}
+	switch {
+	case opt.ConfigPath != "":
+		p, err := opt.abs(opt.ConfigPath)
+		if err != nil {
+			return nil, err
+		}
+		prj.ConfigPath, prj.explicit = p, true
+	case opt.NoConfig:
+	case found != "":
+		prj.ConfigPath = found
+	case opt.UserConfig != "" && fs.Exists(opt.UserConfig):
+		prj.ConfigPath, prj.UserConfig = opt.UserConfig, true
+	}
+
+	prj.Config = &Config{}
 	if prj.ConfigPath != "" {
 		c, err := Load(fs, prj.ConfigPath)
 		if err != nil {
 			return nil, err
 		}
 		prj.Config = c
-		prj.Root = c.AbsRoot()
-		base = prj.Root
-	} else {
-		prj.Config = &Config{}
+		switch {
+		case c.Scope:
+			return nil, fmt.Errorf("%s is a settings scope (root: false), not a project's config", prj.ConfigPath)
+		case !prj.UserConfig:
+			prj.Root = c.AbsRoot()
+			base = prj.Root
+		case filepath.IsAbs(c.Root):
+			prj.Root = filepath.Clean(c.Root)
+			base = prj.Root
+		case c.Root != "":
+			// The user-level file has no directory that could be a lib.
+			return nil, fmt.Errorf("%s: root: %s: the user-level configuration needs an absolute root, or none", prj.ConfigPath, c.Root)
+		}
 	}
 	cfg := prj.Config
 	prj.Base = base
@@ -177,7 +252,7 @@ func Discover(fs vfs.FS, paths []string, opt DiscoverOptions) (*Project, error) 
 	}
 	switch {
 	case opt.Root != "":
-		root, err := abs(opt.Root)
+		root, err := opt.abs(opt.Root)
 		if err != nil {
 			return nil, err
 		}
@@ -205,13 +280,80 @@ func Discover(fs vfs.FS, paths []string, opt DiscoverOptions) (*Project, error) 
 		}
 		prj.Notes = append(prj.Notes, diag.Note{Kind: diag.NoteProfile, Path: prj.Profile.Path, Message: what})
 	}
-	if prj.Root != "" && !prj.Partial {
-		if !fs.IsDir(prj.Root) {
-			return nil, fmt.Errorf("lib root %s is not a directory", prj.Root)
-		}
-		cfg.Root = prj.Root
+	if prj.Root != "" && !prj.Partial && !fs.IsDir(prj.Root) {
+		return nil, fmt.Errorf("lib root %s is not a directory", prj.Root)
 	}
 	return prj, nil
+}
+
+// Workspace finds the project of each path it is asked about, for tools
+// that take files from anywhere: the formatter, an editor server. Each
+// project is resolved once. It is safe for concurrent use.
+type Workspace struct {
+	fs  vfs.FS
+	opt DiscoverOptions
+
+	mu       sync.Mutex
+	roots    map[string]string // directory -> its root config, "" for none
+	projects map[string]*found // root config -> project
+}
+
+type found struct {
+	prj *Project
+	err error
+}
+
+// NewWorkspace returns a workspace that resolves projects with opt. With
+// opt.ConfigPath or opt.NoConfig every path belongs to the one project
+// those describe.
+func NewWorkspace(fs vfs.FS, opt DiscoverOptions) *Workspace {
+	return &Workspace{fs: fs, opt: opt, roots: map[string]string{}, projects: map[string]*found{}}
+}
+
+// Project returns the project of the file or directory at path
+// (absolute): that of the nearest root config at or above it, as
+// Discover finds it. Paths without one share a project, the user-level
+// configuration's when there is one.
+func (w *Workspace) Project(path string) (*Project, error) {
+	dir := filepath.Clean(path)
+	if !w.fs.IsDir(dir) {
+		dir = filepath.Dir(dir)
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	root := ""
+	if w.opt.ConfigPath == "" && !w.opt.NoConfig {
+		var err error
+		if root, err = w.root(dir); err != nil {
+			return nil, err
+		}
+	}
+	f := w.projects[root]
+	if f == nil {
+		f = &found{}
+		f.prj, f.err = resolve(w.fs, w.opt, root, dir)
+		w.projects[root] = f
+	}
+	return f.prj, f.err
+}
+
+// root is FindRoot, remembering the answer for every directory on the
+// way up.
+func (w *Workspace) root(dir string) (string, error) {
+	if r, ok := w.roots[dir]; ok {
+		return r, nil
+	}
+	r, err := rootIn(w.fs, dir)
+	if err != nil {
+		return "", err
+	}
+	if parent := filepath.Dir(dir); r == "" && parent != dir {
+		if r, err = w.root(parent); err != nil {
+			return "", err
+		}
+	}
+	w.roots[dir] = r
+	return r, nil
 }
 
 // mount makes the project a partial checkout: dir on disk is lib path lib.
@@ -267,39 +409,38 @@ func InferCheckout(dir string, patterns []string) (checkoutDir, lib string, ok b
 // applyProfile fills the config from a profile's manifest. Anything the
 // config sets itself wins; registries are merged.
 func applyProfile(cfg *Config, p *profile.Profile) {
-	l := &cfg.Lint
-	if len(l.IncludeDirs) == 0 {
-		l.IncludeDirs = p.IncludeDirs
+	if len(cfg.IncludeDirs) == 0 {
+		cfg.IncludeDirs = p.IncludeDirs
 	}
-	if l.IncludeFile == "" {
-		l.IncludeFile = p.IncludeFile
+	if cfg.IncludeFile == "" {
+		cfg.IncludeFile = p.IncludeFile
 	}
-	if len(l.AutoObjects) == 0 {
-		l.AutoObjects = p.AutoObjects
+	if len(cfg.AutoObjects) == 0 {
+		cfg.AutoObjects = p.AutoObjects
 	}
-	if l.Typechecking == nil {
-		l.Typechecking = p.Dialect.Typechecking
+	if cfg.RelativeObjectPaths == "" {
+		cfg.RelativeObjectPaths = p.RelativeObjectPaths
 	}
-	if l.RelativeObjectPaths == "" {
-		l.RelativeObjectPaths = p.RelativeObjectPaths
+	if cfg.Dialect.Typechecking == nil {
+		cfg.Dialect.Typechecking = p.Dialect.Typechecking
 	}
 	if cfg.Dialect.SlashSlash == nil {
 		v := p.Dialect.SlashSlash
 		cfg.Dialect.SlashSlash = &v
 	}
 	cfg.Dialect.Closures = cfg.Dialect.Closures || p.Dialect.Closures
-	c := p.Conventions
-	if len(l.SpecifierMacros) == 0 {
-		l.SpecifierMacros = c.SpecifierMacros
+	own, c := &cfg.Conventions, p.Conventions
+	if len(own.SpecifierMacros) == 0 {
+		own.SpecifierMacros = c.SpecifierMacros
 	}
-	if len(l.AutosaveMarkers) == 0 {
-		l.AutosaveMarkers = c.AutosaveMarkers
+	if len(own.AutosaveMarkers) == 0 {
+		own.AutosaveMarkers = c.AutosaveMarkers
 	}
-	if len(l.VirtualPaths) == 0 {
-		l.VirtualPaths = c.VirtualPaths
+	if len(own.VirtualPaths) == 0 {
+		own.VirtualPaths = c.VirtualPaths
 	}
-	l.Defines = append(append([]string{}, c.Defines...), l.Defines...)
-	l.Defines = append(l.Defines, p.Dialect.Predefined...)
+	own.Defines = append(append([]string{}, c.Defines...), own.Defines...)
+	own.Defines = append(own.Defines, p.Dialect.Predefined...)
 	mergeInt := func(dst *map[string]int, src map[string]int) {
 		for k, v := range src {
 			if *dst == nil {
@@ -310,20 +451,20 @@ func applyProfile(cfg *Config, p *profile.Profile) {
 			}
 		}
 	}
-	mergeInt(&l.CallRegistry, c.CallRegistry)
-	mergeInt(&l.ObjectRegistry, c.ObjectRegistry)
-	mergeInt(&l.FormatRegistry, c.FormatRegistry)
+	mergeInt(&own.CallRegistry, c.CallRegistry)
+	mergeInt(&own.ObjectRegistry, c.ObjectRegistry)
+	mergeInt(&own.FormatRegistry, c.FormatRegistry)
 	for k, v := range c.Macros {
-		if l.Macros == nil {
-			l.Macros = map[string]string{}
+		if own.Macros == nil {
+			own.Macros = map[string]string{}
 		}
-		if _, set := l.Macros[k]; !set {
-			l.Macros[k] = v
+		if _, set := own.Macros[k]; !set {
+			own.Macros[k] = v
 		}
 	}
 }
 
-// DriverConfig holds the values dgdlint needs from a DGD driver config.
+// DriverConfig holds the values the tools need from a DGD driver config.
 type DriverConfig struct {
 	Directory    string
 	IncludeFile  string
@@ -390,20 +531,19 @@ func ReadDriverConfig(fs vfs.FS, path string) (*DriverConfig, error) {
 	return dc, nil
 }
 
-// Apply fills unset lint settings from the driver config. Explicit
-// dgdtools.yml values always win.
+// Apply fills what the config leaves unset from the driver config.
+// Explicit dgdtools.yml values always win.
 func (dc *DriverConfig) Apply(cfg *Config) {
-	l := &cfg.Lint
-	if len(l.IncludeDirs) == 0 {
-		l.IncludeDirs = dc.IncludeDirs
+	if len(cfg.IncludeDirs) == 0 {
+		cfg.IncludeDirs = dc.IncludeDirs
 	}
-	if l.IncludeFile == "" {
-		l.IncludeFile = dc.IncludeFile
+	if cfg.IncludeFile == "" {
+		cfg.IncludeFile = dc.IncludeFile
 	}
-	if len(l.AutoObjects) == 0 && dc.AutoObject != "" {
-		l.AutoObjects = []string{dc.AutoObject}
+	if len(cfg.AutoObjects) == 0 && dc.AutoObject != "" {
+		cfg.AutoObjects = []string{dc.AutoObject}
 	}
-	if l.Typechecking == nil {
-		l.Typechecking = dc.Typechecking
+	if cfg.Dialect.Typechecking == nil {
+		cfg.Dialect.Typechecking = dc.Typechecking
 	}
 }

@@ -158,7 +158,7 @@ func (s *Snapshot) resolveInclude(from string, inc pp.Include) (hit string, abse
 		}
 	}
 	if s.HasLib() {
-		for _, dir := range s.cfg.Lint.IncludeDirs {
+		for _, dir := range s.cfg.IncludeDirs {
 			if try(path.Join(dir, inc.Name)) {
 				return hit, absent
 			}
@@ -294,7 +294,7 @@ func (b *baseState) touchedBy(changed map[string]struct{}) bool {
 
 func (s *Snapshot) baseState() *baseState {
 	return s.base.load(func() *baseState {
-		inc := s.cfg.Lint.IncludeFile
+		inc := s.cfg.IncludeFile
 		if !s.HasLib() {
 			return &baseState{}
 		}

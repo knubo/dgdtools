@@ -124,7 +124,7 @@ type autoState struct {
 func (s *Snapshot) autoState() *autoState {
 	return s.auto.load(func() *autoState {
 		a := &autoState{funcs: map[string]ChainFunc{}, members: map[string]bool{}}
-		for _, auto := range s.cfg.Lint.AutoObjects {
+		for _, auto := range s.cfg.AutoObjects {
 			ch := s.Chain(NormalizeLibPath(auto, "/"))
 			for name, fn := range ch.Funcs {
 				fn.DefinedIn = "(auto object)"

@@ -86,9 +86,9 @@ func newLib(t *testing.T, files map[string]string, tweak ...func(*config.Config)
 	}
 	cfg := &config.Config{}
 	cfg.Root = "/lib"
-	cfg.Lint.IncludeDirs = []string{"/include"}
-	cfg.Lint.IncludeFile = "/sys/forced.h"
-	cfg.Lint.AutoObjects = []string{"/sys/auto"}
+	cfg.IncludeDirs = []string{"/include"}
+	cfg.IncludeFile = "/sys/forced.h"
+	cfg.AutoObjects = []string{"/sys/auto"}
 	for _, f := range tweak {
 		f(cfg)
 	}
@@ -796,8 +796,8 @@ func TestStubsAndCheckout(t *testing.T) {
 	}
 	both := unionFS{disk, stubs}
 	cfg := &config.Config{}
-	cfg.Lint.IncludeDirs = []string{"/include"}
-	cfg.Lint.AutoObjects = []string{"/sys/auto"}
+	cfg.IncludeDirs = []string{"/include"}
+	cfg.AutoObjects = []string{"/sys/auto"}
 	ix := New(cfg, Layout{
 		Tree:  fileset.Tree{CheckoutDir: "/home/ann", CheckoutLib: "/players/ann"},
 		Stubs: "stub://lib", Covered: []string{"/std/", "/include/"}, Holes: []string{"std/secret/**"},

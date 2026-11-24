@@ -403,12 +403,12 @@ func printConfig(w io.Writer, l *lint.Linter) {
 	if prj.CheckoutLib != "" {
 		fmt.Fprintf(w, "checkout:      %s is %s\n", prj.CheckoutDir, prj.CheckoutLib)
 	}
-	fmt.Fprintf(w, "include dirs:  %s\n", orNone(strings.Join(cfg.Lint.IncludeDirs, ", ")))
-	fmt.Fprintf(w, "include file:  %s\n", orNone(cfg.Lint.IncludeFile))
-	fmt.Fprintf(w, "auto objects:  %s\n", orNone(strings.Join(cfg.Lint.AutoObjects, ", ")))
+	fmt.Fprintf(w, "include dirs:  %s\n", orNone(strings.Join(cfg.IncludeDirs, ", ")))
+	fmt.Fprintf(w, "include file:  %s\n", orNone(cfg.IncludeFile))
+	fmt.Fprintf(w, "auto objects:  %s\n", orNone(strings.Join(cfg.AutoObjects, ", ")))
 	tc := "(unknown: typechecking-dependent rules are silent)"
-	if cfg.Lint.Typechecking != nil {
-		tc = fmt.Sprint(*cfg.Lint.Typechecking)
+	if cfg.Dialect.Typechecking != nil {
+		tc = fmt.Sprint(*cfg.Dialect.Typechecking)
 	}
 	fmt.Fprintf(w, "typechecking:  %s\n", tc)
 	fmt.Fprintf(w, "baseline:      %s\n", orNone(l.BaselinePath()))
@@ -417,7 +417,8 @@ func printConfig(w io.Writer, l *lint.Linter) {
 		fmt.Fprintf(w, "note: %s\n", n.Message)
 	}
 	fmt.Fprintf(w, "rules:\n")
-	for _, r := range l.EffectiveRules("") {
+	rules, _ := l.EffectiveRules("")
+	for _, r := range rules {
 		fmt.Fprintf(w, "  %s %-28s %s\n", r.Code, r.Name, r.Severity)
 	}
 }

@@ -29,7 +29,7 @@ profile_build:
   share: ["std/**", "secure/**"]
   omit: ["secure/private/**"]
   checkouts: ["players/*", "d/*"]
-lint:
+conventions:
   call_registry: {add_action: 0}
 `,
 		"/mud/etc/mud.dgd":                "include_file = \"/sys/forced.h\";\ninclude_dirs = ({ \"/std/include\" });\nauto_object = \"/sys/auto\";\ntypechecking = 1;\n",

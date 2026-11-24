@@ -22,11 +22,11 @@ func minilibProject(t *testing.T) *config.Project {
 	require.NoError(t, err)
 	cfg := &config.Config{}
 	cfg.Root = root
-	cfg.Lint.IncludeDirs = []string{"/include", "/dgd/include"}
-	cfg.Lint.IncludeFile = "/dgd/include/Std.h"
-	cfg.Lint.AutoObjects = []string{"/dgd/lib/object"}
-	cfg.Lint.CallRegistry = map[string]int{"register_handler": 0, "store_fp": 0}
-	cfg.Lint.VirtualPaths = []string{"virtual/**"}
+	cfg.IncludeDirs = []string{"/include", "/dgd/include"}
+	cfg.IncludeFile = "/dgd/include/Std.h"
+	cfg.AutoObjects = []string{"/dgd/lib/object"}
+	cfg.Conventions.CallRegistry = map[string]int{"register_handler": 0, "store_fp": 0}
+	cfg.Conventions.VirtualPaths = []string{"virtual/**"}
 	return &config.Project{Config: cfg, Root: root}
 }
 
@@ -176,11 +176,12 @@ func TestRuleSelection(t *testing.T) {
 	assert.Equal(t, diag.Info, seen["missing-visibility"])
 	assert.NotContains(t, seen, "static-crossobj")
 
-	// Per-path overrides, new and legacy forms.
+	// Per-path overrides.
 	prj = minilibProject(t)
-	prj.Config.Lint.Overrides = []config.Override{{Paths: []string{"obj/**"},
-		Rules: map[string]config.RuleSettings{"callable-not-found": {Severity: "off"}}}}
-	prj.Config.Lint.PathRules = []config.PathRule{{Paths: []string{"daemons/**"}, Disable: []string{"static-autosave-var"}}}
+	prj.Config.Lint.Overrides = []config.Override{
+		{Paths: []string{"obj/**"}, Rules: map[string]config.RuleSettings{"callable-not-found": {Severity: "off"}}},
+		{Paths: []string{"daemons/**"}, Rules: map[string]config.RuleSettings{"static-autosave-var": {Severity: "off"}}},
+	}
 	res = run(t, prj, vfs.OS{}, lint.Request{Options: lint.Options{Enable: []string{"static-autosave-var"}}})
 	for _, d := range res.Diagnostics {
 		assert.NotEqual(t, "callable-not-found", d.Rule)
@@ -193,9 +194,17 @@ func TestRuleSelection(t *testing.T) {
 	require.NoError(t, err)
 	_, err = l.Run(context.Background(), lint.Request{Options: lint.Options{Enable: []string{"no-such-rule"}}})
 	assert.ErrorContains(t, err, "unknown rule")
-	prj.Config.Lint.Disable = []string{"nope"}
+	prj.Config.Lint.Rules = map[string]config.RuleSettings{"nope": {Severity: "off"}}
 	_, err = lint.New(prj, vfs.OS{})
 	assert.ErrorContains(t, err, "unknown rule")
+	prj.Config.Lint.Rules = map[string]config.RuleSettings{"syntax": {Severity: "loud"}}
+	_, err = lint.New(prj, vfs.OS{})
+	assert.ErrorContains(t, err, "unknown severity")
+	prj.Config.Lint.Rules = nil
+	prj.Config.Lint.FailOn = "fatal"
+	_, err = lint.New(prj, vfs.OS{})
+	assert.ErrorContains(t, err, "lint.fail_on")
+	prj.Config.Lint.FailOn = ""
 
 	assert.Equal(t, diag.Error, lint.Threshold(prj.Config))
 	prj.Config.Lint.FailOn = "warning"
@@ -219,11 +228,11 @@ func memProject(files map[string]string) (*config.Project, vfs.Mem) {
 	}
 	cfg := &config.Config{}
 	cfg.Root = "/lib"
-	cfg.Lint.IncludeDirs = []string{"/include"}
-	cfg.Lint.IncludeFile = "/sys/forced.h"
-	cfg.Lint.AutoObjects = []string{"/sys/auto"}
+	cfg.IncludeDirs = []string{"/include"}
+	cfg.IncludeFile = "/sys/forced.h"
+	cfg.AutoObjects = []string{"/sys/auto"}
 	one := 1
-	cfg.Lint.Typechecking = &one
+	cfg.Dialect.Typechecking = &one
 	return &config.Project{Config: cfg, Root: "/lib"}, m
 }
 
@@ -346,7 +355,7 @@ func TestSyntaxRules(t *testing.T) {
 
 		// Typechecking unknown: the typeless rules are silent.
 		prj, m := memProject(map[string]string{"obj/t.c": src})
-		prj.Config.Lint.Typechecking = nil
+		prj.Config.Dialect.Typechecking = nil
 		res := run(t, prj, m, lint.Request{Paths: []string{"/lib/obj/t.c"}, Options: lint.Options{Select: []string{"E009", "E010"}}})
 		for _, d := range res.Diagnostics {
 			assert.NotContains(t, d.Message, "bar")
@@ -542,9 +551,9 @@ func TestIncompleteLibDegradesToUnknown(t *testing.T) {
 	m := vfs.Mem{"/lib/d/Foo/room.c": "#include <std.h>\n#include \"local.h\"\ninherit \"/std/room\";\nvoid create() {\n ::create();\n \"/std/thing\"->x();\n clone_object(\"/obj/y\");\n a = 1\n b = 2;\n}\n"}
 	cfg := &config.Config{}
 	cfg.Root = "/lib"
-	cfg.Lint.IncludeDirs = []string{"/include"}
-	cfg.Lint.IncludeFile = "/sys/forced.h"
-	cfg.Lint.AutoObjects = []string{"/sys/auto"}
+	cfg.IncludeDirs = []string{"/include"}
+	cfg.IncludeFile = "/sys/forced.h"
+	cfg.AutoObjects = []string{"/sys/auto"}
 	prj := &config.Project{Config: cfg, Root: "/lib"}
 	res := run(t, prj, m, lint.Request{})
 	got := keys(res.Diagnostics)

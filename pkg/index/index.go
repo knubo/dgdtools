@@ -144,13 +144,13 @@ func New(cfg *config.Config, lay Layout, fsys vfs.FS) *Index {
 		partial:  lay.Root == "" && (lay.CheckoutDir != "" || lay.Stubs != ""),
 		dialect:  cfg.TokenDialect(),
 		exclude:  fileset.NewMatcher(cfg.Exclude),
-		virtual:  fileset.NewMatcher(cfg.Lint.VirtualPaths),
+		virtual:  fileset.NewMatcher(cfg.Conventions.VirtualPaths),
 		holes:    fileset.NewMatcher(lay.Holes),
 		defined:  cfg.Predefined(),
 		override: cfg.MacroClasses(),
 		markers:  map[string]bool{},
 	}
-	markers := cfg.Lint.AutosaveMarkers
+	markers := cfg.Conventions.AutosaveMarkers
 	if len(markers) == 0 {
 		markers = []string{"set_auto_save"}
 	}
@@ -164,15 +164,15 @@ func New(cfg *config.Config, lay Layout, fsys vfs.FS) *Index {
 			return filepath.Join(lay.Root, filepath.FromSlash(strings.TrimPrefix(libPath, "/")))
 		}
 		var missing []string
-		for _, d := range cfg.Lint.IncludeDirs {
+		for _, d := range cfg.IncludeDirs {
 			if !fsys.IsDir(real(d)) {
 				missing = append(missing, d)
 			}
 		}
-		if f := cfg.Lint.IncludeFile; f != "" && !fsys.Exists(real(f)) {
+		if f := cfg.IncludeFile; f != "" && !fsys.Exists(real(f)) {
 			missing = append(missing, f)
 		}
-		for _, a := range cfg.Lint.AutoObjects {
+		for _, a := range cfg.AutoObjects {
 			if !fsys.Exists(real(withC(a))) {
 				missing = append(missing, a)
 			}
@@ -362,7 +362,7 @@ func (ix *Index) Invalidate(paths ...string) []string {
 	}
 	// Every object gets the auto object's functions.
 	autoChanged := false
-	for _, a := range ix.cfg.Lint.AutoObjects {
+	for _, a := range ix.cfg.AutoObjects {
 		if _, hit := objects[NormalizeLibPath(a, "/")]; hit {
 			autoChanged = true
 			everyUnit()

@@ -25,6 +25,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/mmcdole/dgdtools/internal/par"
 	"github.com/mmcdole/dgdtools/pkg/config"
@@ -76,7 +77,7 @@ type Pass struct {
 	LibPath  string // "" when the file has no lib path
 	Config   *config.Config
 	Settings config.RuleSettings
-	// Format are the project's formatter options.
+	// Format are the formatter's options for this file.
 	Format format.Options
 
 	shared   *fileShared
@@ -248,17 +249,29 @@ type Linter struct {
 
 	rules    []*Rule
 	byKey    map[string][]*Rule // name, code, group, "all" -> rules
-	override []compiledOverride
-	format   format.Options
+	override []layer            // the project's lint.overrides
+	scopes   sync.Map           // *config.Scope -> *scopeLayers
+	format   format.Options     // the project's part of the formatter's options
 
 	baselineOnce sync.Once
 	baseline     *Baseline
 	baselineErr  error
 }
 
-type compiledOverride struct {
+// layer is a set of rule settings and the files it is for.
+type layer struct {
+	// match selects the files: by lib-relative name for the project's
+	// overrides, by name relative to the scope's directory for a
+	// scope's. nil is every file.
 	match *fileset.Matcher
 	rules map[string]config.RuleSettings
+}
+
+// scopeLayers are the layers of one nested configuration file: its rules,
+// then its overrides.
+type scopeLayers struct {
+	layers []layer
+	err    error
 }
 
 // New creates a linter for the project. It fails on configuration that
@@ -272,52 +285,20 @@ func New(prj *config.Project, fsys vfs.FS) (*Linter, error) {
 		l.byKey["all"] = append(l.byKey["all"], r)
 	}
 	cfg := prj.Config
-	l.format = format.OptionsFor(cfg, cfg.Format)
-	check := func(where string, names ...string) error {
-		for _, n := range names {
-			if n = strings.TrimSpace(n); n != "" && l.lookup(n) == nil {
-				return fmt.Errorf("%s: unknown rule %q (see `dgdlint rules`)", where, n)
-			}
+	l.format = format.OptionsFor(cfg, config.Format{})
+	if err := l.checkRules("lint.rules", cfg.Lint.Rules); err != nil {
+		return nil, err
+	}
+	if fo := cfg.Lint.FailOn; fo != "" {
+		if _, ok := diag.ParseSeverity(strings.ToLower(fo)); !ok {
+			return nil, fmt.Errorf("lint.fail_on: unknown severity %q", fo)
 		}
-		return nil
-	}
-	checkSettings := func(where string, m map[string]config.RuleSettings) error {
-		for name, rs := range m {
-			if err := check(where, name); err != nil {
-				return err
-			}
-			if rs.Severity != "" && rs.Severity != "off" {
-				if _, ok := diag.ParseSeverity(strings.ToLower(rs.Severity)); !ok {
-					return fmt.Errorf("%s: rule %q: unknown severity %q", where, name, rs.Severity)
-				}
-			}
-		}
-		return nil
-	}
-	if err := checkSettings("lint.rules", cfg.Lint.Rules); err != nil {
-		return nil, err
-	}
-	if err := check("lint.enable", cfg.Lint.Enable...); err != nil {
-		return nil, err
-	}
-	if err := check("lint.disable", cfg.Lint.Disable...); err != nil {
-		return nil, err
 	}
 	for _, o := range cfg.Lint.Overrides {
-		if err := checkSettings("lint.overrides", o.Rules); err != nil {
+		if err := l.checkRules("lint.overrides", o.Rules); err != nil {
 			return nil, err
 		}
-		l.override = append(l.override, compiledOverride{fileset.NewMatcher(o.Paths), o.Rules})
-	}
-	for _, pr := range cfg.Lint.PathRules {
-		if err := check("lint.path_rules", pr.Disable...); err != nil {
-			return nil, err
-		}
-		m := map[string]config.RuleSettings{}
-		for _, d := range pr.Disable {
-			m[d] = config.RuleSettings{Severity: "off"}
-		}
-		l.override = append(l.override, compiledOverride{fileset.NewMatcher(pr.Paths), m})
+		l.override = append(l.override, layer{fileset.NewMatcher(o.Paths), o.Rules})
 	}
 	lay := index.Layout{Tree: prj.Tree()}
 	if prj.Profile != nil {
@@ -328,6 +309,44 @@ func New(prj *config.Project, fsys vfs.FS) (*Linter, error) {
 	}
 	l.index = index.New(cfg, lay, fsys)
 	return l, nil
+}
+
+// checkRules reports a rule setting that names an unknown rule or
+// severity.
+func (l *Linter) checkRules(where string, m map[string]config.RuleSettings) error {
+	for name, rs := range m {
+		if l.lookup(strings.TrimSpace(name)) == nil {
+			return fmt.Errorf("%s: unknown rule %q (see `dgdtools rules`)", where, name)
+		}
+		if rs.Severity != "" && rs.Severity != "off" {
+			if _, ok := diag.ParseSeverity(strings.ToLower(rs.Severity)); !ok {
+				return fmt.Errorf("%s: rule %q: unknown severity %q", where, name, rs.Severity)
+			}
+		}
+	}
+	return nil
+}
+
+// layersOf returns the layers of a nested configuration file, checked
+// once.
+func (l *Linter) layersOf(sc *config.Scope) ([]layer, error) {
+	if v, ok := l.scopes.Load(sc); ok {
+		sl := v.(*scopeLayers)
+		return sl.layers, sl.err
+	}
+	sl := &scopeLayers{}
+	if sl.err = l.checkRules(sc.Path+": lint.rules", sc.Rules); sl.err == nil {
+		sl.layers = append(sl.layers, layer{nil, sc.Rules})
+		for _, o := range sc.Overrides {
+			if sl.err = l.checkRules(sc.Path+": lint.overrides", o.Rules); sl.err != nil {
+				break
+			}
+			sl.layers = append(sl.layers, layer{fileset.NewMatcher(o.Paths), o.Rules})
+		}
+	}
+	v, _ := l.scopes.LoadOrStore(sc, sl)
+	sl = v.(*scopeLayers)
+	return sl.layers, sl.err
 }
 
 // Project returns the project the linter was made for.
@@ -370,9 +389,10 @@ type active struct {
 	settings config.RuleSettings
 }
 
-// resolve computes which rules run on a file (rel is lib-relative, "" when
-// the file is outside the root) and with what severity.
-func (l *Linter) resolve(rel string, req *Options) (map[*Rule]*active, error) {
+// resolve computes which rules run on a file and with what severity. rel
+// is the file's lib-relative name ("" when it is outside the lib) and
+// set its settings (nil: the project's own).
+func (l *Linter) resolve(file, rel string, set *config.Settings, req *Options) (map[*Rule]*active, error) {
 	st := make(map[*Rule]*active, len(l.rules))
 	for _, r := range l.rules {
 		st[r] = &active{on: r.Default, severity: r.Severity}
@@ -417,14 +437,14 @@ func (l *Linter) resolve(rel string, req *Options) (map[*Rule]*active, error) {
 			}
 		}
 	}
-	set := func(names []string, on bool) error {
+	turn := func(names []string, on bool) error {
 		for _, n := range names {
 			if n = strings.TrimSpace(n); n == "" {
 				continue
 			}
 			rules := l.lookup(n)
 			if rules == nil {
-				return fmt.Errorf("unknown rule %q (see `dgdlint rules`)", n)
+				return fmt.Errorf("unknown rule %q (see `dgdtools rules`)", n)
 			}
 			for _, r := range rules {
 				st[r].on = on
@@ -432,40 +452,41 @@ func (l *Linter) resolve(rel string, req *Options) (map[*Rule]*active, error) {
 		}
 		return nil
 	}
-	cfg := l.project.Config
-	apply(cfg.Lint.Rules)
-	if err := set(cfg.Lint.Enable, true); err != nil {
-		return nil, err
-	}
-	if err := set(cfg.Lint.Disable, false); err != nil {
-		return nil, err
-	}
+	apply(l.project.Config.Lint.Rules)
 	// Command line: --select names the candidate set, --enable adds to
-	// it. Per-path overrides are applied after, so a path that turns a
-	// rule off keeps it off; --disable/--ignore has the last word.
+	// it. What is said about a path (the project's overrides, then each
+	// nested configuration file from the outermost in) is applied after,
+	// so a path that turns a rule off keeps it off; --ignore has the last
+	// word.
 	selected := map[*Rule]bool{}
-	if len(req.Select) > 0 {
-		if err := set(req.Select, true); err != nil {
+	for _, names := range [][]string{req.Select, req.Enable} {
+		if err := turn(names, true); err != nil {
 			return nil, err
 		}
-		for _, n := range req.Select {
+		for _, n := range names {
 			for _, r := range l.lookup(strings.TrimSpace(n)) {
 				selected[r] = true
 			}
-		}
-	}
-	if err := set(req.Enable, true); err != nil {
-		return nil, err
-	}
-	for _, n := range req.Enable {
-		for _, r := range l.lookup(strings.TrimSpace(n)) {
-			selected[r] = true
 		}
 	}
 	if rel != "" {
 		for _, o := range l.override {
 			if o.match.Match(rel) {
 				apply(o.rules)
+			}
+		}
+	}
+	if set != nil {
+		for _, sc := range set.Scopes {
+			layers, err := l.layersOf(sc)
+			if err != nil {
+				return nil, err
+			}
+			in, _ := filepath.Rel(sc.Dir, file)
+			for _, o := range layers {
+				if o.match == nil || o.match.Match(filepath.ToSlash(in)) {
+					apply(o.rules)
+				}
 			}
 		}
 	}
@@ -476,7 +497,7 @@ func (l *Linter) resolve(rel string, req *Options) (map[*Rule]*active, error) {
 			}
 		}
 	}
-	if err := set(req.Disable, false); err != nil {
+	if err := turn(req.Disable, false); err != nil {
 		return nil, err
 	}
 	return st, nil
@@ -495,7 +516,7 @@ func (l *Linter) Run(ctx context.Context, req Request) (*Result, error) {
 			Message: "no dgdtools.yml and no --root: running file-local rules only (cross-file rules need a lib root)"})
 	}
 	// Validate rule names and the baseline once, up front.
-	if _, err := l.resolve("", &req.Options); err != nil {
+	if _, err := l.resolve("", "", nil, &req.Options); err != nil {
 		return nil, err
 	}
 	if !req.NoBaseline {
@@ -569,13 +590,21 @@ func (l *Linter) Run(ctx context.Context, req Request) (*Result, error) {
 	for i := range order {
 		order[i] = i
 	}
-	first := req.Options
-	first.NoScan = true
-	par.Each(ctx, order, func(i int) {
-		if d := l.lintFile(ctx, s, files[i], &first); d != nil {
+	// A nested configuration file that is not valid fails the run: its
+	// files would otherwise be linted by settings nobody chose.
+	var failed atomic.Pointer[error]
+	lintInto := func(i int, opt *Options) {
+		d, err := l.lintFile(ctx, s, files[i], opt)
+		switch {
+		case err != nil:
+			failed.CompareAndSwap(nil, &err)
+		case d != nil:
 			docs[i] = d.release()
 		}
-	})
+	}
+	first := req.Options
+	first.NoScan = true
+	par.Each(ctx, order, func(i int) { lintInto(i, &first) })
 	var again []int
 	for i, d := range docs {
 		if d != nil && d.NeedsScan {
@@ -583,12 +612,11 @@ func (l *Linter) Run(ctx context.Context, req Request) (*Result, error) {
 		}
 	}
 	if len(again) > 0 && !req.NoScan && s.Scan(ctx) {
-		par.Each(ctx, again, func(i int) {
-			if d := l.lintFile(ctx, s, files[i], &req.Options); d != nil {
-				docs[i] = d.release()
-			}
-		})
+		par.Each(ctx, again, func(i int) { lintInto(i, &req.Options) })
 		again = nil
+	}
+	if err := failed.Load(); err != nil {
+		return nil, *err
 	}
 	res.NeedsScan = len(again) > 0
 
@@ -633,7 +661,7 @@ func (l *Linter) Lint(ctx context.Context, path string, opt Options) (*Document,
 	if !filepath.IsAbs(path) {
 		return nil, fmt.Errorf("%s: not an absolute path", path)
 	}
-	if _, err := l.resolve("", &opt); err != nil {
+	if _, err := l.resolve("", "", nil, &opt); err != nil {
 		return nil, err
 	}
 	if !opt.NoBaseline {
@@ -641,18 +669,27 @@ func (l *Linter) Lint(ctx context.Context, path string, opt Options) (*Document,
 			return nil, err
 		}
 	}
-	d := l.lintFile(ctx, l.index.Snapshot(), filepath.Clean(path), &opt)
-	if d == nil {
+	d, err := l.lintFile(ctx, l.index.Snapshot(), filepath.Clean(path), &opt)
+	switch {
+	case err != nil:
+		return nil, err
+	case d == nil:
 		return nil, fmt.Errorf("%s: cannot be read", path)
 	}
 	return d, ctx.Err()
 }
 
-// lintFile lints one file against s; nil when the file cannot be read.
-func (l *Linter) lintFile(ctx context.Context, s *index.Snapshot, file string, opt *Options) *Document {
+// lintFile lints one file against s, with the settings of that file; a
+// nil document when the file cannot be read. It fails when the file's
+// settings cannot be told: a configuration file above it is not valid.
+func (l *Linter) lintFile(ctx context.Context, s *index.Snapshot, file string, opt *Options) (*Document, error) {
 	parsed := s.Parse(file)
 	if parsed == nil {
-		return nil
+		return nil, nil
+	}
+	set, err := l.project.Settings(file)
+	if err != nil {
+		return nil, err
 	}
 	u := parsed.Unit
 	doc := &Document{
@@ -663,9 +700,9 @@ func (l *Linter) lintFile(ctx context.Context, s *index.Snapshot, file string, o
 	if u.LibPath != "" && path.Ext(rel) == "" {
 		rel += ".c"
 	}
-	st, err := l.resolve(rel, opt)
+	st, err := l.resolve(file, rel, set, opt)
 	if err != nil {
-		return doc
+		return nil, err
 	}
 	query := s.Query(u, opt.NoScan)
 	shared := &fileShared{}
@@ -708,7 +745,7 @@ func (l *Linter) lintFile(ctx context.Context, s *index.Snapshot, file string, o
 		pass := &Pass{
 			Ctx: ctx, File: parsed.Tok, Tree: parsed.Tree, Env: parsed.Env,
 			Unit: u, Index: query, LibPath: u.LibPath,
-			Config: l.project.Config, Settings: a.settings, Format: l.format,
+			Config: l.project.Config, Settings: a.settings, Format: l.format.With(set.Format),
 			shared: shared, rule: r, severity: a.severity, out: &out,
 		}
 		r.Run(pass)
@@ -759,18 +796,28 @@ func (l *Linter) lintFile(ctx context.Context, s *index.Snapshot, file string, o
 		ds, stats.baselined = bl.Filter(ds)
 	}
 	doc.Diagnostics, doc.NeedsScan, doc.stats = ds, query.NeedsScan(), *stats
-	return doc
+	return doc, nil
 }
 
 // Rules returns the linter's rule table.
 func (l *Linter) Rules() []*Rule { return l.rules }
 
-// EffectiveRules returns the rules that would run on a lib-relative path
-// ("" for a path-independent answer), with their effective severity.
-func (l *Linter) EffectiveRules(rel string) []*Rule {
-	st, err := l.resolve(rel, &Options{})
+// EffectiveRules returns the rules that would run on the file at path
+// (absolute; "" for the project's own answer, before any path is
+// considered), with their effective severity.
+func (l *Linter) EffectiveRules(path string) ([]*Rule, error) {
+	var set *config.Settings
+	rel := ""
+	if path != "" {
+		var err error
+		if set, err = l.project.Settings(path); err != nil {
+			return nil, err
+		}
+		rel, _ = l.project.Tree().Rel(path)
+	}
+	st, err := l.resolve(path, rel, set, &Options{})
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	var out []*Rule
 	for _, r := range l.rules {
@@ -780,7 +827,7 @@ func (l *Linter) EffectiveRules(rel string) []*Rule {
 			out = append(out, &c)
 		}
 	}
-	return out
+	return out, nil
 }
 
 // RuleByName returns the rule with the given name or code, or nil.
