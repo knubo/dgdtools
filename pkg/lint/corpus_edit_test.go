@@ -88,11 +88,7 @@ func TestCorpusEdit(t *testing.T) {
 
 		invalidate, relint, rescan = append(invalidate, t1.Sub(t0)), append(relint, t2.Sub(t1)), append(rescan, t3.Sub(t2))
 		affected = append(affected, len(deps))
-		n := 0
-		for _, c := range cfs.counts() {
-			n += c
-		}
-		reads = append(reads, n)
+		reads = append(reads, cfs.total())
 		require.Zero(t, cfs.walks(), "%s: the lib was walked again", p)
 		require.Equal(t, l.Generation(), doc.Generation)
 
@@ -125,4 +121,15 @@ func TestCorpusEdit(t *testing.T) {
 	if n := ipct(reads, .95); n > 50 {
 		t.Errorf("95%% of edits should read a handful of files; read %d", n)
 	}
+}
+
+// total is the number of file reads since the last reset.
+func (c *countingFS) total() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	n := 0
+	for _, r := range c.nread {
+		n += r
+	}
+	return n
 }

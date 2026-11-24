@@ -395,6 +395,7 @@ func TestFormatErrors(t *testing.T) {
 	// A scope that is not valid stops its own files, not its project's.
 	code, _, errs = dgdtools(t, "", "format", filepath.Join(dir, "scope"))
 	assert.Equal(t, 2, code)
+	assert.Contains(t, errs, "exclude belongs in the project's root config")
 	assert.Equal(t, formatted, read(t, filepath.Join(dir, "scope/b.c")))
 	assert.Equal(t, messy, read(t, filepath.Join(dir, "scope/in/a.c")))
 

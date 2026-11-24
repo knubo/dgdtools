@@ -147,9 +147,8 @@ func (lx *lexer) scanToken() {
 		for lx.pos < len(lx.src) && isIdentPart(lx.src[lx.pos]) {
 			lx.pos++
 		}
-		word := string(lx.src[start:lx.pos])
 		kind := token.Ident
-		if kw, ok := token.Keywords[word]; ok && (kw != token.KwFunction || lx.dialect.Closures) {
+		if kw, ok := token.Keywords[string(lx.src[start:lx.pos])]; ok && (kw != token.KwFunction || lx.dialect.Closures) {
 			kind = kw
 		}
 		lx.emit(kind, start)

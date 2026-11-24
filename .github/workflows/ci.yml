@@ -19,7 +19,9 @@ jobs:
 
   # Static analysis runs with the current Go release, which the current
   # staticcheck is built for; the code is checked as the Go version of
-  # go.mod. The corpus tag takes in the files only the corpus tests build.
+  # go.mod. Twice: as everybody builds it, and with the files only the
+  # corpus tests build, which use helpers the first run must not see as
+  # unused.
   staticcheck:
     runs-on: ubuntu-latest
     steps:
@@ -27,4 +29,6 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: stable
-      - run: go run honnef.co/go/tools/cmd/staticcheck@latest -tags corpus ./...
+      - run: go install honnef.co/go/tools/cmd/staticcheck@latest
+      - run: staticcheck ./...
+      - run: staticcheck -tags corpus ./...

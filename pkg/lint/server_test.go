@@ -309,16 +309,6 @@ func (c *countingFS) reads(p string) int {
 	return c.nread[p]
 }
 
-func (c *countingFS) counts() map[string]int {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	out := map[string]int{}
-	for p, n := range c.nread {
-		out[p] = n
-	}
-	return out
-}
-
 func (c *countingFS) walks() int {
 	c.mu.Lock()
 	defer c.mu.Unlock()

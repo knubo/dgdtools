@@ -142,7 +142,7 @@ o
 	f, sel, _ = scan("/* header */\n#ifndef X_H\n#define X_H\nint a;\n#endif\n")
 	assert.Equal(t, "", guessedText(f, sel))
 	// ...but `#ifndef X` that is not a guard is a guess.
-	f, sel, _ = scan("int z;\n#ifndef X\nint a;\n#endif\n")
+	_, sel, _ = scan("int z;\n#ifndef X\nint a;\n#endif\n")
 	assert.True(t, sel.Guessed(sel.Sig[len(sel.Sig)-1]))
 }
 
