@@ -41,7 +41,7 @@ func ParseSeverity(s string) (Severity, bool) {
 
 // Diagnostic is one finding tied to a source range. Rule and Code are
 // empty for diagnostics that do not come from a lint rule (lexer errors
-// reported by dgdfmt).
+// reported by the formatter).
 //
 // Line and Col are 1-based; Col counts bytes. Start and End are byte
 // offsets into the file (End exclusive); use UTF16Col to derive the

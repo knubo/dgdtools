@@ -12,7 +12,7 @@ import (
 )
 
 // BaselineFileName is the default baseline file, next to the config.
-const BaselineFileName = "dgdlint-baseline.json"
+const BaselineFileName = "dgdtools-baseline.json"
 
 // Baseline is the set of known findings a project has agreed to live
 // with. A lint subtracts them, so only new findings are reported.

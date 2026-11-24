@@ -296,16 +296,17 @@ var ruleMissingVisibility = &Rule{
 
 var ruleUnformatted = &Rule{
 	Code: "C003", Name: "unformatted", Group: GroupConvention,
-	Doc:     "file is not dgdfmt-formatted",
-	Explain: "Formats the file exactly as dgdfmt does, with the project's format settings, and reports a difference.",
+	Doc: "file is not formatted as `dgdtools format` would format it",
+	Explain: "Formats the file exactly as `dgdtools format` does, with the format settings of that file, and reports a difference. " +
+		"What `dgdfmt: off` comments protect is left alone here too.",
 	Default: false, Severity: diag.Info,
 	Run: func(p *Pass) {
 		out, err := format.Format(p.File, p.Format)
 		if err != nil {
-			return // unlexable files are dgdfmt's problem, not a finding
+			return // a file that does not tokenize is a syntax finding, not this one
 		}
 		if string(out) != string(p.File.Src) {
-			p.Report(0, 0, "file is not dgdfmt-formatted (run dgdfmt -w)")
+			p.Report(0, 0, "file is not formatted (run `dgdtools format`)")
 		}
 	},
 }

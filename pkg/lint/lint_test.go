@@ -714,7 +714,7 @@ func TestBaseline(t *testing.T) {
 	l, err = lint.New(prj, m)
 	require.NoError(t, err)
 	_, err = l.Run(ctx, lint.Request{})
-	assert.ErrorContains(t, err, "dgdlint-baseline.json")
+	assert.ErrorContains(t, err, "dgdtools-baseline.json")
 	_, err = l.Run(ctx, lint.Request{Options: lint.Options{NoBaseline: true}})
 	assert.NoError(t, err, "a broken baseline does not stop a run that ignores it")
 }

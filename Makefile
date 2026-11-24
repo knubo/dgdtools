@@ -4,12 +4,10 @@ LDFLAGS := -ldflags "-X main.version=$(VERSION)"
 .PHONY: build test corpus clean
 
 build:
-	go build $(LDFLAGS) -o bin/dgdfmt ./cmd/dgdfmt
-	go build $(LDFLAGS) -o bin/dgdlint ./cmd/dgdlint
-	go build $(LDFLAGS) -o bin/dgdcmp ./cmd/dgdcmp
+	go build $(LDFLAGS) -o bin/dgdtools ./cmd/dgdtools
 
 test:
-	go test ./...
+	go test -race ./...
 
 # Full-corpus invariants: lex round-trip, comparator self-compare, and the
 # formatter gate over every .c/.h under LPC_CORPUS.

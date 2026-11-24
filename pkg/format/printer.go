@@ -198,21 +198,34 @@ func (p *printer) copyGap(gap []token.Token, next int) {
 }
 
 // teach records that the line beginning with the token at index i is
-// indented by lead, when that says something about its level: the token
-// begins a statement the parser understood.
+// indented by lead, when that says something about its level.
 func (p *printer) teach(i int, lead []byte) {
 	p.forget(i)
+	if level, ok := p.teaches(i); ok {
+		p.learn(level, lead)
+	}
+}
+
+// teaches reports whether the indentation of a line beginning with the
+// token at index i says how its level is indented, and which level that
+// is: the token begins a statement the parser understood, inside a
+// function.
+func (p *printer) teaches(i int) (level int, ok bool) {
 	x := p.plan.info[i]
 	switch {
 	case x.flags&(known|head) != known|head, x.flags&(caseLabel|block) != 0:
-		return // not a statement's first line
+		return 0, false // not a statement's first line
 	case p.f.Tokens[i].Kind == token.KwElse, x.level == 0:
-		return // part of the statement above; and the top level is the margin
+		return 0, false // part of the statement above; and the top level is the margin
 	}
-	for len(p.taught) <= int(x.level) {
+	return int(x.level), true
+}
+
+func (p *printer) learn(level int, lead []byte) {
+	for len(p.taught) <= level {
 		p.taught = append(p.taught, nil)
 	}
-	p.taught[x.level] = append([]byte{}, lead...)
+	p.taught[level] = append([]byte{}, lead...)
 }
 
 // forget drops what deeper levels taught when a line begins with the
@@ -235,7 +248,15 @@ func (p *printer) forget(i int) {
 // plus the configured unit for each level beyond that.
 func (p *printer) indent(i, level int) {
 	if p.sel != nil {
-		p.forget(i)
+		// The line's own level is asked of the lines above it, then of
+		// the lines below; a line that continues a statement, or closes
+		// something, is indented from its statement's.
+		own := min(level, int(p.plan.info[i].level))
+		if own > 0 && (own >= len(p.taught) || p.taught[own] == nil) {
+			if lead, ok := p.below(i, own); ok {
+				p.learn(own, lead)
+			}
+		}
 		for base := min(level, len(p.taught)-1); base > 0; base-- {
 			if p.taught[base] != nil {
 				p.buf.Write(p.taught[base])
@@ -243,10 +264,42 @@ func (p *printer) indent(i, level int) {
 				break
 			}
 		}
+		p.forget(i)
 	}
 	for ; level > 0; level-- {
 		p.buf.WriteString(p.unit)
 	}
+}
+
+// below returns the indentation of the first line after the token at
+// index i that is not selected and teaches the given level, looking no
+// further than the end of the block the token is in.
+func (p *printer) below(i, level int) ([]byte, bool) {
+	toks := p.f.Tokens
+	ord := p.ord
+	lineStart := -1 // index of what follows the last newline of the gap
+	for j := i + 1; j < len(toks); j++ {
+		switch t := toks[j]; {
+		case t.Kind == token.Newline:
+			lineStart = j + 1
+		case t.Kind == token.Space:
+		case t.Kind.IsTrivia():
+			lineStart = -1 // a comment: what follows is not at the line's start
+		case t.Kind == token.EOF:
+			return nil, false
+		default:
+			ord++
+			x := p.plan.info[j]
+			if x.flags&head != 0 && x.flags&caseLabel == 0 && int(x.level) < level {
+				return nil, false // the block has ended
+			}
+			if l, ok := p.teaches(j); ok && l == level && lineStart >= 0 && !p.sel.has(ord) {
+				return p.f.Src[toks[lineStart].Off:t.Off], true
+			}
+			lineStart = -1
+		}
+	}
+	return nil, false
 }
 
 // gapComments reports whether the gap contains any comment.

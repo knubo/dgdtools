@@ -1,4 +1,4 @@
-// Package lint is dgdlint as a library: give it a project and a file
+// Package lint is the linter as a library: give it a project and a file
 // system, ask it to lint, get diagnostics back.
 //
 //	fs := vfs.NewOverlay(vfs.OS{})
@@ -48,7 +48,7 @@ type Rule struct {
 	Name  string // "syntax-error"
 	Group string // syntax | runtime | suspicious | convention
 	// Doc is a one-line summary; Explain is the long form shown by
-	// `dgdlint explain`.
+	// `dgdtools explain`.
 	Doc     string
 	Explain string
 	Default bool

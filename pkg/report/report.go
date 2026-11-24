@@ -178,7 +178,7 @@ type jsonSum struct {
 // JSON writes a versioned JSON document. line and col are 1-based byte
 // positions; offsets are byte offsets into the file.
 func JSON(w io.Writer, res *lint.Result, o Options) error {
-	out := jsonOut{Version: 1, Tool: "dgdlint " + o.Version, Diagnostics: []jsonDiag{},
+	out := jsonOut{Version: 1, Tool: "dgdtools " + o.Version, Diagnostics: []jsonDiag{},
 		Skipped: res.Skipped}
 	for _, n := range res.Notes {
 		out.Notes = append(out.Notes, jsonNote{n.Kind, n.Message, n.Path})
@@ -240,7 +240,7 @@ func GitHub(w io.Writer, res *lint.Result, o Options) error {
 			level = "warning"
 		}
 		if _, err := fmt.Fprintf(w, "::%s file=%s,line=%d,col=%d,endLine=%d,title=%s::%s\n",
-			level, prop(o.rel(d.Path)), d.Line, d.Col, d.EndLine, prop("dgdlint "+d.Rule), esc(d.Message)); err != nil {
+			level, prop(o.rel(d.Path)), d.Line, d.Col, d.EndLine, prop("dgdtools "+d.Rule), esc(d.Message)); err != nil {
 			return err
 		}
 	}
@@ -335,7 +335,7 @@ func SARIF(w io.Writer, res *lint.Result, rules []*lint.Rule, o Options) error {
 		"version": "2.1.0",
 		"runs": []any{map[string]any{
 			"tool": map[string]any{"driver": map[string]any{
-				"name": "dgdlint", "version": o.Version,
+				"name": "dgdtools", "version": o.Version,
 				"informationUri": "https://github.com/mmcdole/dgdtools",
 				"rules":          srules,
 			}},

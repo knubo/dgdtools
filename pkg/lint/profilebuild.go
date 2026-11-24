@@ -282,7 +282,7 @@ func (l *Linter) sharedByUse(ctx context.Context, ix *index.Snapshot, minOwners 
 // macro, a path macro in an inherit statement).
 //
 // A file that could not be fully read says so with
-// `#pragma dgdlint partial`, which makes every lookup through it unknown
+// `#pragma dgdtools partial`, which makes every lookup through it unknown
 // rather than wrong.
 func Stub(p *index.Parsed, header bool) string {
 	f, tree := p.Tok, p.Tree
@@ -379,13 +379,13 @@ func Stub(p *index.Parsed, header bool) string {
 		// A declaration in a conditional branch that was only guessed at
 		// is kept under a condition the reader will also only guess at.
 		if a, _ := d.node.Span(); tree.Sel.Guessed(a) {
-			b.WriteString("#ifdef __DGDLINT_UNDECIDED__\n" + d.text + "#endif\n")
+			b.WriteString("#ifdef __DGDTOOLS_UNDECIDED__\n" + d.text + "#endif\n")
 		} else {
 			b.WriteString(d.text)
 		}
 	}
 	if partial {
-		b.WriteString("#pragma dgdlint partial\n")
+		b.WriteString("#pragma dgdtools partial\n")
 	}
 	return b.String()
 }

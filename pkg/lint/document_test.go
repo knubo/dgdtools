@@ -209,7 +209,7 @@ func TestStubLocations(t *testing.T) {
 	d := doc.Diagnostics[0]
 	assert.Equal(t, "static-crossobj", d.Rule)
 	require.Len(t, d.Related, 1)
-	assert.Equal(t, "dgdlint-profile://mini/std/room.c", d.Related[0].Path)
+	assert.Equal(t, "dgdtools-profile://mini/std/room.c", d.Related[0].Path)
 	assert.Equal(t, 5, d.Related[0].Line)
 
 	name, libFile, ok := profile.SplitLocation(d.Related[0].Path)
@@ -222,14 +222,14 @@ func TestStubLocations(t *testing.T) {
 	// The stub is readable where the index reads it, and nowhere else.
 	stubs := profile.NewFS(alone, prj.Profile)
 	assert.Equal(t, profile.Location("mini"), stubs.Location())
-	src, err := stubs.ReadFile("dgdlint-profile://mini/std/room.c")
+	src, err := stubs.ReadFile("dgdtools-profile://mini/std/room.c")
 	require.NoError(t, err)
 	assert.Equal(t, p.Files["/std/room.c"], string(src))
-	assert.True(t, stubs.Exists("dgdlint-profile://mini/std"))
-	assert.True(t, stubs.IsDir("dgdlint-profile://mini/std"))
-	assert.False(t, stubs.IsDir("dgdlint-profile://mini/std/room.c"))
-	assert.False(t, stubs.Exists("dgdlint-profile://mini/std/none.c"))
-	assert.False(t, stubs.Exists("dgdlint-profile://other/std/room.c"))
+	assert.True(t, stubs.Exists("dgdtools-profile://mini/std"))
+	assert.True(t, stubs.IsDir("dgdtools-profile://mini/std"))
+	assert.False(t, stubs.IsDir("dgdtools-profile://mini/std/room.c"))
+	assert.False(t, stubs.Exists("dgdtools-profile://mini/std/none.c"))
+	assert.False(t, stubs.Exists("dgdtools-profile://other/std/room.c"))
 	assert.False(t, stubs.Exists("/std/room.c"))
 	assert.True(t, stubs.Exists("/home/ann/players/ann/x.c"))
 }

@@ -152,9 +152,9 @@ func TestProfileBuildAndPartialCheckout(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, p.Manifest, loaded.Manifest)
 	assert.Equal(t, p.Files, loaded.Files)
-	_, err = profile.Parse([]byte("dgdlint-profile 99\n{}\n"))
+	_, err = profile.Parse([]byte("dgdtools-profile 99\n{}\n"))
 	assert.ErrorContains(t, err, "format 99")
-	_, err = profile.Parse([]byte("dgdlint-profile 1\n{\"dialect\":{\"driver\":\"fluffos\"}}\n"))
+	_, err = profile.Parse([]byte("dgdtools-profile 1\n{\"dialect\":{\"driver\":\"fluffos\"}}\n"))
 	assert.ErrorContains(t, err, "only the dgd dialect")
 
 	// --- whole lib vs. the wizard's folder alone with the profile

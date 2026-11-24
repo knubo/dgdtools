@@ -16,7 +16,7 @@ import (
 var ruleSyntaxError = &Rule{
 	Code: "E001", Name: "syntax-error", Group: GroupSyntax,
 	Doc: "the file does not parse; DGD will refuse to compile it",
-	Explain: "Reported by dgdlint's own error-tolerant parser, which implements the " +
+	Explain: "Reported by the linter's own error-tolerant parser, which implements the " +
 		"DGD 1.7 grammar on unpreprocessed source. A missing ';' is reported where " +
 		"the ';' belongs (DGD reports the token after it). Errors that could be an " +
 		"artifact of a macro the linter cannot see through are not reported: a " +

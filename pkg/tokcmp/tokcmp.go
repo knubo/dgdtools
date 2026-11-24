@@ -3,7 +3,7 @@
 // Two files compare equal when their non-trivia tokens match pairwise in
 // kind and exact bytes. Whitespace, newlines, and comments are ignored —
 // so equality proves a diff is formatting-only and cannot have changed
-// program behavior. This is the safety gate for dgdfmt: the formatter
+// program behavior. This is the formatter's safety gate: it
 // refuses to write output whose token stream diverges from its input.
 //
 // The only permitted normalization is trailing space/tab trimming at the

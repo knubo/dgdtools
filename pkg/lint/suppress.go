@@ -62,7 +62,7 @@ func scanSuppressions(f *token.File, l *Linter) *suppressions {
 					if l != nil {
 						rule := l.RuleByName(r)
 						if rule == nil {
-							prose = true // not a rule: the comment is talking about dgdlint
+							prose = true // not a rule: the comment is talking about the linter
 							break
 						}
 						r = rule.Name

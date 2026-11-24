@@ -94,7 +94,7 @@ type Table struct {
 	Path     string
 	Macros   map[string]*Macro
 	Includes []Include
-	// Partial is set by `#pragma dgdlint partial`, which a profile stub
+	// Partial is set by `#pragma dgdtools partial`, which a profile stub
 	// uses to say that the file it stands for could not be fully read.
 	Partial bool
 	// Undefs are the names this file #undef'd. A definition that follows

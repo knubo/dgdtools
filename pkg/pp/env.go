@@ -391,7 +391,7 @@ func (e *Env) scan(f *token.File, include func(Include), take map[int]bool) *Sel
 			}
 			t.Undefs[n] = true
 		case "pragma":
-			if strings.Join(strings.Fields(rest), " ") == "dgdlint partial" {
+			if strings.Join(strings.Fields(rest), " ") == "dgdtools partial" {
 				t.Partial = true
 			}
 		case "include":

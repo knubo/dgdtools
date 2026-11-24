@@ -1,4 +1,4 @@
-// Package profile is a mudlib profile: everything dgdlint needs to know
+// Package profile is a mudlib profile: everything the tools need to know
 // about a lib that a wizard's own checkout does not contain.
 //
 // A profile is to a mudlib what lib.d.ts is to a JavaScript runtime or
@@ -42,9 +42,9 @@ import (
 const Format = 1
 
 // FileName is the default name of a locally built profile.
-const FileName = "dgdlint.profile"
+const FileName = "dgdtools.profile"
 
-const magic = "dgdlint-profile"
+const magic = "dgdtools-profile"
 
 // Dialect describes the language a lib is written in. Only driver "dgd"
 // is implemented; the field exists so a profile says what it is, and so
@@ -168,10 +168,10 @@ func Parse(data []byte) (*Profile, error) {
 	head, rest, _ := bytes.Cut(data, []byte("\n"))
 	var format int
 	if _, err := fmt.Sscanf(string(head), magic+" %d", &format); err != nil {
-		return nil, fmt.Errorf("not a dgdlint profile")
+		return nil, fmt.Errorf("not a dgdtools profile")
 	}
 	if format != Format {
-		return nil, fmt.Errorf("profile format %d is not supported by this dgdlint (wants %d); rebuild the profile", format, Format)
+		return nil, fmt.Errorf("profile format %d is not supported by this dgdtools (wants %d); rebuild the profile", format, Format)
 	}
 	p := &Profile{Files: map[string]string{}}
 	body := rest
@@ -217,7 +217,7 @@ const PathEnv = "DGDTOOLS_PROFILE_PATH"
 //     directory.
 //
 // The caller supplies all three (an empty one is skipped): this package
-// reads no environment. No profile is built into dgdlint: a profile
+// reads no environment. No profile is built into the tools: a profile
 // describes one particular mud and is published by that mud.
 func UserDirs(pathList, userConfigDir, home string) []string {
 	var dirs []string
@@ -286,12 +286,12 @@ func Load(fsys vfs.FS, ref, configDir string, dirs []string) (*Profile, error) {
 }
 
 // Scheme is the URI scheme of stub locations.
-const Scheme = "dgdlint-profile"
+const Scheme = "dgdtools-profile"
 
 // Location returns the location prefix of a profile's stubs. A stub is
 // not a file on disk and is not named like one: the stub for lib file
 // "/std/room.c" of profile "viking" is at
-// "dgdlint-profile://viking/std/room.c". That is the path FS answers
+// "dgdtools-profile://viking/std/room.c". That is the path FS answers
 // for, the path diagnostics name when a declaration comes from a stub,
 // and the URI of the read-only document an editor shows for it.
 func Location(name string) string { return Scheme + "://" + name }

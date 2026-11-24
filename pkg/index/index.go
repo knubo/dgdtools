@@ -1,4 +1,4 @@
-// Package index is the cross-file view of an LPC lib that dgdlint's
+// Package index is the cross-file view of an LPC lib that the linter's
 // whole-lib rules need: every object's functions and variables, its
 // resolved inherit chain, and the macros visible in each file.
 //

@@ -91,10 +91,13 @@ func TestLines(t *testing.T) {
 	// of its level around it, not by the configured width.
 	want := strings.Replace(legacy, "    bar(i)   ;", "    bar(i);", 1)
 	assert.Equal(t, want, fmtLines(t, legacy, Options{}, LineRange{5, 5}))
-	// The first line of a block has no neighbour to follow: one unit
-	// more than the line that opens it.
-	want = strings.Replace(legacy, "    foo( i );", "      foo(i);", 1)
+	// The first line of a block follows the lines below it.
+	want = strings.Replace(legacy, "    foo( i );", "    foo(i);", 1)
 	assert.Equal(t, want, fmtLines(t, legacy, Options{}, LineRange{4, 4}))
+	// A whole block has no neighbour to follow: one unit more than the
+	// line that opens it.
+	want = strings.Replace(legacy, "    foo( i );\n    bar(i)   ;", "      foo(i);\n      bar(i);", 1)
+	assert.Equal(t, want, fmtLines(t, legacy, Options{}, LineRange{4, 5}))
 	// Several ranges; a selected brace joins the line above it.
 	want = strings.Replace(legacy, "  for (i=0;i<3;i++) {", "  for (i = 0; i < 3; i++) {", 1)
 	want = strings.Replace(want, "  if (x)\n  {", "  if (x) {", 1)
