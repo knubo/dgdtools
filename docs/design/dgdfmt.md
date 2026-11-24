@@ -1,0 +1,274 @@
+# The formatter: design
+
+`dgdtools format` and `pkg/format`. How the engine lays a file out (the
+plan from the syntax tree, the printer, every `#if` arm, the fallback
+where the parser gives up) is in [dgdlint-rewrite.md](dgdlint-rewrite.md),
+section 8. This document is about what the tool is: its model, its
+options, and how it is driven.
+
+## 1. What the others do
+
+| Tool | Model | Options | Line breaks | Skip | Partial |
+|---|---|---|---|---|---|
+| gofmt | prints the syntax tree, keeps comments | none | the author's; nothing is wrapped; blank-line runs collapse to one | none | none |
+| black | reflows to a line length | line length, a few toggles; "uncompromising" by charter | its own | `# fmt: off` / `on`, `# fmt: skip` | `--line-ranges` (24.1) |
+| ruff format | black's style, reimplemented | line length, indent style and width, quote style, line ending; nothing else by policy | its own | black's comments | `--range` (one file) |
+| Prettier | reflows to a print width | a deliberately frozen handful; the "option philosophy" page explains that options were a mistake of adoption and no more are taken | its own | `// prettier-ignore` (next node), range pragmas in some languages | `--range-start/--range-end` |
+| rustfmt | reflows | a small stable set; dozens of options that have been unstable for years because each must work with every other | its own | `#[rustfmt::skip]` | `--file-lines` (unstable) |
+| clang-format | reflows by penalties | 150+ options and `BasedOnStyle` presets; the counterexample: two teams' "clang-format" outputs have nothing in common, and bugs live in option interactions | its own | `// clang-format off` / `on` | `--lines`, `git clang-format`; indentation adapts to the unformatted lines around |
+| Biome | Prettier's style | few; `formatter` and `linter` are sections of one `biome.json` | its own | `// biome-ignore format: reason` | no |
+
+Three things recur in the tools people do not fight with:
+
+- **The value is that there is one style.** Every option divides the
+  code a tool has been tested on and the people who can read each
+  other's diffs. Prettier and black say it outright; rustfmt and
+  clang-format show the cost.
+- **The options that survive everywhere are the ones a formatter cannot
+  decide for you because an editor must agree with it:** indentation
+  (tabs or spaces, how wide) and line endings. Those are also exactly
+  what `.editorconfig` states.
+- **Old code needs a way in:** a skip marker for the table somebody
+  aligned by hand, a check mode for CI, and a way to format only what
+  was touched.
+
+## 2. Decisions
+
+### 2.1 The model stays: trivia only, behind a gate
+
+The formatter writes every significant token's bytes unchanged and
+chooses only the whitespace between them. The result is returned only if
+it re-lexes to the same token stream (`pkg/tokcmp`) and formatting it
+again changes nothing.
+
+This is gofmt's contract (a formatter cannot change what the program
+means) made checkable per file, and it is the right one here for reasons
+the reflowing formatters do not have:
+
+- The corpus is a hundred thousand files written by hand over thirty
+  years, many of which do not parse (macros from headers that are not
+  there, dead dialects). A formatter that must print from a tree cannot
+  touch them; one that rearranges tokens cannot be trusted on them. A
+  trivia-only formatter with a token-equality gate can do both.
+- The gate turns "we believe the formatter is safe" into something a
+  whole-lib run proves: 0 gate failures over 180,850 files.
+
+### 2.2 No line wrapping
+
+Lines are never broken for length, and the author's line breaks inside
+expressions and argument lists are kept, as in gofmt. The formatter
+moves a line break only where structure fixes it: the header and braces
+of a function definition, a control statement's `{`, `else`.
+
+Why not wrap:
+
+- Wrapping needs a style for every construct (where to break a call, a
+  chain of `+` over string literals, a mapping literal) and then
+  everybody's hand-laid descriptions and tables are reflowed to it. On
+  this corpus that is most of the text in the lib, changed for no gain.
+- A wrapper has to understand everything it wraps. Where the parser
+  gives up, the formatter today moves no line break at all, which is
+  what keeps it a fixed point; a wrapper would need a second, weaker
+  layout for those regions.
+- Width-driven output is unstable under small edits (one more argument
+  reflows the statement), which is what makes blame noisy.
+
+A future opt-in (`format.line_width`, off by default) is possible
+without changing the model: breaking and joining lines is still trivia.
+It would be a second engine pass over statements the tree understands,
+and it is not planned.
+
+### 2.3 The option set
+
+| Key (`format:`) | Values | Default | Also from |
+|---|---|---|---|
+| `indent_style` | `space`, `tab` | `space` | `.editorconfig` `indent_style` |
+| `indent_width` | 1 to 16 | 4 | `.editorconfig` `indent_size` (`tab_width` when it says `tab`) |
+| `line_endings` | `preserve`, `lf`, `crlf` | `preserve` | `.editorconfig` `end_of_line` |
+
+That is all. `indent_width` is the number of spaces per level with
+`indent_style: space` and is not used with `tab` (one tab per level;
+nothing in the engine measures columns).
+
+`line_endings: preserve` keeps each line break's bytes and gives a new
+one the file's dominant form. It is the default because a lib that came
+through thirty years of FTP has both, and a formatter should not make
+every file differ in every line the first time it runs.
+
+Two former options are now the house style:
+
+- **Function headers: KNF, always.** Specifiers and return type on one
+  line, the name at column 0, the brace on its own line. `joined` is
+  gone. The reason for the split form is practical and specific to how
+  mud code is worked on: `grep '^name('` finds the definition of a
+  function in any file with any tool, including the ones available in a
+  mud's own editor. A definition written entirely on one line
+  (`int query_x() { return x; }`) is still left alone; that is a
+  vertical decision the author made, not a header style. No strong
+  reason for the alternative survived: it was a preference, and a
+  preference is what an opinionated formatter exists to end.
+- **Blank lines: at most two in a row, none at the start of a file,
+  exactly one newline at the end.** gofmt, Prettier and clang-format
+  keep one; black keeps two between top-level definitions. Two is kept
+  because the corpus separates functions and sections of declarations
+  with two, deliberately, and one would rewrite that in most files for
+  nothing. A knob for it has no user: nobody's style depends on three.
+
+The dialect (`//` comments, closures) and the macro conventions
+(`conventions.specifier_macros`, `conventions.macros`) are not format
+options. They are facts about the project, they come from the project's
+configuration or its profile, and the formatter reads them like every
+other tool.
+
+### 2.4 Skip markers
+
+```c
+/* dgdfmt: off */
+mapping exits = ([ "north" : "/room/hall",
+                   "south" : "/room/yard",   ]);
+/* dgdfmt: on */
+```
+
+A comment whose whole text is `dgdfmt: off` turns the formatter off from
+that comment on; `dgdfmt: on` turns it back on after it. Either comment
+form works (`//` needs a driver with `SLASHSLASH`, so the block form is
+the one to document). Between the two, every byte is kept as it is.
+Without an `on` the rest of the file is kept: that is the whole-file
+form, for generated files that are not excluded by path.
+
+- off/on, not a next-statement marker: the regions people protect are
+  hand-aligned tables and ASCII art, which are ranges of lines, and one
+  mechanism is enough. clang-format and black use the same pair.
+- The name is the formatter's, not the binary's: `dgdfmt:` next to the
+  linter's `dgdlint:` comments, as Deno has `deno-fmt-ignore` and
+  `deno-lint-ignore`. Both stay short and greppable.
+- The marker must be the entire comment, so prose that mentions it is
+  not one.
+- The tokens in a skipped region still go through the engine (its
+  bracket and conditional state must stay right for the code after), and
+  the gate still covers the whole file.
+
+### 2.5 Check, diff, standard input
+
+```
+dgdtools format PATH...            rewrite the files in place
+dgdtools format --check PATH...    write nothing; list the files that would change
+dgdtools format --diff PATH...     write nothing; print unified diffs
+dgdtools format -                  standard input to standard output
+dgdtools format --stdin-filename players/x/room.c   (implies -)
+```
+
+- **In place by default**, as ruff format, black, rustfmt and `gofmt -w`
+  users expect of a command named `format`. A path is required: a bare
+  `dgdtools format` in a lib of 100,000 files should not be one keypress
+  from rewriting all of them (black's rule; `.` is not much to type).
+- **Exit codes:** 0 nothing to do or done; 1 `--check` or `--diff` found
+  files that would change; 2 usage, configuration or I/O error, or a
+  file that could not be formatted (it does not tokenize, or the gate
+  tripped). An error wins over 1. Same numbers as ruff and Prettier, and
+  as `dgdtools lint`.
+- `--check` prints one path per line on standard output (what
+  `gofmt -l` prints, so scripts can read it); the summary goes to
+  standard error and `--quiet` drops it.
+- `--stdin-filename` names the buffer: settings are discovered from that
+  path (project, nested scopes, `.editorconfig`) and messages use it.
+  The file need not exist. This is what an editor that pipes a buffer
+  needs, and what ruff, Prettier and Biome call it.
+- A file named explicitly is formatted even if `exclude` matches it;
+  excludes prune directory walks.
+
+### 2.6 Formatting part of a file
+
+Two users: an editor (`textDocument/rangeFormatting`, format-modified-
+lines-on-save) and somebody who changed one function in a legacy file
+and does not want the other two thousand lines in the diff.
+
+**Library.** `format.Lines(file, options, []LineRange)` formats only
+the given lines (1-based, inclusive) and returns the whole text.
+`format.Edits(file, out)` turns any result into the minimal list of
+replacements, one per whitespace gap that changed, which is what an LSP
+server returns for formatting and range formatting alike.
+
+The unit is the *gap*: the whitespace and comments between two
+significant tokens. Formatting a file is replacing every gap; formatting
+lines is replacing the gaps that belong to them and copying the others
+byte for byte:
+
+- a gap belongs to the line its following token starts on (so a line's
+  indentation, the break before it and the spacing inside it are
+  formatted together), and to any comment or blank line inside it;
+- trailing spaces on a selected line are removed even though the gap
+  they are in belongs to the next line.
+
+So the line above a selected line can change in one way: a selected `{`
+or `else` that the style cuddles moves up to it. Nothing else outside
+the selection changes.
+
+**Indentation blends in.** The unselected lines keep their indentation,
+which in a legacy file is not the canonical one (tabs, two spaces). A
+selected line is therefore indented from what is around it, the way
+clang-format does it: an unselected line that begins a statement teaches
+the indentation of its nesting level; a selected line at a level that
+has been taught uses it; at a deeper level it adds the configured unit
+to the nearest taught one. In a file that is already formatted this is
+the canonical indentation, so range formatting and whole-file formatting
+agree there.
+
+**The gate still holds.** The token streams must be equal, and
+formatting the same gaps of the result again must change nothing.
+
+**Command line.**
+
+```
+dgdtools format --lines 120-180 [--lines 300-310] FILE
+dgdtools format --changed PATH...             lines that differ from HEAD
+dgdtools format --changed --base origin/main PATH...
+```
+
+- `--lines` takes one file (or standard input) and line numbers of the
+  input.
+- `--changed` asks git: `git diff -U0 BASE -- PATH` gives the changed
+  line ranges of each file (working tree against `BASE`, default
+  `HEAD`, so staged and unstaged both count); a file git does not track
+  yet is formatted whole; a file without changes is not read. It needs a
+  git work tree and says so otherwise. It composes with `--check` and
+  `--diff`, which is the CI form: "the lines this branch touched are
+  formatted".
+- git is a front-end concern. The library takes line ranges and never
+  runs a program.
+
+Why lines and not syntax nodes: lines are what an editor selection, a
+diff hunk and `git blame` are made of, and every tool with this feature
+(clang-format, black, ruff, rustfmt) takes lines.
+
+### 2.7 One configuration, found per file
+
+The formatter's settings are the `format:` section of `dgdtools.yml`,
+resolved for each file as [config.md](config.md) describes: nearest
+settings scope, then the project's config, then `.editorconfig`, then
+the defaults; command-line flags (`--indent-style`, `--indent-width`,
+`--line-endings`) over all of them. Values are validated when the
+config is loaded; an unknown key or value is an error, not a default.
+
+The `unformatted` lint rule calls the same function with the same
+per-file settings, so `dgdtools lint` and `dgdtools format --check`
+cannot disagree.
+
+## 3. The library surface
+
+```go
+opts := format.OptionsFor(project.Config, settings.Format)   // settings: project.Settings(path)
+
+out, err := format.Format(file, opts)                 // the whole file
+out, err := format.Lines(file, opts, ranges)          // only these lines
+edits := format.Edits(file, out)                      // []diag.TextEdit, one per changed gap
+```
+
+`file` is a `*token.File` (`lexer.Lex`), so a server formats the buffer
+it already lexed. A result depends on the file's bytes and the options
+only: no other file is read, and the same bytes give the same result in
+an editor buffer, in a partial checkout and in the whole lib.
+
+Errors are values (`ErrIllegal`, `ErrGateFailure`, `ErrNotIdempotent`,
+`ErrInternal`): a file that cannot be formatted is reported and left
+alone, in a run over many files and in an editor session alike.
