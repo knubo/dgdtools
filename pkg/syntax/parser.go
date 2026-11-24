@@ -113,6 +113,9 @@ func (p *parser) sync(start int, top bool) (eof bool) {
 	pop := func(n int) {
 		open, braces = open[:n], braces[:n]
 	}
+	// In a for/rlimits header ';' separates clauses: there the skip must
+	// not stop at a ';' while the header's parenthesis is open.
+	header := !top && (p.toks[p.tokAt(start)].Kind == token.KwFor || p.toks[p.tokAt(start)].Kind == token.KwRlimits)
 	for j := start; j < p.i && j < len(p.sig); j++ {
 		switch p.toks[p.sig[j]].Kind {
 		case token.LParen, token.LBracket, token.LBrace:
@@ -153,7 +156,7 @@ func (p *parser) sync(start int, top bool) (eof bool) {
 				return false // the construct's own block just closed
 			}
 		case token.Semicolon:
-			if !anyBlock(open) {
+			if !anyBlock(open) && !(header && len(open) > 0) {
 				p.next()
 				return false
 			}
@@ -806,9 +809,20 @@ func (p *parser) parseBlock() *BlockStmt {
 func (p *parser) parseStmt() (s Stmt) {
 	start := p.i
 	nerr := len(p.errs)
+	resumed := p.resumes[p.idx()]
 	defer func() {
 		r := recover()
 		if r == nil {
+			// A statement read right after a skip may be the tail of
+			// the construct that failed (`for (int i = 0; i < n; i++)`
+			// resumes at `i < n;`). It parsed, but it is not evidence
+			// of anything: hide it from the rules.
+			if resumed && s != nil && !p.abort {
+				if _, block := s.(*BlockStmt); !block {
+					a, b := s.Span()
+					s = &BadStmt{span: span{a, b}, Opaque: true}
+				}
+			}
 			return
 		}
 		if _, ok := r.(stmtBail); !ok {

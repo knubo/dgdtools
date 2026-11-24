@@ -359,6 +359,16 @@ func (ix *Index) IsVirtual(libPath string) bool {
 	return ix.virtual.Match(strings.TrimPrefix(libPath, "/"))
 }
 
+// ObjectPath turns an object path as written in fromLib into an absolute
+// lib path. A path without a leading slash is resolved from the lib root,
+// as the driver does, unless the config says paths are file-relative.
+func (ix *Index) ObjectPath(p, fromLib string) string {
+	if ix.Cfg.Lint.RelativeObjectPaths == "file" {
+		return NormalizeLibPath(p, fromLib)
+	}
+	return NormalizeLibPath(p, "/")
+}
+
 // NormalizeLibPath strips .c and makes p absolute relative to fromLib's
 // directory.
 func NormalizeLibPath(p, fromLib string) string {
@@ -835,7 +845,7 @@ func (ix *Index) resolveInherit(tree *syntax.File, d *syntax.InheritDecl, libPat
 	if !ok || val == "" {
 		return ref
 	}
-	ref.Path = NormalizeLibPath(val, libPath)
+	ref.Path = ix.ObjectPath(val, libPath)
 	ref.Resolved = true
 	return ref
 }

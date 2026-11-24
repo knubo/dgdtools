@@ -280,7 +280,7 @@ func hasAnyPrefix(s string, prefixes []string) bool {
 
 var ruleMissingVisibility = &Rule{
 	Code: "C002", Name: "missing-visibility", Group: GroupConvention,
-	Doc:  "function with no visibility specifier",
+	Doc: "function with no visibility specifier",
 	Explain: "Flags functions declared without private, static, nomask or a " +
 		"specifier macro such as public.",
 	Default: false, Severity: diag.Warning,

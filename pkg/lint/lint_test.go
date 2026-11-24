@@ -88,12 +88,12 @@ func TestMinilibSeededBugs(t *testing.T) {
 			"vet.c:23",  // correct arity
 			"vet.c:24",  // ellipsis accepts extras
 			"mixinuser.c",
-			"user.c:20",    // static + same object is legal
-			"user.c:18",    // real function
-			"user.c:22",    // auto object provides it
-			"user.c:23",    //
-			"user.c:25",    //
-			"user.c:12",    // registered handler exists
+			"user.c:20",   // static + same object is legal
+			"user.c:18",   // real function
+			"user.c:22",   // auto object provides it
+			"user.c:23",   //
+			"user.c:25",   //
+			"user.c:12",   // registered handler exists
 			"broken.c:10", // partial chain: unknown, not missing
 		} {
 			assert.NotContains(t, k, clean)
@@ -404,6 +404,21 @@ func TestAssignmentInCondition(t *testing.T) {
 	}
 }
 
+// A statement that only exists because the parser resynchronized in the
+// middle of a broken construct must not feed other rules.
+func TestNoFindingsFromResynchronizedCode(t *testing.T) {
+	got := lintMem(t, fn("for (int i = 0; i < n; i++) x();\n ok();\n q == 4;"), lint.Request{}, nil)
+	require.Len(t, got, 2, "%v", got)
+	assertFinding(t, got, "syntax-error 2:6")
+	assertFinding(t, got, "no-effect-statement 4:4")
+
+	// The statement right after a skip is hidden; the one after it counts.
+	got = lintMem(t, fn("x = foo(1, 2;\n y == 3;\n q == 4;"), lint.Request{}, nil)
+	require.Len(t, got, 2, "%v", got)
+	assertFinding(t, got, "syntax-error 2:13")
+	assertFinding(t, got, "no-effect-statement 4:4")
+}
+
 func TestSuspiciousRules(t *testing.T) {
 	got := lintMem(t, fn("x == f();\n x != 1;\n x < 2;\n x = 1;\n f();\n x == 1 ? a() : b();\n a() && b();"),
 		lint.Request{Select: []string{"no-effect-statement"}}, nil)
@@ -451,12 +466,30 @@ static void create() {
 	assertFinding(t, got, "callable-not-found 13:22 function 'nope4'")
 	assert.Len(t, got, 7, "%v", got)
 
+	// Object paths without a leading slash are resolved from the lib
+	// root, as the driver does.
+	got = lintMem(t, "inherit \"std/base\";\nstatic void create() {\n ::create();\n \"std/base\"->query(1);\n clone_object(\"std/base\");\n \"obj/nothere\"->x();\n}\n", lint.Request{}, nil)
+	require.Len(t, got, 1, "%v", got)
+	assertFinding(t, got, "target-object-missing 6:17 object /obj/nothere does not exist")
+
 	// lifecycle-chain sees ::create() through the tree, and stays silent
 	// when part of the body could not be parsed.
 	got = lintMem(t, "inherit \"/std/base\";\nstatic void create() { x = 1; }\n", lint.Request{Select: []string{"lifecycle-chain"}}, nil)
 	assert.Len(t, got, 1)
 	got = lintMem(t, "#define INIT ::create();\ninherit \"/std/base\";\nstatic void create() { INIT }\n", lint.Request{Select: []string{"lifecycle-chain"}}, nil)
 	assert.Empty(t, got)
+}
+
+// Code that is part of the auto object runs as every object in the lib,
+// so a self-call there proves nothing about any one object.
+func TestAutoObjectSelfCallsAreUnknown(t *testing.T) {
+	prj, m := memProject(map[string]string{
+		"sys/auto.c":  "inherit \"/sys/timer\";\nvoid a() { this_object()->reset(); }\n",
+		"sys/timer.c": "void tick() { this_object()->heart_beat(); call_out(\"heart_beat\", 1); }\n",
+		"obj/leaf.c":  "void f() { this_object()->nowhere(); }\n",
+	})
+	res := run(t, prj, m, lint.Request{})
+	assert.Equal(t, []string{"callable-not-found leaf.c:1"}, keys(res.Diagnostics))
 }
 
 // A parent whose top level did not fully parse has an incomplete symbol

@@ -154,7 +154,7 @@ type Stats struct {
 	PartialFiles       int `json:"partial_files"` // symbol table incomplete
 	CallSites          int `json:"call_sites"`
 	UnknownReceivers   int `json:"unknown_receivers"`
-	TaintedSyntax      int `json:"tainted_syntax_errors"` // possibly macro artifacts; not reported
+	TaintedSyntax      int `json:"tainted_syntax_errors"`   // possibly macro artifacts; not reported
 	GuessedBranch      int `json:"guessed_branch_findings"` // in #if branches that could not be decided; not reported
 }
 

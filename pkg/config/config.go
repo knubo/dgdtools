@@ -103,6 +103,12 @@ type Lint struct {
 	AutosaveMarkers []string `yaml:"autosave_markers"`
 	// ObjectRegistry maps path-taking functions to the argument index.
 	ObjectRegistry map[string]int `yaml:"object_registry"`
+	// RelativeObjectPaths says what an object path without a leading
+	// slash is relative to: "root" (the default; DGD resolves object
+	// names from the lib root, so "std/room" is /std/room) or "file"
+	// (the directory of the referencing file, for libs whose auto object
+	// rewrites paths that way).
+	RelativeObjectPaths string `yaml:"relative_object_paths"`
 	// VirtualPaths are lib-path globs served by virtual-object daemons.
 	VirtualPaths []string `yaml:"virtual_paths"`
 	// FormatRegistry maps scanf-style functions to their format argument.

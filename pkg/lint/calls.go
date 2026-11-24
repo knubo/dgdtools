@@ -125,7 +125,7 @@ func (p *Pass) extractCalls() *callFacts {
 				if argIdx, ok := objRegs[name]; ok && argIdx < len(n.Args) {
 					if s, ok := strLit(n.Args[argIdx]); ok && strings.Contains(s, "/") {
 						cf.paths = append(cf.paths, pathRef{
-							Path: index.NormalizeLibPath(s, p.LibPath), Via: name,
+							Path: p.Index.ObjectPath(s, p.LibPath), Via: name,
 							Start: t.Off(n.Args[argIdx]), End: t.End(n.Args[argIdx]),
 						})
 					}
@@ -166,7 +166,7 @@ func (p *Pass) extractCalls() *callFacts {
 							cf.strings = append(cf.strings, stringCall{
 								Func: fn2, Registrar: name, Kind: crossObject,
 								Target: targetPath, NArgs: -1,
-								TargetPath: index.NormalizeLibPath(fname, p.LibPath),
+								TargetPath: p.Index.ObjectPath(fname, p.LibPath),
 								Start:      t.Off(n.Args[reg.arg+1]), End: t.End(n.Args[reg.arg+1]),
 							})
 						}
@@ -219,7 +219,7 @@ func (p *Pass) classifyTarget(e syntax.Expr) (targetKind, string) {
 	if !ok || s == "" {
 		return targetUnknown, ""
 	}
-	return targetPath, index.NormalizeLibPath(s, p.LibPath)
+	return targetPath, p.Index.ObjectPath(s, p.LibPath)
 }
 
 // isIdentName reports whether s is a plausible LPC function name.

@@ -232,6 +232,19 @@ func (ix *Index) AutoFuncs() map[string]ChainFunc {
 	return ix.autoFuncs
 }
 
+// inAutoChain reports whether libPath is an auto object or one of the
+// programs an auto object is built from.
+func (ix *Index) inAutoChain(libPath string) bool {
+	for _, auto := range ix.Cfg.Lint.AutoObjects {
+		for _, o := range ix.Chain(NormalizeLibPath(auto, "/")).Objects {
+			if o == libPath {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // UsersOf returns the objects whose inherit closure includes libPath, plus
 // the objects that #include it as code. The second result is false when
 // the whole-lib scan could not complete (cancelled); the answer is then
@@ -346,6 +359,11 @@ func (ix *Index) LookupCallable(ctx context.Context, target, fn string, self boo
 	}
 	if !self {
 		return Lookup{State: LookupMissing}
+	}
+	// Code in the auto object's own chain runs as every object in the
+	// lib: this_object() there can be anything.
+	if ix.inAutoChain(target) {
+		return Lookup{State: LookupUnknown}
 	}
 	users, ok := ix.UsersOf(ctx, target)
 	if !ok {

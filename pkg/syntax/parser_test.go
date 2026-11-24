@@ -210,6 +210,7 @@ func TestErrors(t *testing.T) {
 		{"decided branches", "#define ON 1\n#define FLAG\nvoid f() {\n#if ON\n a = 1\n#endif\n#ifdef FLAG\n b = 2\n#endif\n#ifndef __DGD__\n garbage here (\n#else\n c = 3\n#endif\n}\n",
 			[]string{"5:7 missing ';'", "8:7 missing ';'", "13:7 missing ';'"}},
 		{"cascade after a skip is dropped", body("x = foo(1, 2;\nelse y();\nelse z();\nok();\nq = 1\nr = 2;"), []string{"expected ')'", "6:6 missing ';'"}},
+		{"for with declaration", body("for (int t = 0; t < n; t++) {\n  x = t\n}\nok();\ny = 1\nz = 2;"), []string{"2:6 unexpected 'int'", "6:6 missing ';'"}},
 		{"expr macro without semi", "#define MAX(a,b) ((a)>(b)?(a):(b))\nvoid f() {\n MAX(1,2)\n g();\n}\n", []string{"3:10 missing ';'"}},
 	}
 	for _, tt := range tests {
