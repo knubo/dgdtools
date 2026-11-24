@@ -2,7 +2,6 @@ package index
 
 import (
 	"context"
-	"io/fs"
 	"path"
 	"path/filepath"
 	"strings"
@@ -40,27 +39,11 @@ func (l *lib) clean(p string) string {
 
 // diskPath is where libFile (a lib path with its extension) would be on
 // disk; false when no directory on disk holds that part of the lib.
-func (l *lib) diskPath(libFile string) (string, bool) {
-	if l.lay.CheckoutDir != "" {
-		if libFile == l.lay.CheckoutLib {
-			return l.lay.CheckoutDir, true
-		}
-		if rest, ok := strings.CutPrefix(libFile, l.lay.CheckoutLib+"/"); ok {
-			return filepath.Join(l.lay.CheckoutDir, filepath.FromSlash(rest)), true
-		}
-	}
-	if l.lay.Root == "" {
-		return "", false
-	}
-	return filepath.Join(l.lay.Root, filepath.FromSlash(strings.TrimPrefix(libFile, "/"))), true
-}
+func (l *lib) diskPath(libFile string) (string, bool) { return l.lay.Path(libFile) }
 
 // inCheckout reports whether libFile lies in the lib directory the
 // checkout holds; nothing but the checkout speaks for those.
-func (l *lib) inCheckout(libFile string) bool {
-	return l.lay.CheckoutDir != "" &&
-		(libFile == l.lay.CheckoutLib || strings.HasPrefix(libFile, l.lay.CheckoutLib+"/"))
-}
+func (l *lib) inCheckout(libFile string) bool { return l.lay.InCheckout(libFile) }
 
 // rel returns p relative to the lib root, slash-separated and with its
 // extension ("players/x/room.c"); false when p is not a file of the lib.
@@ -68,22 +51,7 @@ func (l *lib) rel(p string) (string, bool) {
 	if l.isStub(p) {
 		return strings.TrimPrefix(p, l.lay.Stubs+"/"), true
 	}
-	under := func(dir string) (string, bool) {
-		r, err := filepath.Rel(dir, p)
-		if err != nil || r == ".." || strings.HasPrefix(r, ".."+string(filepath.Separator)) {
-			return "", false
-		}
-		return filepath.ToSlash(r), true
-	}
-	if l.lay.CheckoutDir != "" {
-		if r, ok := under(l.lay.CheckoutDir); ok {
-			return strings.TrimPrefix(path.Join(l.lay.CheckoutLib, r), "/"), true
-		}
-	}
-	if l.lay.Root == "" {
-		return "", false
-	}
-	return under(l.lay.Root)
+	return l.lay.Rel(p)
 }
 
 // LibPath maps a file's path to its lib path ("/std/room" for
@@ -152,29 +120,7 @@ func (l *lib) excluded(rel string, dir bool) bool {
 // configuration does not exclude. It stops with ctx's error when ctx is
 // cancelled.
 func (l *lib) Walk(ctx context.Context, dir string, visit func(path string)) error {
-	err := l.fs.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
-		if ctx.Err() != nil {
-			return fs.SkipAll
-		}
-		if err != nil {
-			return nil
-		}
-		rel, inLib := l.rel(p)
-		if d.IsDir() {
-			if p != dir && inLib && l.excluded(rel, true) {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if filepath.Ext(p) == ".c" && !(inLib && l.excluded(rel, false)) {
-			visit(p)
-		}
-		return nil
-	})
-	if err != nil {
-		return err
-	}
-	return ctx.Err()
+	return l.lay.Walk(ctx, l.fs, dir, []string{".c"}, l.exclude, visit)
 }
 
 // scanRoot is the directory the whole-lib scan covers. With a partial

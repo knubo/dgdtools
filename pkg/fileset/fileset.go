@@ -1,12 +1,18 @@
-// Package fileset walks an LPC source tree with exclude globs and maps
-// between filesystem paths and lib-absolute object paths.
+// Package fileset knows where a lib's files are: it maps between paths on
+// disk and lib paths, matches the globs that select files, and walks a
+// source tree with the project's excludes.
 package fileset
 
 import (
+	"context"
 	"io/fs"
+	"path"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
+
+	"github.com/mmcdole/dgdtools/pkg/vfs"
 )
 
 // Matcher matches slash-separated relative paths against ** globs.
@@ -79,34 +85,90 @@ func (m *Matcher) MatchDir(rel string) bool {
 	return false
 }
 
-// Walk visits every .c and .h file under root that is not excluded.
-// rel is slash-separated and relative to root.
-func Walk(root string, exclude []string, visit func(path, rel string)) error {
-	m := NewMatcher(exclude)
-	return filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
+// Tree says where a lib is on disk: all of it under Root, or, for a
+// partial checkout, its directory CheckoutLib ("/players/name") under
+// CheckoutDir. With neither there is no lib.
+type Tree struct {
+	Root                     string
+	CheckoutDir, CheckoutLib string
+}
+
+// Rel returns the path p as a file of the lib: relative to the lib root,
+// slash-separated and with its extension ("players/x/room.c"). It is what
+// exclude and override globs are matched against. The second result is
+// false when p is not in the lib.
+func (t Tree) Rel(p string) (string, bool) {
+	under := func(dir string) (string, bool) {
+		r, err := filepath.Rel(dir, p)
+		if err != nil || r == ".." || strings.HasPrefix(r, ".."+string(filepath.Separator)) {
+			return "", false
+		}
+		return filepath.ToSlash(r), true
+	}
+	if t.CheckoutDir != "" {
+		if r, ok := under(t.CheckoutDir); ok {
+			return strings.TrimPrefix(path.Join(t.CheckoutLib, r), "/"), true
+		}
+	}
+	if t.Root == "" {
+		return "", false
+	}
+	return under(t.Root)
+}
+
+// Path is where libFile (a lib path with its extension) would be on disk;
+// false when no directory on disk holds that part of the lib.
+func (t Tree) Path(libFile string) (string, bool) {
+	if t.CheckoutDir != "" {
+		if libFile == t.CheckoutLib {
+			return t.CheckoutDir, true
+		}
+		if rest, ok := strings.CutPrefix(libFile, t.CheckoutLib+"/"); ok {
+			return filepath.Join(t.CheckoutDir, filepath.FromSlash(rest)), true
+		}
+	}
+	if t.Root == "" {
+		return "", false
+	}
+	return filepath.Join(t.Root, filepath.FromSlash(strings.TrimPrefix(libFile, "/"))), true
+}
+
+// InCheckout reports whether libFile lies in the lib directory the
+// checkout holds.
+func (t Tree) InCheckout(libFile string) bool {
+	return t.CheckoutDir != "" &&
+		(libFile == t.CheckoutLib || strings.HasPrefix(libFile, t.CheckoutLib+"/"))
+}
+
+// Walk visits every file under dir (a directory on disk) that has one of
+// the extensions exts and that exclude does not take. The globs are
+// matched against lib-relative names, so they mean the same wherever the
+// walk starts; a file outside the lib is never excluded. Walk stops with
+// ctx's error when ctx is cancelled.
+func (t Tree) Walk(ctx context.Context, fsys vfs.FS, dir string, exts []string, exclude *Matcher, visit func(path string)) error {
+	err := fsys.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
+		if ctx.Err() != nil {
+			return fs.SkipAll
+		}
 		if err != nil {
 			return nil
 		}
-		rel, rerr := filepath.Rel(root, path)
-		if rerr != nil {
-			return nil
-		}
-		rel = filepath.ToSlash(rel)
+		rel, inLib := t.Rel(p)
 		if d.IsDir() {
-			if rel != "." && (m.Match(rel) || m.MatchDir(rel)) {
+			if p != dir && inLib && (exclude.Match(rel) || exclude.MatchDir(rel)) {
 				return filepath.SkipDir
 			}
 			return nil
 		}
-		if ext := filepath.Ext(path); ext != ".c" && ext != ".h" {
-			return nil
+		if slices.Contains(exts, filepath.Ext(p)) && !(inLib && exclude.Match(rel)) {
+			visit(p)
 		}
-		if m.Match(rel) {
-			return nil
-		}
-		visit(path, rel)
 		return nil
 	})
+	if err != nil {
+		return err
+	}
+	return ctx.Err()
 }
 
 // LibPath converts a root-relative file path to a lib-absolute object path

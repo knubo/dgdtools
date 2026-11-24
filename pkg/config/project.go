@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/mmcdole/dgdtools/pkg/diag"
+	"github.com/mmcdole/dgdtools/pkg/fileset"
 	"github.com/mmcdole/dgdtools/pkg/lexer"
 	"github.com/mmcdole/dgdtools/pkg/profile"
 	"github.com/mmcdole/dgdtools/pkg/token"
@@ -47,6 +48,11 @@ type Project struct {
 // HasLib reports whether cross-file analysis is possible: the lib is on
 // disk, or part of it is and a profile or a lib path places it.
 func (prj *Project) HasLib() bool { return prj.Root != "" || prj.Partial }
+
+// Tree returns where the project's lib is on disk.
+func (prj *Project) Tree() fileset.Tree {
+	return fileset.Tree{Root: prj.Root, CheckoutDir: prj.CheckoutDir, CheckoutLib: prj.CheckoutLib}
+}
 
 // DiscoverOptions are what the caller knows that the file system does
 // not say: explicit overrides (CLI flags, editor settings) and the parts
@@ -128,7 +134,7 @@ func Discover(fs vfs.FS, paths []string, opt DiscoverOptions) (*Project, error) 
 		base = starts[0]
 	}
 	if prj.ConfigPath != "" {
-		c, err := LoadFS(fs, prj.ConfigPath)
+		c, err := Load(fs, prj.ConfigPath)
 		if err != nil {
 			return nil, err
 		}
@@ -136,8 +142,7 @@ func Discover(fs vfs.FS, paths []string, opt DiscoverOptions) (*Project, error) 
 		prj.Root = c.AbsRoot()
 		base = prj.Root
 	} else {
-		prj.Config = Default()
-		prj.Config.Root = ""
+		prj.Config = &Config{}
 	}
 	cfg := prj.Config
 	prj.Base = base

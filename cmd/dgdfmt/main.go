@@ -1,233 +1,370 @@
 // dgdfmt formats DGD LPC source, gofmt-style.
 //
-// Without -l/-d/-w it prints the formatted source of each named file (or
-// stdin) to stdout. Directories are walked for .c and .h files, honoring
-// the excludes from dgdtools.yml (found by searching upward from the
-// working directory, or via -config). The config also supplies dialect
-// and format defaults; explicitly passed flags win.
+// It is a thin front end over pkg/format (the layout engine) and
+// pkg/config (project discovery); everything a file is formatted by lives
+// there.
 //
-// Every write is protected by the formatter's internal gate: the output is
-// re-lexed and its significant token stream must be identical to the
-// input's, and formatting must be idempotent — otherwise the file is left
-// untouched and an error is reported. Files that do not fully tokenize
-// (dead or non-LPC content) are refused.
+// Without -l, -d or -w it prints the formatted source of each named file
+// (or of standard input) to standard output. A directory stands for the
+// .c and .h files under it, minus the project's excludes. Each file is
+// formatted with the settings of its own project: the nearest
+// dgdtools.yml at or above it, found the way dgdlint finds it, which
+// gives the dialect (the config's, or its profile's), the format options
+// and the macro conventions. Flags given on the command line win.
+//
+// Every result is protected by the formatter's gate: the output is
+// re-lexed, its significant token stream must be identical to the
+// input's, and formatting it again must change nothing. Otherwise the
+// file is left untouched and an error is reported. Files that do not
+// fully tokenize (dead or non-LPC content) are refused.
+//
+// Exit codes: 0 success, 2 usage, configuration or I/O error, or a file
+// that could not be formatted.
 package main
 
 import (
 	"bytes"
+	"context"
 	"flag"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
+	"os/signal"
+	"path/filepath"
 
+	"github.com/mmcdole/dgdtools/internal/par"
 	"github.com/mmcdole/dgdtools/pkg/config"
 	"github.com/mmcdole/dgdtools/pkg/fileset"
 	"github.com/mmcdole/dgdtools/pkg/format"
 	"github.com/mmcdole/dgdtools/pkg/lexer"
+	"github.com/mmcdole/dgdtools/pkg/profile"
+	"github.com/mmcdole/dgdtools/pkg/token"
+	"github.com/mmcdole/dgdtools/pkg/vfs"
 )
 
 var version = "dev"
 
-var (
-	list        = flag.Bool("l", false, "list files whose formatting differs")
-	diff        = flag.Bool("d", false, "display diffs instead of rewriting files")
-	write       = flag.Bool("w", false, "write result to (source) file instead of stdout")
-	configPath  = flag.String("config", "", "path to dgdtools.yml (default: search upward)")
-	indent      = flag.Int("indent", 4, "spaces per indentation level")
-	lineEndings = flag.String("line-endings", "preserve", "newline policy: preserve, lf, or crlf")
-	maxBlank    = flag.Int("max-blank-lines", 2, "maximum consecutive blank lines")
-	funcHeaders = flag.String("func-headers", "split", "function header layout: split (KNF, name at column 0) or joined (one line)")
-	noSlash     = flag.Bool("no-slash-slash", false, "disable // line comments (DGD without SLASHSLASH)")
-	closures    = flag.Bool("closures", false, "reserve 'function' as a keyword (DGD with CLOSURES)")
-	showVersion = flag.Bool("version", false, "print version")
-)
-
-var exitCode = 0
-
 func main() {
-	flag.Usage = func() {
-		fmt.Fprintf(os.Stderr, "usage: dgdfmt [flags] [path ...]\n")
-		flag.PrintDefaults()
-	}
-	flag.Parse()
-
-	if *showVersion {
-		fmt.Println("dgdfmt", version)
-		return
-	}
-
-	cfg, err := loadConfig()
-	if err != nil {
-		fatal(err)
-	}
-	opts, dialect, err := options(cfg)
-	if err != nil {
-		fatal(err)
-	}
-
-	if flag.NArg() == 0 {
-		if *write {
-			fatal(fmt.Errorf("cannot use -w with standard input"))
-		}
-		src, err := io.ReadAll(os.Stdin)
-		if err != nil {
-			fatal(err)
-		}
-		processBytes("<stdin>", src, opts, dialect)
-		os.Exit(exitCode)
-	}
-
-	for _, arg := range flag.Args() {
-		info, err := os.Stat(arg)
-		switch {
-		case err != nil:
-			report(err)
-		case info.IsDir():
-			err := fileset.Walk(arg, cfg.Exclude, func(path, rel string) {
-				processFile(path, opts, dialect)
-			})
-			if err != nil {
-				report(err)
-			}
-		default:
-			processFile(arg, opts, dialect)
-		}
-	}
-	os.Exit(exitCode)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+	os.Exit(run(ctx, os.Args[1:], os.Stdin, os.Stdout, os.Stderr))
 }
 
-func loadConfig() (*config.Config, error) {
-	if *configPath != "" {
-		return config.Load(*configPath)
+const usage = `usage: dgdfmt [flags] [path ...]
+
+Formats the named files, the .c and .h files under the named directories,
+or standard input. Each file is formatted with the settings of the nearest
+dgdtools.yml at or above it.
+
+flags:
+`
+
+type options struct {
+	list, diff, write        bool
+	configPath               string
+	noConfig                 bool
+	indent, maxBlank         int
+	lineEndings, funcHeaders string
+	noSlashSlash, closures   bool
+	showVersion              bool
+}
+
+func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) int {
+	var o options
+	fs := flag.NewFlagSet("dgdfmt", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	fs.BoolVar(&o.list, "l", false, "list the files whose formatting differs")
+	fs.BoolVar(&o.diff, "d", false, "print diffs instead of the formatted source")
+	fs.BoolVar(&o.write, "w", false, "write the result to the source file")
+	fs.StringVar(&o.configPath, "config", "", "use this `file` for every path instead of searching for dgdtools.yml")
+	fs.BoolVar(&o.noConfig, "no-config", false, "do not look for a config file")
+	fs.IntVar(&o.indent, "indent", 0, "spaces per indentation level (default 4)")
+	fs.StringVar(&o.lineEndings, "line-endings", "", "newline `policy`: preserve, lf or crlf (default preserve)")
+	fs.IntVar(&o.maxBlank, "max-blank-lines", 0, "most consecutive blank lines kept (default 2)")
+	fs.StringVar(&o.funcHeaders, "func-headers", "", "function header `layout`: split (KNF, name at column 0) or joined (default split)")
+	fs.BoolVar(&o.noSlashSlash, "no-slash-slash", false, "no // comments (a driver built without SLASHSLASH)")
+	fs.BoolVar(&o.closures, "closures", false, "'function' is a keyword (a driver built with CLOSURES)")
+	fs.BoolVar(&o.showVersion, "version", false, "print version")
+	fs.Usage = func() {
+		fmt.Fprint(stderr, usage)
+		fs.PrintDefaults()
 	}
+	if err := fs.Parse(args); err != nil {
+		if err == flag.ErrHelp {
+			return 0
+		}
+		return 2
+	}
+	if o.showVersion {
+		fmt.Fprintln(stdout, "dgdfmt", version)
+		return 0
+	}
+
+	c := &command{
+		ctx: ctx, o: o, given: map[string]bool{}, fsys: vfs.OS{},
+		stdout: stdout, stderr: stderr,
+		byDir: map[string]*settings{}, byConfig: map[string]*settings{},
+	}
+	fs.Visit(func(f *flag.Flag) { c.given[f.Name] = true })
+	// What the flags say must make sense whether or not a file needs it.
+	if _, err := c.override(format.Options{}); err != nil {
+		return c.fail(err)
+	}
+	// The library takes absolute paths and is told where profiles may be
+	// installed; the working directory and the environment are read here.
 	wd, err := os.Getwd()
 	if err != nil {
-		return nil, err
+		return c.fail(err)
 	}
-	return config.Find(wd)
+	c.wd = wd
+	userConfig, _ := os.UserConfigDir()
+	home, _ := os.UserHomeDir()
+	c.profileDirs = profile.UserDirs(os.Getenv(profile.PathEnv), userConfig, home)
+
+	if fs.NArg() == 0 {
+		if o.write {
+			return c.fail(fmt.Errorf("cannot use -w with standard input"))
+		}
+		src, err := io.ReadAll(stdin)
+		if err != nil {
+			return c.fail(err)
+		}
+		st, err := c.settingsFor(wd)
+		if err != nil {
+			return c.fail(err)
+		}
+		c.report(c.format(job{path: "<stdin>", name: "<stdin>", settings: st}, src))
+		return c.code
+	}
+
+	var jobs []job
+	for _, arg := range fs.Args() {
+		p := arg
+		if !filepath.IsAbs(p) {
+			p = filepath.Join(wd, p)
+		}
+		switch {
+		case !c.fsys.Exists(p):
+			c.fail(fmt.Errorf("%s: no such file or directory", arg))
+		case c.fsys.IsDir(p):
+			jobs = c.walk(jobs, p, arg)
+		default:
+			jobs = c.add(jobs, p, arg)
+		}
+	}
+	// Format on all CPUs, report in order.
+	const batch = 256
+	for len(jobs) > 0 && ctx.Err() == nil {
+		n := min(batch, len(jobs))
+		results := make([]result, n)
+		order := make([]int, n)
+		for i := range order {
+			order[i] = i
+		}
+		par.Each(ctx, order, func(i int) {
+			src, err := c.fsys.ReadFile(jobs[i].path)
+			if err != nil {
+				results[i] = result{job: jobs[i], err: err}
+				return
+			}
+			results[i] = c.format(jobs[i], src)
+		})
+		if ctx.Err() != nil {
+			break
+		}
+		for _, r := range results {
+			c.report(r)
+		}
+		jobs = jobs[n:]
+	}
+	if err := ctx.Err(); err != nil {
+		return c.fail(err)
+	}
+	return c.code
 }
 
-// options merges config-file format settings with flags; flags that were
-// explicitly passed on the command line win.
-func options(cfg *config.Config) (format.Options, lexer.Dialect, error) {
-	set := map[string]bool{}
-	flag.Visit(func(f *flag.Flag) { set[f.Name] = true })
+// command is one run of dgdfmt.
+type command struct {
+	ctx            context.Context
+	o              options
+	given          map[string]bool // the flags that were passed
+	fsys           vfs.FS
+	stdout, stderr io.Writer
+	wd             string
+	profileDirs    []string
 
-	o := format.Options{Indent: *indent, MaxBlankLines: *maxBlank}
-	le := *lineEndings
-	fh := *funcHeaders
-	dialect := lexer.Dialect{SlashSlash: !*noSlash, Closures: *closures}
+	// byDir and byConfig remember the settings found for a directory and
+	// for a config file ("" is no config).
+	byDir, byConfig map[string]*settings
 
-	if !set["indent"] && cfg.Format.Indent > 0 {
-		o.Indent = cfg.Format.Indent
-	}
-	if !set["max-blank-lines"] && cfg.Format.MaxBlankLines > 0 {
-		o.MaxBlankLines = cfg.Format.MaxBlankLines
-	}
-	if !set["line-endings"] && cfg.Format.LineEndings != "" {
-		le = cfg.Format.LineEndings
-	}
-	if !set["func-headers"] && cfg.Format.FunctionHeaders != "" {
-		fh = cfg.Format.FunctionHeaders
-	}
-	if !set["no-slash-slash"] && !set["closures"] {
-		dialect = cfg.TokenDialect()
-	}
-
-	switch le {
-	case "preserve":
-		o.LineEndings = format.Preserve
-	case "lf":
-		o.LineEndings = format.LF
-	case "crlf":
-		o.LineEndings = format.CRLF
-	default:
-		return o, dialect, fmt.Errorf("invalid line-endings %q", le)
-	}
-	switch fh {
-	case "split":
-		o.FuncHeaders = format.HeadersSplit
-	case "joined":
-		o.FuncHeaders = format.HeadersJoined
-	default:
-		return o, dialect, fmt.Errorf("invalid func-headers %q (want split or joined)", fh)
-	}
-	return o, dialect, nil
+	code int
 }
 
-func fatal(err error) {
-	fmt.Fprintln(os.Stderr, "dgdfmt:", err)
-	os.Exit(2)
+// settings are what a project says about formatting its files.
+type settings struct {
+	project *config.Project
+	opts    format.Options
+	dialect token.Dialect
+	exclude *fileset.Matcher
 }
 
-func report(err error) {
-	fmt.Fprintln(os.Stderr, "dgdfmt:", err)
-	exitCode = 2
+// job is one file to format: its path, how the user named it, and its
+// project's settings.
+type job struct {
+	path, name string
+	settings   *settings
 }
 
-func processFile(path string, opts format.Options, dialect lexer.Dialect) {
-	src, err := os.ReadFile(path)
-	if err != nil {
-		report(err)
-		return
+type result struct {
+	job
+	src, out []byte
+	err      error
+}
+
+// fail reports an error and makes the run exit 2.
+func (c *command) fail(err error) int {
+	fmt.Fprintln(c.stderr, "dgdfmt:", err)
+	c.code = 2
+	return c.code
+}
+
+// settingsFor returns the settings for the files in dir: those of the
+// nearest config file at or above it (config.FindPath, as dgdlint's
+// discovery uses), resolved by config.Discover.
+func (c *command) settingsFor(dir string) (*settings, error) {
+	if st, ok := c.byDir[dir]; ok {
+		return st, nil
 	}
-	out, changed, ok := run(path, src, opts, dialect)
+	found := c.o.configPath
+	if found == "" && !c.o.noConfig {
+		found = config.FindPath(c.fsys, dir)
+	}
+	st, ok := c.byConfig[found]
 	if !ok {
+		prj, err := config.Discover(c.fsys, []string{dir}, config.DiscoverOptions{
+			ConfigPath: found, NoConfig: found == "",
+			WorkDir: c.wd, ProfileDirs: c.profileDirs,
+		})
+		if err != nil {
+			return nil, err
+		}
+		opts, err := format.OptionsFromConfig(prj.Config)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", prj.ConfigPath, err)
+		}
+		if opts, err = c.override(opts); err != nil {
+			return nil, err
+		}
+		st = &settings{
+			project: prj, opts: opts,
+			dialect: prj.Config.TokenDialect(),
+			exclude: fileset.NewMatcher(prj.Config.Exclude),
+		}
+		if c.given["no-slash-slash"] {
+			st.dialect.SlashSlash = !c.o.noSlashSlash
+		}
+		if c.given["closures"] {
+			st.dialect.Closures = c.o.closures
+		}
+		c.byConfig[found] = st
+	}
+	c.byDir[dir] = st
+	return st, nil
+}
+
+// override applies the format flags that were passed.
+func (c *command) override(o format.Options) (format.Options, error) {
+	var err error
+	if c.given["indent"] {
+		o.Indent = c.o.indent
+	}
+	if c.given["max-blank-lines"] {
+		o.MaxBlankLines = c.o.maxBlank
+	}
+	if c.given["line-endings"] {
+		if o.LineEndings, err = format.ParseLineEndings(c.o.lineEndings); err != nil {
+			return o, fmt.Errorf("-line-endings: %w", err)
+		}
+	}
+	if c.given["func-headers"] {
+		if o.FuncHeaders, err = format.ParseHeaderStyle(c.o.funcHeaders); err != nil {
+			return o, fmt.Errorf("-func-headers: %w", err)
+		}
+	}
+	return o, nil
+}
+
+// add queues the file at path, which the user named name.
+func (c *command) add(jobs []job, path, name string) []job {
+	st, err := c.settingsFor(filepath.Dir(path))
+	if err != nil {
+		c.fail(err)
+		return jobs
+	}
+	return append(jobs, job{path: path, name: name, settings: st})
+}
+
+// walk queues the .c and .h files under dir that its project does not
+// exclude. The excludes are those of the project dir belongs to, matched
+// from that project's lib root; each file is then formatted with the
+// settings of its own nearest config.
+func (c *command) walk(jobs []job, dir, name string) []job {
+	st, err := c.settingsFor(dir)
+	if err != nil {
+		c.fail(err)
+		return jobs
+	}
+	err = st.project.Tree().Walk(c.ctx, c.fsys, dir, []string{".c", ".h"}, st.exclude, func(p string) {
+		shown := p
+		if rel, err := filepath.Rel(dir, p); err == nil {
+			shown = filepath.Join(name, rel)
+		}
+		jobs = c.add(jobs, p, shown)
+	})
+	if err != nil && c.ctx.Err() == nil {
+		c.fail(err)
+	}
+	return jobs
+}
+
+// format formats one file's source.
+func (c *command) format(j job, src []byte) result {
+	r := result{job: j, src: src}
+	f := lexer.Lex(j.path, src, j.settings.dialect)
+	if r.err = f.CheckRoundTrip(); r.err == nil {
+		r.out, r.err = format.Format(f, j.settings.opts)
+	}
+	return r
+}
+
+// report does what the mode asks with one file's result.
+func (c *command) report(r result) {
+	if r.err != nil {
+		c.fail(r.err)
 		return
 	}
-
+	changed := !bytes.Equal(r.src, r.out)
 	switch {
-	case *list:
+	case c.o.list:
 		if changed {
-			fmt.Println(path)
+			fmt.Fprintln(c.stdout, r.name)
 		}
-	case *diff:
+	case c.o.diff:
 		if changed {
-			printDiff(path, src, out)
+			if err := c.printDiff(r); err != nil {
+				c.fail(err)
+			}
 		}
-	case *write:
+	case c.o.write:
 		if changed {
-			if err := writeFile(path, out); err != nil {
-				report(err)
+			if err := writeFile(r.path, r.out); err != nil {
+				c.fail(err)
 			}
 		}
 	default:
-		os.Stdout.Write(out)
+		c.stdout.Write(r.out)
 	}
-}
-
-func processBytes(name string, src []byte, opts format.Options, dialect lexer.Dialect) {
-	out, changed, ok := run(name, src, opts, dialect)
-	if !ok {
-		return
-	}
-	switch {
-	case *list:
-		if changed {
-			fmt.Println(name)
-		}
-	case *diff:
-		if changed {
-			printDiff(name, src, out)
-		}
-	default:
-		os.Stdout.Write(out)
-	}
-}
-
-func run(name string, src []byte, opts format.Options, dialect lexer.Dialect) (out []byte, changed, ok bool) {
-	f := lexer.Lex(name, src, dialect)
-	if err := f.CheckRoundTrip(); err != nil {
-		report(err)
-		return nil, false, false
-	}
-	out, err := format.Format(f, opts)
-	if err != nil {
-		report(err)
-		return nil, false, false
-	}
-	return out, !bytes.Equal(src, out), true
 }
 
 // writeFile replaces path's contents, preserving its permission bits.
@@ -239,34 +376,34 @@ func writeFile(path string, out []byte) error {
 	return os.WriteFile(path, out, info.Mode().Perm())
 }
 
-func printDiff(path string, before, after []byte) {
-	dir := os.TempDir()
-	a, err := os.CreateTemp(dir, "dgdfmt-a-*")
-	if err != nil {
-		report(err)
-		return
+// printDiff writes a unified diff of the file and its formatted form,
+// made by diff(1).
+func (c *command) printDiff(r result) error {
+	var tmp [2]string
+	for i, data := range [][]byte{r.src, r.out} {
+		f, err := os.CreateTemp("", "dgdfmt-*")
+		if err != nil {
+			return err
+		}
+		defer os.Remove(f.Name())
+		_, err = f.Write(data)
+		if cerr := f.Close(); err == nil {
+			err = cerr
+		}
+		if err != nil {
+			return err
+		}
+		tmp[i] = f.Name()
 	}
-	defer os.Remove(a.Name())
-	b, err := os.CreateTemp(dir, "dgdfmt-b-*")
-	if err != nil {
-		report(err)
-		return
-	}
-	defer os.Remove(b.Name())
-	a.Write(before)
-	b.Write(after)
-	a.Close()
-	b.Close()
-
-	cmd := exec.Command("diff", "-u",
-		"--label", path+".orig", a.Name(),
-		"--label", path, b.Name())
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	// diff exits 1 when files differ; that is the expected case.
+	cmd := exec.CommandContext(c.ctx, "diff", "-u",
+		"--label", r.name+".orig", tmp[0],
+		"--label", r.name, tmp[1])
+	cmd.Stdout, cmd.Stderr = c.stdout, c.stderr
+	// diff exits 1 when the files differ; that is the expected case.
 	if err := cmd.Run(); err != nil {
 		if ee, isExit := err.(*exec.ExitError); !isExit || ee.ExitCode() > 1 {
-			report(fmt.Errorf("diff: %v", err))
+			return fmt.Errorf("diff: %v", err)
 		}
 	}
+	return nil
 }

@@ -39,11 +39,10 @@ self-compare, and the formatter gate on every file.
 
 ## Configuration
 
-All three tools read `dgdtools.yml` (or `.dgdtools.yml`). dgdfmt and
-dgdcmp search upward from the working directory; dgdlint searches upward
-from the path it is asked to lint, so it works from anywhere on disk.
-Every field is optional and the tools work with no config file at all. A
-natural setup is one file next to the mudlib:
+dgdfmt and dgdlint read `dgdtools.yml` (or `.dgdtools.yml`), found by
+searching upward from the path they are given, so they work from anywhere
+on disk. Every field is optional and the tools work with no config file
+at all. A natural setup is one file next to the mudlib:
 
 ```
 mud/
@@ -124,9 +123,20 @@ dgdfmt -d file.c            # show a unified diff
 dgdfmt -w dir/              # rewrite files in place
 ```
 
+With no path, standard input is formatted. A directory stands for the
+`.c` and `.h` files under it, minus the `exclude` globs of its project
+(matched from the lib root, wherever the walk starts). Each file is
+formatted with the settings of the nearest `dgdtools.yml` at or above it:
+the dialect (the config's or its profile's), the `format` options, and
+the macro conventions (`specifier_macros`, `macros`, `defines`). A file
+is formatted from its own text and those settings alone; no other file is
+read, so the result is the same in an editor buffer, in a wizard's
+checkout and in the whole lib.
+
 The style is fixed, with a small number of toggles (`-indent`,
 `-line-endings`, `-max-blank-lines`, `-func-headers`); flags override the
-config file. The default style:
+config file, as do `-no-slash-slash` and `-closures` for the dialect. The
+default style:
 
 - Function definitions in KNF: specifiers and return type on one line,
   the name at column 0, braces on their own lines. `-func-headers joined`
@@ -135,10 +145,17 @@ config file. The default style:
   (`string query_code() { return code; }`).
 - Control-flow braces are cuddled (`if (x) {`, `} else {`) when the
   source uses Allman layout; one-line brace blocks keep their own lines.
+- Statements are indented by their nesting, with or without braces: the
+  body of a braceless `if`, `else`, `for`, `while` or `do` is one level
+  in. A line that continues a statement is one level in from it.
 - `case` labels at the `switch` level, bodies one deeper.
 - Horizontal spacing is normalized (`a+b` becomes `a + b`, `f( a,b )`
   becomes `f(a, b)`); the author's line breaks are preserved and long
   lines are never re-wrapped.
+- Every branch of an `#if` is formatted, by the same rules, as if it were
+  the one compiled.
+- Code that does not parse keeps its line breaks and is indented by its
+  braces; the code around it is formatted as usual.
 - Comments are never reflowed. Multi-line block comments shift as a unit,
   and function headers containing comments keep their original layout.
 - Trailing whitespace is removed, blank-line runs are capped, files end

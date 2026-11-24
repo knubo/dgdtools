@@ -322,7 +322,7 @@ func New(prj *config.Project, fsys vfs.FS) (*Linter, error) {
 		}
 		l.override = append(l.override, compiledOverride{fileset.NewMatcher(pr.Paths), m})
 	}
-	lay := index.Layout{Root: prj.Root, CheckoutDir: prj.CheckoutDir, CheckoutLib: prj.CheckoutLib}
+	lay := index.Layout{Tree: prj.Tree()}
 	if prj.Profile != nil {
 		// Stubs answer for whatever is not on disk; real files win.
 		stubs := profile.NewFS(fsys, prj.Profile)

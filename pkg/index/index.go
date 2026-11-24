@@ -57,11 +57,9 @@ import (
 //     as a profile's stubs describe it.
 //   - Neither: only file-local facts are available.
 type Layout struct {
-	// Root is the lib's directory on disk, "" when the lib is not there.
-	Root string
-	// CheckoutDir is a directory on disk holding the lib directory
-	// CheckoutLib ("/players/name"); both empty without a checkout.
-	CheckoutDir, CheckoutLib string
+	// Tree is where the lib is on disk: Root, or CheckoutDir holding the
+	// lib directory CheckoutLib.
+	fileset.Tree
 	// Stubs is the location prefix of a profile's stubs: the stub for lib
 	// file "/std/room.c" is read from the file system as
 	// Stubs+"/std/room.c". Empty without a profile. A file on disk always

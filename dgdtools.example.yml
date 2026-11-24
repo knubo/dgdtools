@@ -1,6 +1,6 @@
-# dgdtools.yml -- shared configuration for dgdfmt, dgdlint and dgdcmp.
-# Place it at your project root; every field is optional. dgdlint finds it
-# by walking up from the path it is asked to lint.
+# dgdtools.yml -- shared configuration for dgdfmt and dgdlint.
+# Place it at your project root; every field is optional. Both find it
+# by walking up from the path they are given.
 #
 # This file is the setup for someone who has the WHOLE lib (here:
 # VikingMUD). A wizard with only their own folder needs one line instead:

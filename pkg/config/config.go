@@ -52,12 +52,10 @@ type Config struct {
 	Format  Format   `yaml:"format"`
 	Lint    Lint     `yaml:"lint"`
 
-	// Dir is the directory the config was loaded from ("." for defaults).
-	Dir string `yaml:"-"`
-	// Path is the config file path ("" for defaults).
+	// Dir is the directory the config was loaded from, and Path the config
+	// file; both are empty for a project without one.
+	Dir  string `yaml:"-"`
 	Path string `yaml:"-"`
-	// RootSet records whether the file gave a root.
-	RootSet bool `yaml:"-"`
 }
 
 // StringList decodes from either a scalar or a sequence.
@@ -202,23 +200,14 @@ type PathRule struct {
 	Disable []string `yaml:"disable"`
 }
 
-// Default returns the zero configuration with Dir set.
-func Default() *Config {
-	return &Config{Dir: ".", Root: "."}
-}
-
-// Load reads a config file from disk.
-func Load(path string) (*Config, error) { return LoadFS(vfs.OS{}, path) }
-
-// LoadFS reads a config file, applying extends.
-func LoadFS(fs vfs.FS, path string) (*Config, error) {
+// Load reads a config file, applying extends.
+func Load(fs vfs.FS, path string) (*Config, error) {
 	c := &Config{}
 	if err := loadInto(fs, path, c, map[string]bool{}); err != nil {
 		return nil, err
 	}
 	c.Dir = filepath.Dir(path)
 	c.Path = path
-	c.RootSet = c.Root != ""
 	if c.Root == "" {
 		c.Root = "."
 	}
@@ -276,16 +265,6 @@ func loadInto(fs vfs.FS, path string, c *Config, seen map[string]bool) error {
 		c.ProfileBuild.DriverConfig = drv
 	}
 	return nil
-}
-
-// Find searches dir (an absolute path) and its parents for a config file;
-// returns Default() when none exists.
-func Find(dir string) (*Config, error) {
-	p := FindPath(vfs.OS{}, dir)
-	if p == "" {
-		return Default(), nil
-	}
-	return Load(p)
 }
 
 // FindPath returns the nearest config file at or above dir (an absolute
@@ -355,12 +334,4 @@ func (c *Config) MacroClasses() map[string]pp.Class {
 		}
 	}
 	return m
-}
-
-// RuleSettingsFor returns the per-rule settings (zero value if unset).
-func (c *Config) RuleSettingsFor(rule string) RuleSettings {
-	if c.Lint.Rules == nil {
-		return RuleSettings{}
-	}
-	return c.Lint.Rules[rule]
 }

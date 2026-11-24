@@ -121,7 +121,7 @@ lint:
   defines: [__FEATURE__]
 `,
 	}
-	c, err := LoadFS(m, "/proj/dgdtools.yml")
+	c, err := Load(m, "/proj/dgdtools.yml")
 	require.NoError(t, err)
 	// root from the base is relative to the base file.
 	assert.Equal(t, "/shared/lib", c.AbsRoot())
@@ -139,19 +139,19 @@ lint:
 
 	// A misspelled key is an error, not a silently ignored setting.
 	m["/typo/dgdtools.yml"] = "lint:\n  include_dir: [/x]\n"
-	_, err = LoadFS(m, "/typo/dgdtools.yml")
+	_, err = Load(m, "/typo/dgdtools.yml")
 	assert.ErrorContains(t, err, "include_dir")
 
 	// Cycles are reported.
 	m["/loop/a.yml"] = "extends: b.yml\n"
 	m["/loop/b.yml"] = "extends: a.yml\n"
-	_, err = LoadFS(m, "/loop/a.yml")
+	_, err = Load(m, "/loop/a.yml")
 	assert.ErrorContains(t, err, "cycle")
 }
 
 // The documented example must stay loadable and name only real settings.
 func TestExampleConfigLoads(t *testing.T) {
-	c, err := Load("../../dgdtools.example.yml")
+	c, err := Load(vfs.OS{}, "../../dgdtools.example.yml")
 	require.NoError(t, err)
 	assert.Equal(t, "etc/config.viking", c.ProfileBuild.DriverConfig)
 	assert.Contains(t, c.ProfileBuild.Share, "std/**")
@@ -188,7 +188,7 @@ lint:
       disable: [lifecycle-chain]
   fail_on: error
 `}
-	c, err := LoadFS(m, "/mud/dgdtools.yml")
+	c, err := Load(m, "/mud/dgdtools.yml")
 	require.NoError(t, err)
 	assert.Equal(t, "/mud/lib", c.AbsRoot())
 	assert.Equal(t, "warning", c.Lint.Rules["raw-inherit-path"].Severity)

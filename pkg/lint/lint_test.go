@@ -20,7 +20,7 @@ func minilibProject(t *testing.T) *config.Project {
 	t.Helper()
 	root, err := filepath.Abs(filepath.Join("testdata", "minilib"))
 	require.NoError(t, err)
-	cfg := config.Default()
+	cfg := &config.Config{}
 	cfg.Root = root
 	cfg.Lint.IncludeDirs = []string{"/include", "/dgd/include"}
 	cfg.Lint.IncludeFile = "/dgd/include/Std.h"
@@ -217,7 +217,7 @@ func memProject(files map[string]string) (*config.Project, vfs.Mem) {
 	for k, v := range files {
 		m["/lib/"+k] = v
 	}
-	cfg := config.Default()
+	cfg := &config.Config{}
 	cfg.Root = "/lib"
 	cfg.Lint.IncludeDirs = []string{"/include"}
 	cfg.Lint.IncludeFile = "/sys/forced.h"
@@ -540,7 +540,7 @@ func TestIncompleteLibDegradesToUnknown(t *testing.T) {
 	// Only one domain is checked out: /include, the force-include and the
 	// auto object are absent.
 	m := vfs.Mem{"/lib/d/Foo/room.c": "#include <std.h>\n#include \"local.h\"\ninherit \"/std/room\";\nvoid create() {\n ::create();\n \"/std/thing\"->x();\n clone_object(\"/obj/y\");\n a = 1\n b = 2;\n}\n"}
-	cfg := config.Default()
+	cfg := &config.Config{}
 	cfg.Root = "/lib"
 	cfg.Lint.IncludeDirs = []string{"/include"}
 	cfg.Lint.IncludeFile = "/sys/forced.h"

@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/mmcdole/dgdtools/pkg/config"
+	"github.com/mmcdole/dgdtools/pkg/fileset"
 	"github.com/mmcdole/dgdtools/pkg/pp"
 	"github.com/mmcdole/dgdtools/pkg/vfs"
 )
@@ -83,7 +84,7 @@ func newLib(t *testing.T, files map[string]string, tweak ...func(*config.Config)
 	for k, v := range files {
 		m["/lib/"+k] = v
 	}
-	cfg := config.Default()
+	cfg := &config.Config{}
 	cfg.Root = "/lib"
 	cfg.Lint.IncludeDirs = []string{"/include"}
 	cfg.Lint.IncludeFile = "/sys/forced.h"
@@ -93,7 +94,7 @@ func newLib(t *testing.T, files map[string]string, tweak ...func(*config.Config)
 	}
 	ov := vfs.NewOverlay(m)
 	pfs := &probeFS{FS: ov}
-	return &lib_{ix: New(cfg, Layout{Root: "/lib"}, pfs), disk: m, ov: ov, fs: pfs}
+	return &lib_{ix: New(cfg, Layout{Tree: fileset.Tree{Root: "/lib"}}, pfs), disk: m, ov: ov, fs: pfs}
 }
 
 func (l *lib_) set(t *testing.T, rel, src string) []string {
@@ -382,7 +383,7 @@ func TestLookupCallable(t *testing.T) {
 
 func TestNoLib(t *testing.T) {
 	m := vfs.Mem{"/any/a.c": "#include \"b.h\"\ninherit \"/std/x\";\nvoid f() { }\n", "/any/b.h": "#define B 1\n"}
-	ix := New(config.Default(), Layout{}, m)
+	ix := New(&config.Config{}, Layout{}, m)
 	assert.False(t, ix.HasLib())
 	s := ix.Snapshot()
 	u := s.UnitAt("/any/a.c")
@@ -761,11 +762,11 @@ func TestStubsAndCheckout(t *testing.T) {
 		"/home/ann/sub/closet.c": "inherit \"/players/ann/hall\";\n",
 	}
 	both := unionFS{disk, stubs}
-	cfg := config.Default()
+	cfg := &config.Config{}
 	cfg.Lint.IncludeDirs = []string{"/include"}
 	cfg.Lint.AutoObjects = []string{"/sys/auto"}
 	ix := New(cfg, Layout{
-		CheckoutDir: "/home/ann", CheckoutLib: "/players/ann",
+		Tree:  fileset.Tree{CheckoutDir: "/home/ann", CheckoutLib: "/players/ann"},
 		Stubs: "stub://lib", Covered: []string{"/std/", "/include/"}, Holes: []string{"std/secret/**"},
 	}, both)
 	assert.True(t, ix.HasLib())
@@ -814,7 +815,7 @@ func TestRealFileWinsOverStub(t *testing.T) {
 	disk := vfs.Mem{"/lib/obj/a.c": "inherit \"/std/room\";\n", "/lib/keep": ""}
 	stubs := vfs.Mem{"stub://lib/std/room.c": "void from_stub() {}\n"}
 	ov := vfs.NewOverlay(unionFS{disk, stubs})
-	ix := New(config.Default(), Layout{Root: "/lib", Stubs: "stub://lib"}, ov)
+	ix := New(&config.Config{}, Layout{Tree: fileset.Tree{Root: "/lib"}, Stubs: "stub://lib"}, ov)
 
 	s := ix.Snapshot()
 	assert.Contains(t, s.Chain("/obj/a").Funcs, "from_stub")
