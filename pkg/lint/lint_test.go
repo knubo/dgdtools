@@ -1,7 +1,10 @@
 package lint_test
 
 import (
+	"context"
 	"fmt"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -10,176 +13,628 @@ import (
 	"github.com/mmcdole/dgdtools/pkg/config"
 	"github.com/mmcdole/dgdtools/pkg/diag"
 	"github.com/mmcdole/dgdtools/pkg/lint"
-	_ "github.com/mmcdole/dgdtools/pkg/lint/rules"
+	"github.com/mmcdole/dgdtools/pkg/vfs"
 )
 
-func minilibConfig() *config.Config {
+func minilibProject(t *testing.T) *config.Project {
+	t.Helper()
+	root, err := filepath.Abs(filepath.Join("testdata", "minilib"))
+	require.NoError(t, err)
 	cfg := config.Default()
-	cfg.Dir = "testdata"
-	cfg.Root = "minilib"
+	cfg.Root = root
 	cfg.Lint.IncludeDirs = []string{"/include", "/dgd/include"}
 	cfg.Lint.IncludeFile = "/dgd/include/Std.h"
 	cfg.Lint.AutoObjects = []string{"/dgd/lib/object"}
-	cfg.Lint.CallRegistry = map[string]int{"register_handler": 0}
+	cfg.Lint.CallRegistry = map[string]int{"register_handler": 0, "store_fp": 0}
 	cfg.Lint.VirtualPaths = []string{"virtual/**"}
-	return cfg
+	return &config.Project{Config: cfg, Root: root}
 }
 
-// runLint executes the given rules over the fixture lib and returns
-// findings as "rule path:line" plus messages for detail assertions.
-func runLint(t *testing.T, cfg *config.Config, enable, disable []string) []diag.Diagnostic {
+func run(t *testing.T, prj *config.Project, fsys vfs.FS, req lint.Request) *lint.Result {
 	t.Helper()
-	analyzers, err := lint.Enabled(cfg, enable, disable)
+	l, err := lint.New(prj, fsys)
 	require.NoError(t, err)
-	runner := &lint.Runner{Config: cfg, Analyzers: analyzers}
-	ds, err := runner.Run([]string{cfg.AbsRoot()})
+	res, err := l.Run(context.Background(), req)
 	require.NoError(t, err)
-	return ds
+	return res
 }
 
+// keys renders findings as "rule file:line".
 func keys(ds []diag.Diagnostic) []string {
 	var out []string
 	for _, d := range ds {
-		out = append(out, fmt.Sprintf("%s %s:%d", d.Rule, shortPath(d.Path), d.Line))
+		out = append(out, fmt.Sprintf("%s %s:%d", d.Rule, filepath.Base(d.Path), d.Line))
 	}
 	return out
 }
 
-func shortPath(p string) string {
-	for i := len(p) - 1; i >= 0; i-- {
-		if p[i] == '/' {
-			return p[i+1:]
+func TestMinilibSeededBugs(t *testing.T) {
+	res := run(t, minilibProject(t), vfs.OS{}, lint.Request{Enable: []string{"static-autosave-var"}})
+	got := keys(res.Diagnostics)
+
+	for _, want := range []string{
+		"callable-not-found user.c:10",    // call_out to missing function
+		"callable-not-found user.c:11",    // config registrar to missing function
+		"callable-not-found user.c:19",    // this_object()->missing_fn()
+		"static-crossobj user.c:27",       // static cross-object
+		"static-crossobj user.c:21",       // private via ->
+		"callable-not-found user.c:24",    // call_other missing
+		"callable-not-found user.c:26",    // literal-path -> missing
+		"static-autosave-var saver.c:4",   //
+		"lifecycle-chain messy.c:6",       //
+		"undefined-prototype user.c:28",   // call to declared-never-defined function
+		"target-object-missing user.c:29", // clone_object of missing file
+		"target-object-missing user.c:30", // -> on missing object
+		"target-object-missing broken.c:3",
+		"include-not-found vet.c:1",
+		"assignment-in-condition vet.c:12",
+		"assignment-in-condition vet.c:16",
+		"no-effect-statement vet.c:18",
+		"sscanf-format vet.c:19",
+		"callback-arity vet.c:21",
+		"callback-arity vet.c:22",
+	} {
+		assert.Contains(t, got, want)
+	}
+	for _, k := range got {
+		for _, clean := range []string{
+			"user.c:31", // virtual path is exempt
+			"thing.c:3", // forward decl with definition
+			"cond.c",    // #ifdef-split brackets; registration arity unknown
+			"vet.c:14",  // ((x = 1)) idiom
+			"vet.c:25",  // assign-and-test
+			"vet.c:20",  // %% is not a conversion
+			"vet.c:23",  // correct arity
+			"vet.c:24",  // ellipsis accepts extras
+			"mixinuser.c",
+			"user.c:20",    // static + same object is legal
+			"user.c:18",    // real function
+			"user.c:22",    // auto object provides it
+			"user.c:23",    //
+			"user.c:25",    //
+			"user.c:12",    // registered handler exists
+			"broken.c:10",  // partial chain: unknown, not missing
+			"syntax-error", // the fixture lib parses
+		} {
+			assert.NotContains(t, k, clean)
 		}
 	}
-	return p
-}
 
-func TestTier2SeededBugs(t *testing.T) {
-	ds := runLint(t, minilibConfig(), []string{"static-autosave-var"}, nil)
-	got := keys(ds)
-
-	// Every seeded bug is found.
-	assert.Contains(t, got, "callable-not-found user.c:10", "call_out to missing function")
-	assert.Contains(t, got, "callable-not-found user.c:11", "config registrar to missing function")
-	assert.Contains(t, got, "callable-not-found user.c:19", "this_object()->missing_fn()")
-	assert.Contains(t, got, "static-crossobj user.c:27", "static cross-object")
-	assert.Contains(t, got, "static-crossobj user.c:21", "private via ->")
-	assert.Contains(t, got, "callable-not-found user.c:24", "call_other missing")
-	assert.Contains(t, got, "callable-not-found user.c:26", "literal-path -> missing")
-	assert.Contains(t, got, "static-autosave-var saver.c:4")
-	assert.Contains(t, got, "lifecycle-chain messy.c:6")
-	assert.Contains(t, got, "undefined-prototype user.c:28", "call to declared-never-defined function")
-	assert.Contains(t, got, "target-object-missing user.c:29", "clone_object of missing file")
-	assert.Contains(t, got, "target-object-missing user.c:30", "-> on missing object")
-	assert.Contains(t, got, "target-object-missing broken.c:3", "resolved inherit of missing file")
-
-	// Virtual paths and forward-declared-then-defined functions are clean.
-	for _, k := range got {
-		assert.NotContains(t, k, "user.c:31", "virtual path is exempt")
-		assert.NotContains(t, k, "thing.c:3", "forward decl with definition is fine")
-	}
-
-	// A definition whose body splits brackets across #ifdef/#else must not
-	// be lost (its prototype would otherwise read as undefined), and a
-	// two-argument registrar registration is never arity-checked.
-	for _, k := range got {
-		assert.NotContains(t, k, "cond.c", "conditional-branch fixture must be clean")
-	}
-
-	// Compiler-blindspot rules (vet.c fixture).
-	assert.Contains(t, got, "include-not-found vet.c:1")
-	assert.Contains(t, got, "assignment-in-condition vet.c:12", "if (x = 1)")
-	assert.Contains(t, got, "assignment-in-condition vet.c:16", "precedence class in for middle clause")
-	assert.Contains(t, got, "no-effect-statement vet.c:18", "x == 1;")
-	assert.Contains(t, got, "sscanf-format vet.c:19", "1 conversion, 2 variables")
-	assert.Contains(t, got, "callback-arity vet.c:21", "too few via ->")
-	assert.Contains(t, got, "callback-arity vet.c:22", "too many via call_out")
-	for _, k := range got {
-		assert.NotContains(t, k, "vet.c:14", "((x = 1)) idiom is accepted")
-		assert.NotContains(t, k, "vet.c:25", "assign-and-test idiom is accepted")
-		assert.NotContains(t, k, "mixinuser.c", "no parent create: nothing to chain")
-		assert.NotContains(t, k, "vet.c:20", "%% is not a conversion")
-		assert.NotContains(t, k, "vet.c:23", "correct arity")
-		assert.NotContains(t, k, "vet.c:24", "ellipsis accepts extras")
-	}
-
-	// Static via same-object call_other is legal in DGD: no finding.
-	for _, k := range got {
-		assert.NotContains(t, k, "user.c:20", "static + same object is legal")
-	}
-
-	// The auto object's functions and real functions never fire.
-	for _, k := range got {
-		assert.NotContains(t, k, "user.c:18", "visible_fn is real")
-		assert.NotContains(t, k, "user.c:22", "object_name comes from the auto object")
-		assert.NotContains(t, k, "user.c:23", "call_other to visible_fn is fine")
-		assert.NotContains(t, k, "user.c:25", "literal-path -> visible_fn is fine")
-	}
-
-	// Partial chains are skipped, not guessed at.
-	for _, k := range got {
-		assert.NotContains(t, k, "broken.c:10", "partial chain must not produce findings")
-	}
-
-	// register_handler("on_event") resolves: on_event exists.
-	for _, d := range ds {
-		if d.Rule == "callable-not-found" {
-			assert.NotContains(t, d.Message, "on_event")
+	// Diagnostics carry codes, ranges and related locations.
+	for _, d := range res.Diagnostics {
+		assert.NotEmpty(t, d.Code)
+		assert.LessOrEqual(t, d.Start, d.End)
+		if d.Rule == "static-crossobj" {
+			require.NotEmpty(t, d.Related)
+			assert.Equal(t, "thing.c", filepath.Base(d.Related[0].Path))
 		}
 	}
+	// Unknowns are counted, not reported.
+	assert.Greater(t, res.Stats.UnknownReceivers, 0)
+	assert.Greater(t, res.Stats.UnresolvedInherits, 0)
 }
 
-func TestTier1RulesOptIn(t *testing.T) {
-	ds := runLint(t, minilibConfig(), []string{"missing-visibility", "raw-inherit-path", "unresolved-inherit"}, nil)
-	got := keys(ds)
-
+func TestOptInRulesAndSuppression(t *testing.T) {
+	res := run(t, minilibProject(t), vfs.OS{}, lint.Request{
+		Enable: []string{"missing-visibility", "raw-inherit-path", "unresolved-inherit", "C006"}})
+	got := keys(res.Diagnostics)
 	assert.Contains(t, got, "missing-visibility messy.c:13")
 	assert.Contains(t, got, "raw-inherit-path messy.c:1")
-	assert.Contains(t, got, "raw-inherit-path saver.c:1")
 	assert.Contains(t, got, "unresolved-inherit broken.c:4")
-
-	// Suppression comment works.
 	assert.NotContains(t, got, "missing-visibility messy.c:21", "disable-next-line suppresses")
-	// public counts as a specifier: thing.c's functions are never flagged.
 	for _, k := range got {
-		assert.NotContains(t, k, "missing-visibility thing.c")
+		assert.NotContains(t, k, "missing-visibility thing.c", "public counts as a specifier")
+		assert.NotContains(t, k, "unused-suppression", "the one suppression comment is used")
 	}
+	assert.Equal(t, 1, res.Stats.Suppressed)
+
+	// With the rule off, the same comment suppresses nothing.
+	res = run(t, minilibProject(t), vfs.OS{}, lint.Request{Enable: []string{"unused-suppression"}})
+	assert.Contains(t, keys(res.Diagnostics), "unused-suppression messy.c:20")
 }
 
-func TestDisableAndPathRules(t *testing.T) {
-	cfg := minilibConfig()
-	ds := runLint(t, cfg, nil, []string{"static-crossobj"})
-	for _, d := range ds {
+func TestRuleSelection(t *testing.T) {
+	prj := minilibProject(t)
+
+	res := run(t, prj, vfs.OS{}, lint.Request{Disable: []string{"static-crossobj"}})
+	for _, d := range res.Diagnostics {
 		assert.NotEqual(t, "static-crossobj", d.Rule)
 	}
 
-	cfg = minilibConfig()
-	cfg.Lint.PathRules = []config.PathRule{{Paths: []string{"daemons/**"}, Disable: []string{"static-autosave-var"}}}
-	ds = runLint(t, cfg, []string{"static-autosave-var"}, nil)
-	for _, d := range ds {
-		if d.Rule == "static-autosave-var" {
-			assert.NotContains(t, d.Path, "saver.c")
-		}
+	// --select replaces the set; codes and groups work.
+	res = run(t, prj, vfs.OS{}, lint.Request{Select: []string{"R001"}})
+	require.NotEmpty(t, res.Diagnostics)
+	for _, d := range res.Diagnostics {
+		assert.Equal(t, "callable-not-found", d.Rule)
 	}
-}
+	res = run(t, prj, vfs.OS{}, lint.Request{Select: []string{"suspicious"}})
+	for _, d := range res.Diagnostics {
+		assert.Contains(t, []string{"assignment-in-condition", "no-effect-statement", "sscanf-format", "unreachable-code"}, d.Rule)
+	}
 
-func TestSeverityConfigAndThreshold(t *testing.T) {
-	cfg := minilibConfig()
-	cfg.Lint.Rules = map[string]config.RuleSettings{
+	// Config: scalar severity enables and sets severity; off disables;
+	// group settings are overridden by rule settings.
+	prj = minilibProject(t)
+	prj.Config.Lint.Rules = map[string]config.RuleSettings{
+		"runtime":            {Severity: "off"},
 		"callable-not-found": {Severity: "warning"},
+		"missing-visibility": {Severity: "info"},
 	}
-	ds := runLint(t, cfg, nil, nil)
-	for _, d := range ds {
-		if d.Rule == "callable-not-found" {
-			assert.Equal(t, diag.Warning, d.Severity)
-		}
+	res = run(t, prj, vfs.OS{}, lint.Request{})
+	seen := map[string]diag.Severity{}
+	for _, d := range res.Diagnostics {
+		seen[d.Rule] = d.Severity
 	}
-	assert.Equal(t, diag.Error, lint.Threshold(cfg))
-	cfg.Lint.FailOn = "warning"
-	assert.Equal(t, diag.Warning, lint.Threshold(cfg))
+	assert.Equal(t, diag.Warning, seen["callable-not-found"])
+	assert.Equal(t, diag.Info, seen["missing-visibility"])
+	assert.NotContains(t, seen, "static-crossobj")
+
+	// Per-path overrides, new and legacy forms.
+	prj = minilibProject(t)
+	prj.Config.Lint.Overrides = []config.Override{{Paths: []string{"obj/**"},
+		Rules: map[string]config.RuleSettings{"callable-not-found": {Severity: "off"}}}}
+	prj.Config.Lint.PathRules = []config.PathRule{{Paths: []string{"daemons/**"}, Disable: []string{"static-autosave-var"}}}
+	res = run(t, prj, vfs.OS{}, lint.Request{Enable: []string{"static-autosave-var"}})
+	for _, d := range res.Diagnostics {
+		assert.NotEqual(t, "callable-not-found", d.Rule)
+		assert.NotEqual(t, "static-autosave-var", d.Rule)
+	}
+
+	// Unknown rules are configuration errors, not silently ignored.
+	prj = minilibProject(t)
+	l, err := lint.New(prj, vfs.OS{})
+	require.NoError(t, err)
+	_, err = l.Run(context.Background(), lint.Request{Enable: []string{"no-such-rule"}})
+	assert.ErrorContains(t, err, "unknown rule")
+	prj.Config.Lint.Disable = []string{"nope"}
+	_, err = lint.New(prj, vfs.OS{})
+	assert.ErrorContains(t, err, "unknown rule")
+
+	assert.Equal(t, diag.Error, lint.Threshold(prj.Config))
+	prj.Config.Lint.FailOn = "warning"
+	assert.Equal(t, diag.Warning, lint.Threshold(prj.Config))
 }
 
-func TestUnknownRuleRejected(t *testing.T) {
-	_, err := lint.Enabled(minilibConfig(), []string{"no-such-rule"}, nil)
-	assert.Error(t, err)
+// ------------------------------------------------------------ mem libs
+
+// memProject builds an in-memory lib under /lib with a config that mirrors
+// a small driver setup.
+func memProject(files map[string]string) (*config.Project, vfs.Mem) {
+	m := vfs.Mem{
+		"/lib/include/std.h":   "#define public\n#define status int\n#define STD \"/std/\"\n",
+		"/lib/sys/auto.c":      "string object_name() { return \"x\"; }\n",
+		"/lib/sys/forced.h":    "#define TRUE 1\n",
+		"/lib/std/base.c":      "static void create() { }\nint query(int a) { return a; }\nstatic int hidden() { return 1; }\n",
+		"/lib/placeholder.txt": "",
+	}
+	for k, v := range files {
+		m["/lib/"+k] = v
+	}
+	cfg := config.Default()
+	cfg.Root = "/lib"
+	cfg.Lint.IncludeDirs = []string{"/include"}
+	cfg.Lint.IncludeFile = "/sys/forced.h"
+	cfg.Lint.AutoObjects = []string{"/sys/auto"}
+	one := 1
+	cfg.Lint.Typechecking = &one
+	return &config.Project{Config: cfg, Root: "/lib"}, m
+}
+
+// lintMem lints a single file "t.c" with the given source and returns
+// "rule line:col message" strings.
+func lintMem(t *testing.T, src string, req lint.Request, extra map[string]string) []string {
+	t.Helper()
+	files := map[string]string{"obj/t.c": src}
+	for k, v := range extra {
+		files[k] = v
+	}
+	prj, m := memProject(files)
+	req.Paths = []string{"/lib/obj/t.c"}
+	res := run(t, prj, m, req)
+	var out []string
+	for _, d := range res.Diagnostics {
+		out = append(out, fmt.Sprintf("%s %d:%d %s", d.Rule, d.Line, d.Col, d.Message))
+	}
+	return out
+}
+
+func fn(body string) string { return "void f() {\n" + body + "\n}\n" }
+
+func assertFinding(t *testing.T, got []string, prefix string) {
+	t.Helper()
+	for _, g := range got {
+		if strings.HasPrefix(g, prefix) {
+			return
+		}
+	}
+	t.Errorf("no finding with prefix %q in %v", prefix, got)
+}
+
+func TestSyntaxRules(t *testing.T) {
+	t.Run("castle", func(t *testing.T) {
+		got := lintMem(t, "#include <std.h>\nmapping c;\nvoid create() {\n c[\"a\"] = ({\n  STD + \"x\", \"se\",\n  })\n c[\"b\"] = ({ });\n}\n", lint.Request{}, nil)
+		require.Len(t, got, 1, "%v", got)
+		assert.Equal(t, "syntax-error 6:5 missing ';' before 'c'", got[0])
+	})
+	t.Run("legacy idioms", func(t *testing.T) {
+		got := lintMem(t, "int g = 5;\n"+fn("int x = 1;\n write(\"a\" \"b\"\n  \"c\");\n add(\"x\", (: this_object(), \"fn\" :));"), lint.Request{}, nil)
+		assertFinding(t, got, "declaration-initializer 1:5")
+		assertFinding(t, got, "declaration-initializer 3:5")
+		assertFinding(t, got, "adjacent-strings 4:12")
+		assertFinding(t, got, "legacy-closure 6:11")
+		assert.Len(t, got, 4, "%v", got)
+	})
+	t.Run("adjacent strings fix", func(t *testing.T) {
+		prj, m := memProject(map[string]string{"obj/t.c": fn(`write("a" "b" "c");`)})
+		res := run(t, prj, m, lint.Request{Paths: []string{"/lib/obj/t.c"}})
+		require.Len(t, res.Diagnostics, 1)
+		d := res.Diagnostics[0]
+		require.Len(t, d.Fixes, 1)
+		src := []byte(m["/lib/obj/t.c"])
+		edits := d.Fixes[0].Edits
+		for i := len(edits) - 1; i >= 0; i-- { // apply back to front
+			e := edits[i]
+			src = append(src[:e.Start], append([]byte(e.NewText), src[e.End:]...)...)
+		}
+		assert.Contains(t, string(src), `write("a" + "b" + "c");`)
+	})
+	t.Run("declaration after statement", func(t *testing.T) {
+		got := lintMem(t, fn("int a;\n a = 1;\n int b;\n { int ok; ok = 1; }\n ;\n if (a) { int fine; fine = 2; }"), lint.Request{}, nil)
+		require.Len(t, got, 1, "%v", got)
+		assertFinding(t, got, "declaration-after-statement 4:2")
+
+		got = lintMem(t, "#define DECLS int a; int b;\n"+fn("DECLS\n int c;\n c = 1;"), lint.Request{}, nil)
+		assert.Empty(t, got, "a macro before the declaration may itself declare")
+	})
+	t.Run("bad directive", func(t *testing.T) {
+		got := lintMem(t, "#ifdef X\n#else X\n#endif X\n#endif /* X */\n#foo\n#\n#pragma whatever\nint a;\n", lint.Request{}, nil)
+		assertFinding(t, got, "bad-directive 2:1")
+		assertFinding(t, got, "bad-directive 3:1")
+		assertFinding(t, got, "bad-directive 5:1 unknown preprocessor directive '#foo'")
+		assert.Len(t, got, 3, "%v", got)
+	})
+	t.Run("inherit after declaration", func(t *testing.T) {
+		got := lintMem(t, "inherit \"/std/base\";\nint x;\ninherit b \"/std/base\";\n", lint.Request{}, nil)
+		assertFinding(t, got, "inherit-after-declaration 3:1")
+	})
+	t.Run("typeless functions under typechecking", func(t *testing.T) {
+		src := "foo(a, int b) { }\nbar() { return 1; }\nbaz() { return; }\nvoid v() { return 2; }\nint i() { return; }\nstatus s() { return; }\npublic ok() { }\n"
+		got := lintMem(t, "#include <std.h>\n"+src, lint.Request{}, nil)
+		assertFinding(t, got, "missing-parameter-type 2:5 missing type for parameter 'a'")
+		assertFinding(t, got, "return-value 3:9 value returned from 'bar'")
+		assertFinding(t, got, "return-value 5:12 value returned from void function")
+		assertFinding(t, got, "return-value 6:11 function must return a value")
+		assert.Len(t, got, 4, "%v", got)
+
+		// Typechecking unknown: the typeless rules are silent.
+		prj, m := memProject(map[string]string{"obj/t.c": src})
+		prj.Config.Lint.Typechecking = nil
+		res := run(t, prj, m, lint.Request{Paths: []string{"/lib/obj/t.c"}, Select: []string{"E009", "E010"}})
+		for _, d := range res.Diagnostics {
+			assert.NotContains(t, d.Message, "bar")
+			assert.NotContains(t, d.Message, "parameter")
+		}
+	})
+	t.Run("missing include is fatal for syntax", func(t *testing.T) {
+		got := lintMem(t, "#include \"gone.h\"\nvoid f() { x = 1 y = 2; }\n", lint.Request{}, nil)
+		require.Len(t, got, 1, "%v", got)
+		assertFinding(t, got, "include-not-found 1:1")
+	})
+	t.Run("lexical", func(t *testing.T) {
+		got := lintMem(t, fn("write(\"abc);\n x = 1 @ 2;"), lint.Request{}, nil)
+		assertFinding(t, got, "syntax-error 2:7 unterminated string literal")
+		assertFinding(t, got, "syntax-error 3:8 illegal character")
+	})
+}
+
+func TestAssignmentInCondition(t *testing.T) {
+	tests := []struct {
+		name, body string
+		want       int
+		message    string
+	}{
+		{"integer constant", `if (x = 1) x = 2;`, 1, "assignment of a constant"},
+		{"float constant", `if (x = 1.5) x = 2;`, 1, "assignment of a constant"},
+		{"string constant", `if (s = "yes") x = 2;`, 1, "assignment of a constant"},
+		{"character constant", `if (x = 'y') x = 2;`, 1, "assignment of a constant"},
+		{"nil constant", `if (value = nil) x = 2;`, 1, "assignment of a constant"},
+		{"negative constant", `if (x = -1) x = 2;`, 1, "assignment of a constant"},
+		{"logical and RHS", `if (x = next() && ready) x = 2;`, 1, "stores the result of &&/||"},
+		{"logical or RHS", `if (x = next() || ready) x = 2;`, 1, "stores the result of &&/||"},
+		{"constant assignment chain", `if (x = y = 0) x = 2;`, 1, "assignment of a constant"},
+		{"logical assignment chain", `if (x = y = next() && ready) x = 2;`, 1, "stores the result of &&/||"},
+		{"do-while", `do x++; while (x = 0);`, 1, "assignment of a constant"},
+		{"for middle clause", `for (i = 0; i = 5; i++) x++;`, 1, "assignment of a constant"},
+		{"comma segments", `if (y = next(), x = 0) x = 2;`, 1, "assignment of a constant"},
+		{"index target", `if (a[0] = 1) x = 2;`, 1, "assignment of a constant"},
+		{"assign and test", `if (x = sizeof(values)) x = 2;`, 0, ""},
+		{"while assign and test", `while (value = next()) x++;`, 0, ""},
+		{"parenthesized constant", `if ((x = 1)) x = 2;`, 0, ""},
+		{"parenthesized assignment before logical", `if ((x = next()) && ready) x = 2;`, 0, ""},
+		{"parenthesized assignment after logical", `if (ready && (x = next())) x = 2;`, 0, ""},
+		{"parenthesized logical RHS", `if (x = (next() && ready)) x = 2;`, 0, ""},
+		{"ternary RHS", `if (x = ready ? 1 : 0) x = 2;`, 0, ""},
+		{"compiler owns unary LHS", `if (!x = next() || ready) x = 2;`, 0, ""},
+		{"compiler owns logical LHS", `if (ready && x = 0) x = 2;`, 0, ""},
+		{"compiler owns chained logical LHS", `if (x = ready && y = next()) x = 2;`, 0, ""},
+		{"for init and post", `for (i = 0; i < 5; i = 2) x++;`, 0, ""},
+		{"compound assignment", `if (x += 1) x = 2;`, 0, ""},
+		{"comparison", `if (x == 1) x = 2;`, 0, ""},
+		{"assignment in call argument", `if (check(x = 1)) x = 2;`, 0, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := lintMem(t, fn(tt.body), lint.Request{Select: []string{"assignment-in-condition"}}, nil)
+			require.Len(t, got, tt.want, "%v", got)
+			if tt.want > 0 {
+				assert.Contains(t, got[0], tt.message)
+			}
+		})
+	}
+}
+
+func TestSuspiciousRules(t *testing.T) {
+	got := lintMem(t, fn("x == f();\n x != 1;\n x < 2;\n x = 1;\n f();\n x == 1 ? a() : b();\n a() && b();"),
+		lint.Request{Select: []string{"no-effect-statement"}}, nil)
+	assert.Len(t, got, 3, "%v", got)
+
+	got = lintMem(t, fn("sscanf(s, \"%d %s\", a, b, c);\n sscanf(s, \"%d %*s %s\", a, b);\n sscanf(s, \"%d\");\n sscanf(s, fmt, a, b, c);\n ob->sscanf(s, \"\", a);"),
+		lint.Request{Select: []string{"sscanf-format"}}, nil)
+	require.Len(t, got, 1, "%v", got)
+	assertFinding(t, got, "sscanf-format 2:11")
+
+	got = lintMem(t, "int g(int x) {\n switch (x) {\n case 1: return 1; break;\n case 2: return 2;\n default: break;\n }\n return 0;\n x = 1;\n}\n",
+		lint.Request{Select: []string{"unreachable-code"}}, nil)
+	assertFinding(t, got, "unreachable-code 3:20")
+	assertFinding(t, got, "unreachable-code 8:2")
+	assert.Len(t, got, 2, "%v", got)
+}
+
+func TestRuntimeRulesOnTree(t *testing.T) {
+	extra := map[string]string{
+		"std/paths.h": "#define BASE \"/std/base\"\n#define ME this_object()\n#define GONE \"/std/gone\"\n",
+	}
+	src := `#include "/std/paths.h"
+inherit BASE;
+static void create() {
+    ::create();
+    BASE->query(1);
+    BASE->nope();
+    BASE->hidden();
+    ME->nope2();
+    (BASE)->query(1, 2);
+    ("/std/" + "base")->nope3();
+    GONE->x();
+    unknown()->whatever();
+    call_other(BASE, "nope4", 1);
+    BASE->query(args...);
+}
+`
+	got := lintMem(t, src, lint.Request{}, extra)
+	assertFinding(t, got, "callable-not-found 6:11 function 'nope' is not defined in /std/base")
+	assertFinding(t, got, "static-crossobj 7:11")
+	assertFinding(t, got, "callable-not-found 8:9 function 'nope2'")
+	assertFinding(t, got, "callback-arity 9:13")
+	assertFinding(t, got, "callable-not-found 10:25 function 'nope3'")
+	assertFinding(t, got, "target-object-missing 11:11 object /std/gone does not exist")
+	assertFinding(t, got, "callable-not-found 13:22 function 'nope4'")
+	assert.Len(t, got, 7, "%v", got)
+
+	// lifecycle-chain sees ::create() through the tree, and stays silent
+	// when part of the body could not be parsed.
+	got = lintMem(t, "inherit \"/std/base\";\nstatic void create() { x = 1; }\n", lint.Request{Select: []string{"lifecycle-chain"}}, nil)
+	assert.Len(t, got, 1)
+	got = lintMem(t, "#define INIT ::create();\ninherit \"/std/base\";\nstatic void create() { INIT }\n", lint.Request{Select: []string{"lifecycle-chain"}}, nil)
+	assert.Empty(t, got)
+}
+
+// A parent whose top level did not fully parse has an incomplete symbol
+// table; nothing may be concluded from a name missing in it.
+func TestPartialParentIsUnknown(t *testing.T) {
+	extra := map[string]string{
+		"std/broken.c": "int there() { return 1; }\nint lost( { return 2; }\nint after() { return 3; }\n",
+		"std/unbal.c":  "int there() { if (1) { return 1; }\nint lost() { return 2; }\n",
+	}
+	src := "void f() {\n \"/std/broken\"->there();\n \"/std/broken\"->lost();\n \"/std/broken\"->nowhere();\n \"/std/unbal\"->lost();\n \"/std/unbal\"->nowhere();\n}\n"
+	got := lintMem(t, src, lint.Request{}, extra)
+	assert.Empty(t, got, "broken parents make lookups unknown")
+
+	// The broken files themselves do report their syntax errors.
+	prj, m := memProject(extra)
+	res := run(t, prj, m, lint.Request{Paths: []string{"/lib/std/unbal.c"}})
+	require.NotEmpty(t, res.Diagnostics)
+	assert.Equal(t, "syntax-error", res.Diagnostics[0].Rule)
+	assert.Contains(t, res.Diagnostics[0].Message, "function 'lost' begins inside the body of 'there'")
+	require.NotEmpty(t, res.Diagnostics[0].Related)
+}
+
+// ------------------------------------------- degraded and zero-config
+
+func TestFileLocalModeWithoutRoot(t *testing.T) {
+	m := vfs.Mem{"/any/where/castle.c": "#include <std.h>\ninherit ROOM;\nmapping c;\nvoid create() {\n c[\"a\"] = ({ IW + \"x\" })\n c[\"b\"] = 1;\n NOPE->gone();\n \"/std/gone\"->x();\n}\n"}
+	prj, err := config.Discover(m, []string{"/any/where/castle.c"}, config.DiscoverOptions{})
+	require.NoError(t, err)
+	assert.Empty(t, prj.Root)
+	res := run(t, prj, m, lint.Request{Paths: []string{"/any/where/castle.c"}})
+	require.Len(t, res.Diagnostics, 1, "%v", res.Diagnostics)
+	assert.Equal(t, "syntax-error", res.Diagnostics[0].Rule)
+	assert.Equal(t, 5, res.Diagnostics[0].Line)
+	require.NotEmpty(t, res.Notes)
+	assert.Contains(t, res.Notes[0], "file-local rules only")
+}
+
+func TestIncompleteLibDegradesToUnknown(t *testing.T) {
+	// Only one domain is checked out: /include, the force-include and the
+	// auto object are absent.
+	m := vfs.Mem{"/lib/d/Foo/room.c": "#include <std.h>\n#include \"local.h\"\ninherit \"/std/room\";\nvoid create() {\n ::create();\n \"/std/thing\"->x();\n clone_object(\"/obj/y\");\n a = 1\n b = 2;\n}\n"}
+	cfg := config.Default()
+	cfg.Root = "/lib"
+	cfg.Lint.IncludeDirs = []string{"/include"}
+	cfg.Lint.IncludeFile = "/sys/forced.h"
+	cfg.Lint.AutoObjects = []string{"/sys/auto"}
+	prj := &config.Project{Config: cfg, Root: "/lib"}
+	res := run(t, prj, m, lint.Request{})
+	got := keys(res.Diagnostics)
+	assert.Equal(t, []string{"syntax-error room.c:8"}, got, "only the provable finding survives")
+	require.NotEmpty(t, res.Notes)
+	assert.Contains(t, strings.Join(res.Notes, "\n"), "lib looks incomplete")
+	assert.Greater(t, res.Stats.UnknownIncludes, 0)
+}
+
+func TestFileOutsideRoot(t *testing.T) {
+	prj, m := memProject(nil)
+	m["/elsewhere/x.c"] = "inherit \"/std/nothere\";\nvoid f() { \"/std/gone\"->x(); y = 1 z = 2; }\n"
+	res := run(t, prj, m, lint.Request{Paths: []string{"/elsewhere/x.c"}})
+	assert.Equal(t, []string{"syntax-error x.c:2"}, keys(res.Diagnostics))
+	assert.Contains(t, strings.Join(res.Notes, "\n"), "outside the lib root")
+}
+
+func TestExcludesAndExplicitFiles(t *testing.T) {
+	prj, m := memProject(map[string]string{
+		"attic/old.c": "void f() { x = 1 y = 2; }\n",
+		"obj/ok.c":    "void f() { }\n",
+	})
+	prj.Config.Exclude = []string{"attic/**"}
+	res := run(t, prj, m, lint.Request{})
+	assert.Empty(t, res.Diagnostics, "excluded directories are not walked")
+	res = run(t, prj, m, lint.Request{Paths: []string{"/lib/attic/old.c"}})
+	assert.Len(t, res.Diagnostics, 1, "a file named explicitly is linted")
+
+	l, err := lint.New(prj, m)
+	require.NoError(t, err)
+	_, err = l.Run(context.Background(), lint.Request{Paths: []string{"/lib/nope.c"}})
+	assert.ErrorContains(t, err, "no such file")
+}
+
+// ------------------------------------------------- library behaviours
+
+func TestOverlayAndInvalidate(t *testing.T) {
+	prj, m := memProject(map[string]string{
+		"std/lib.c": "int helper() { return 1; }\n",
+		"obj/a.c":   "inherit \"/std/lib\";\nvoid f() { this_object()->helper(); this_object()->extra(); }\n",
+		"obj/b.c":   "void g() { }\n",
+	})
+	ov := vfs.NewOverlay(m)
+	l, err := lint.New(prj, ov)
+	require.NoError(t, err)
+	ctx := context.Background()
+
+	res, err := l.Run(ctx, lint.Request{Paths: []string{"/lib/obj/a.c"}})
+	require.NoError(t, err)
+	require.Len(t, res.Diagnostics, 1)
+	assert.Contains(t, res.Diagnostics[0].Message, "'extra'")
+
+	// An unsaved edit to the parent adds extra() and removes helper().
+	ov.Set("/lib/std/lib.c", []byte("int extra() { return 2; }\n"))
+	dropped := l.Invalidate("/lib/std/lib.c")
+	assert.Contains(t, dropped, "/lib/std/lib.c")
+	res, err = l.Run(ctx, lint.Request{Paths: []string{"/lib/obj/a.c"}})
+	require.NoError(t, err)
+	require.Len(t, res.Diagnostics, 1)
+	assert.Contains(t, res.Diagnostics[0].Message, "'helper'")
+
+	// An unsaved syntax error in the file itself.
+	ov.Set("/lib/obj/a.c", []byte("void f() { x = 1 y = 2; }\n"))
+	l.Invalidate("/lib/obj/a.c")
+	res, err = l.Run(ctx, lint.Request{Paths: []string{"/lib/obj/a.c"}})
+	require.NoError(t, err)
+	require.Len(t, res.Diagnostics, 1)
+	assert.Equal(t, "syntax-error", res.Diagnostics[0].Rule)
+
+	// Dropping the buffer restores the disk view.
+	ov.Delete("/lib/obj/a.c")
+	ov.Delete("/lib/std/lib.c")
+	l.Invalidate("/lib/obj/a.c", "/lib/std/lib.c")
+	res, err = l.Run(ctx, lint.Request{Paths: []string{"/lib/obj/a.c"}})
+	require.NoError(t, err)
+	require.Len(t, res.Diagnostics, 1)
+	assert.Contains(t, res.Diagnostics[0].Message, "'extra'")
+}
+
+func TestInvalidateFollowsIncludes(t *testing.T) {
+	prj, m := memProject(map[string]string{
+		"obj/defs.h": "#define TARGET \"/std/base\"\n",
+		"obj/a.c":    "#include \"defs.h\"\nvoid f() { TARGET->query(1); }\n",
+	})
+	ov := vfs.NewOverlay(m)
+	l, err := lint.New(prj, ov)
+	require.NoError(t, err)
+	res, err := l.Run(context.Background(), lint.Request{Paths: []string{"/lib/obj/a.c"}})
+	require.NoError(t, err)
+	assert.Empty(t, res.Diagnostics)
+
+	ov.Set("/lib/obj/defs.h", []byte("#define TARGET \"/std/gone\"\n"))
+	dropped := l.Invalidate("/lib/obj/defs.h")
+	assert.Contains(t, dropped, "/lib/obj/a.c", "a.c was built from defs.h")
+	res, err = l.Run(context.Background(), lint.Request{Paths: []string{"/lib/obj/a.c"}})
+	require.NoError(t, err)
+	require.Len(t, res.Diagnostics, 1)
+	assert.Equal(t, "target-object-missing", res.Diagnostics[0].Rule)
+}
+
+func TestCancellation(t *testing.T) {
+	prj, m := memProject(map[string]string{"obj/a.c": "void f() { }\n"})
+	l, err := lint.New(prj, m)
+	require.NoError(t, err)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err = l.Run(ctx, lint.Request{})
+	assert.ErrorIs(t, err, context.Canceled)
+}
+
+func TestBaseline(t *testing.T) {
+	src := "void f() {\n a = 1\n b = 2;\n}\n"
+	prj, m := memProject(map[string]string{"obj/a.c": src})
+	m["/lib/dgdtools.yml"] = ""
+	prj.Config.Path, prj.Config.Dir = "/lib/dgdtools.yml", "/lib"
+	l, err := lint.New(prj, m)
+	require.NoError(t, err)
+	ctx := context.Background()
+	res, err := l.Run(ctx, lint.Request{})
+	require.NoError(t, err)
+	require.Len(t, res.Diagnostics, 1)
+
+	data, err := l.NewBaseline(res.Diagnostics).Marshal()
+	require.NoError(t, err)
+	assert.Contains(t, string(data), `"path": "obj/a.c"`)
+	m[l.BaselinePath()] = string(data)
+
+	res, err = l.Run(ctx, lint.Request{})
+	require.NoError(t, err)
+	assert.Empty(t, res.Diagnostics)
+	assert.Equal(t, 1, res.Stats.Baselined)
+
+	// Edits above the finding do not resurrect it; a new finding shows.
+	m["/lib/obj/a.c"] = "/* a comment */\n\nvoid f() {\n a = 1\n b = 2;\n c = 3\n}\n"
+	l.Invalidate("/lib/obj/a.c")
+	res, err = l.Run(ctx, lint.Request{})
+	require.NoError(t, err)
+	require.Len(t, res.Diagnostics, 1)
+	assert.Equal(t, 6, res.Diagnostics[0].Line)
+
+	res, err = l.Run(ctx, lint.Request{NoBaseline: true})
+	require.NoError(t, err)
+	assert.Len(t, res.Diagnostics, 2)
+}
+
+func TestRuleTableIsStable(t *testing.T) {
+	codes, names := map[string]bool{}, map[string]bool{}
+	for _, r := range lint.Rules() {
+		assert.False(t, codes[r.Code], "duplicate code %s", r.Code)
+		assert.False(t, names[r.Name], "duplicate name %s", r.Name)
+		codes[r.Code], names[r.Name] = true, true
+		assert.NotEmpty(t, r.Doc, r.Name)
+		assert.NotEmpty(t, r.Explain, r.Name)
+		assert.Regexp(t, `^[ERSC]\d{3}$`, r.Code)
+	}
+	// Names that suppression comments in existing libs rely on.
+	for _, n := range []string{"callable-not-found", "static-crossobj", "undefined-prototype",
+		"target-object-missing", "callback-arity", "include-not-found", "assignment-in-condition",
+		"no-effect-statement", "sscanf-format", "lifecycle-chain", "static-autosave-var",
+		"unresolved-inherit", "raw-inherit-path", "missing-visibility", "unformatted"} {
+		assert.True(t, names[n], n)
+	}
+	// Mutating a returned table does not affect the next one.
+	lint.Rules()[0].Default = false
+	assert.True(t, lint.Rules()[0].Default)
 }

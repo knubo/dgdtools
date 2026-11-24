@@ -1,0 +1,362 @@
+package lint
+
+import (
+	"strings"
+
+	"github.com/mmcdole/dgdtools/pkg/diag"
+	"github.com/mmcdole/dgdtools/pkg/index"
+	"github.com/mmcdole/dgdtools/pkg/syntax"
+)
+
+// The runtime group: code that compiles and then fails, or silently
+// returns nil, when it runs. All of these need the lib index and report
+// only what the index can prove.
+
+// definedAt builds the related location of a function definition.
+func definedAt(p *Pass, fn index.ChainFunc, msg string) []diag.Related {
+	if fn.Path == "" {
+		return nil
+	}
+	rel := diag.Related{Path: fn.Path, Start: fn.Off, End: fn.Off, Message: msg}
+	if fn.Path == p.File.Path {
+		pos := p.File.Pos(fn.Off)
+		rel.Line, rel.Col = pos.Line, pos.Col
+	} else if src, err := p.Index.FS.ReadFile(fn.Path); err == nil {
+		rel.Line, rel.Col = 1, 1
+		for i := 0; i < int(fn.Off) && i < len(src); i++ {
+			if src[i] == '\n' {
+				rel.Line++
+				rel.Col = 1
+			} else {
+				rel.Col++
+			}
+		}
+	}
+	return []diag.Related{rel}
+}
+
+var ruleCallableNotFound = &Rule{
+	Code: "R001", Name: "callable-not-found", Group: GroupRuntime,
+	Doc: "string-referenced function (obj->fn(), call_other, call_out, registrars) missing from the target's inherit chain",
+	Explain: "In DGD a call_other to a function that does not exist silently " +
+		"returns nil. Reported only when the receiver is known (a string constant, " +
+		"a macro that evaluates to one, or this_object()) and the target's whole " +
+		"inherit chain was resolved and parsed; for a file that other objects " +
+		"inherit or #include, the function is also looked for in those users.",
+	Default: true, Severity: diag.Error, CrossFile: true,
+	Run: func(p *Pass) {
+		for _, c := range p.calls().strings {
+			lk, desc := p.lookup(c)
+			if lk.State == index.LookupMissing {
+				p.Report(c.Start, c.End, "function '%s' is not defined in %s%s (called via %s)",
+					c.Func, desc, lk.Note, c.Registrar)
+			}
+		}
+	},
+}
+
+var ruleStaticCrossObj = &Rule{
+	Code: "R002", Name: "static-crossobj", Group: GroupRuntime,
+	Doc: "call_other to an unreachable function: private always, static from another object",
+	Explain: "call_other cannot reach private functions at all, and reaches static " +
+		"functions only from the same object. The call silently returns nil.",
+	Default: true, Severity: diag.Error, CrossFile: true,
+	Run: func(p *Pass) {
+		for _, c := range p.calls().strings {
+			if c.Kind != crossObject {
+				continue
+			}
+			lk, _ := p.lookup(c)
+			if lk.State != index.LookupFound {
+				continue
+			}
+			same := c.Target == targetSelf || c.TargetPath == p.LibPath
+			var d *diag.Diagnostic
+			switch {
+			case lk.Fn.Private:
+				d = p.Report(c.Start, c.End, "'%s' in %s is private — call_other cannot reach it and returns nil",
+					c.Func, lk.Fn.DefinedIn)
+			case lk.Fn.Static && !same:
+				d = p.Report(c.Start, c.End, "'%s' in %s is static — call_other from another object returns nil",
+					c.Func, lk.Fn.DefinedIn)
+			}
+			if d != nil {
+				d.Related = definedAt(p, lk.Fn, "defined here")
+			}
+		}
+	},
+}
+
+var ruleUndefinedPrototype = &Rule{
+	Code: "R003", Name: "undefined-prototype", Group: GroupRuntime,
+	Doc: "function declared but never defined anywhere in the chain, and called",
+	Explain: "DGD compiles a call to a function that only has a prototype and " +
+		"raises \"Undefined function\" when the call runs. Not reported when an " +
+		"inheritor or includer of the file provides the definition.",
+	Default: true, Severity: diag.Error, CrossFile: true,
+	Run: func(p *Pass) {
+		for _, c := range p.calls().strings {
+			lk, _ := p.lookup(c)
+			if lk.State != index.LookupFound || !lk.Fn.PrototypeOnly {
+				continue
+			}
+			if c.Target == targetSelf && p.Index.ProvidedByUsers(p.Ctx, p.LibPath, c.Func) {
+				continue
+			}
+			d := p.Report(c.Start, c.End, "'%s' in %s is declared but never defined — calling it is a runtime error",
+				c.Func, lk.Fn.DefinedIn)
+			d.Related = definedAt(p, lk.Fn, "prototype")
+		}
+
+		ch := p.Index.Chain(p.LibPath)
+		if ch.Partial {
+			return // the definition may live where we cannot see
+		}
+		for _, dc := range p.calls().direct {
+			if dc.Call.Scoped {
+				continue
+			}
+			name := dc.Call.Fun.Name
+			fn, ok := ch.Funcs[name]
+			if !ok || !fn.PrototypeOnly {
+				continue
+			}
+			if !p.Index.ProvidedByUsers(p.Ctx, p.LibPath, name) {
+				d := p.ReportNode(dc.Call.Fun, "'%s' is declared but never defined (prototype in %s) — calling it is a runtime error",
+					name, fn.DefinedIn)
+				d.Related = definedAt(p, fn, "prototype")
+			}
+		}
+	},
+}
+
+var ruleTargetObjectMissing = &Rule{
+	Code: "R004", Name: "target-object-missing", Group: GroupRuntime,
+	Doc: "literal object path (inherit, clone_object, call target) with no backing file",
+	Explain: "Loading an object whose file does not exist is a runtime error (for " +
+		"an inherit, a compile error). Paths served by virtual-object daemons " +
+		"belong in lint.virtual_paths. Not reported when the lib on disk is " +
+		"incomplete.",
+	Default: true, Severity: diag.Error, CrossFile: true,
+	Run: func(p *Pass) {
+		if !p.Index.Complete {
+			return
+		}
+		missing := func(lib string) bool {
+			return !p.Index.IsVirtual(lib) && !p.Index.ObjectExists(lib)
+		}
+		cf := p.calls()
+		for _, ref := range cf.paths {
+			if missing(ref.Path) {
+				p.Report(ref.Start, ref.End, "object %s does not exist (via %s)", ref.Path, ref.Via)
+			}
+		}
+		for _, c := range cf.strings {
+			if c.Target == targetPath && missing(c.TargetPath) {
+				p.Report(c.Start, c.End, "object %s does not exist (called via %s)", c.TargetPath, c.Registrar)
+			}
+		}
+		for _, ref := range p.Unit.Inherits {
+			if ref.Resolved && missing(ref.Path) {
+				p.Report(ref.Off, ref.End, "inherited object %s does not exist", ref.Path)
+			}
+		}
+	},
+}
+
+var ruleCallbackArity = &Rule{
+	Code: "R005", Name: "callback-arity", Group: GroupRuntime,
+	Doc: "dispatched call passing an argument count the target cannot accept",
+	Explain: "Under non-strict typechecking DGD silently pads missing call_other " +
+		"arguments with nil and drops extras; under strict typechecking it is a " +
+		"runtime error.",
+	Default: true, Severity: diag.Warning, CrossFile: true,
+	Run: func(p *Pass) {
+		for _, c := range p.calls().strings {
+			if c.NArgs < 0 {
+				continue
+			}
+			lk, _ := p.lookup(c)
+			if lk.State != index.LookupFound || lk.Fn.PrototypeOnly {
+				continue
+			}
+			var d *diag.Diagnostic
+			switch {
+			case c.NArgs < lk.Fn.MinArgs:
+				d = p.Report(c.Start, c.End,
+					"'%s' in %s needs at least %d argument(s); this call passes %d (missing ones become nil)",
+					c.Func, lk.Fn.DefinedIn, lk.Fn.MinArgs, c.NArgs)
+			case lk.Fn.MaxArgs >= 0 && c.NArgs > lk.Fn.MaxArgs:
+				d = p.Report(c.Start, c.End,
+					"'%s' in %s takes at most %d argument(s); this call passes %d (extras are dropped)",
+					c.Func, lk.Fn.DefinedIn, lk.Fn.MaxArgs, c.NArgs)
+			}
+			if d != nil {
+				d.Related = definedAt(p, lk.Fn, "defined here")
+			}
+		}
+	},
+}
+
+var ruleLifecycleChain = &Rule{
+	Code: "R006", Name: "lifecycle-chain", Group: GroupRuntime,
+	Doc: "lifecycle function (default: create) does not call the inherited implementations",
+	Explain: "A create() that overrides an inherited create() without calling " +
+		"::create() leaves the parent uninitialized. With several defining " +
+		"parents, label each inherit and chain each one. Proof-based: files with " +
+		"no explicit inherit, parents without the function, and unresolved " +
+		"parents are skipped. Configure the function names with " +
+		"rules.lifecycle-chain.names.",
+	Default: true, Severity: diag.Warning, CrossFile: true,
+	Run: func(p *Pass) {
+		names := p.Settings.Names
+		if len(names) == 0 {
+			names = []string{"create"}
+		}
+		for _, d := range p.Tree.Decls {
+			fn, ok := d.(*syntax.FuncDecl)
+			if !ok || fn.Body == nil || fn.Name == nil {
+				continue
+			}
+			for _, n := range names {
+				if n == fn.Name.Name {
+					checkLifecycleChain(p, fn)
+				}
+			}
+		}
+	},
+}
+
+type lifecycleParent struct {
+	labels []string
+	path   string
+}
+
+func lifecycleParents(p *Pass, name string) []lifecycleParent {
+	var parents []lifecycleParent
+	seen := map[string]int{}
+	for _, ref := range p.Unit.Inherits {
+		if !ref.Resolved {
+			continue
+		}
+		fn, ok := p.Index.Chain(ref.Path).Funcs[name]
+		if !ok || fn.PrototypeOnly || fn.Private {
+			continue
+		}
+		if i, ok := seen[ref.Path]; ok {
+			if ref.Label != "" {
+				parents[i].labels = append(parents[i].labels, ref.Label)
+			}
+			continue // the same inherited program is one implementation
+		}
+		parent := lifecycleParent{path: ref.Path}
+		if ref.Label != "" {
+			parent.labels = []string{ref.Label}
+		}
+		seen[ref.Path] = len(parents)
+		parents = append(parents, parent)
+	}
+	return parents
+}
+
+func checkLifecycleChain(p *Pass, fn *syntax.FuncDecl) {
+	name := fn.Name.Name
+	parents := lifecycleParents(p, name)
+	if len(parents) == 0 {
+		return
+	}
+	// ::name() and label::name() calls in the body.
+	unqualified := false
+	labels := map[string]bool{}
+	var labelOrder []string
+	opaque := false
+	syntax.Inspect(fn.Body, func(n syntax.Node) bool {
+		switch n := n.(type) {
+		case *syntax.BadStmt, *syntax.MacroStmt:
+			opaque = true // a chained call may hide in what we could not parse
+		case *syntax.CallExpr:
+			if n.Opaque {
+				opaque = true
+			}
+			if !n.Scoped || n.Fun.Name != name {
+				return true
+			}
+			if n.Label == nil {
+				unqualified = true
+			} else if !labels[n.Label.Name] {
+				labels[n.Label.Name] = true
+				labelOrder = append(labelOrder, n.Label.Name)
+			}
+		}
+		return true
+	})
+	if opaque {
+		return
+	}
+	called := func(ls []string) bool {
+		for _, l := range ls {
+			if labels[l] {
+				return true
+			}
+		}
+		return false
+	}
+
+	if len(parents) == 1 {
+		parent := parents[0]
+		if unqualified || called(parent.labels) || (len(parent.labels) == 0 && len(labelOrder) > 0) {
+			return
+		}
+		suggestion := "::" + name + "()"
+		for _, label := range parent.labels {
+			suggestion += " or " + label + "::" + name + "()"
+		}
+		p.ReportNode(fn.Name, "%s() overrides inherited %s::%s() but does not chain it; call %s",
+			name, parent.path, name, suggestion)
+		return
+	}
+
+	known := map[string]bool{}
+	for _, parent := range parents {
+		for _, label := range parent.labels {
+			known[label] = true
+		}
+	}
+	var fallback []string
+	for _, label := range labelOrder {
+		if !known[label] {
+			fallback = append(fallback, label)
+		}
+	}
+	var unlabeled, missing []string
+	for _, parent := range parents {
+		if len(parent.labels) == 0 {
+			unlabeled = append(unlabeled, parent.path)
+			continue
+		}
+		if !called(parent.labels) {
+			missing = append(missing, parent.labels[0]+"::"+name+"()")
+		}
+	}
+	// One preprocessor branch is linted. In old portable source that
+	// branch may hold unlabeled inherits while the body uses labels
+	// declared in the other branch; match otherwise-unclaimed label calls
+	// to those parents in order. DGD validates that the labels are real.
+	if len(fallback) >= len(unlabeled) {
+		unlabeled = nil
+	} else {
+		unlabeled = unlabeled[len(fallback):]
+	}
+	if len(unlabeled) == 0 && len(missing) == 0 {
+		return
+	}
+	var details []string
+	if len(unlabeled) > 0 {
+		details = append(details, "missing labeled "+name+"() call for "+strings.Join(unlabeled, ", "))
+	}
+	if len(missing) > 0 {
+		details = append(details, "missing "+strings.Join(missing, ", "))
+	}
+	p.ReportNode(fn.Name, "%s() does not chain all inherited implementations: %s",
+		name, strings.Join(details, "; "))
+}

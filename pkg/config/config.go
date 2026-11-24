@@ -1,32 +1,64 @@
 // Package config loads dgdtools.yml, the shared configuration for dgdfmt
-// and dgdlint. Every field is optional; the zero config gives working
-// defaults. Everything mudlib-specific — include dirs, the auto object,
-// call registries, lint conventions — lives here, never in the tools.
+// and dgdlint, and discovers the project a path belongs to. Every field is
+// optional; the zero config gives working defaults. Everything
+// mudlib-specific — include dirs, the auto object, call registries, lint
+// conventions — lives here, never in the tools.
 package config
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 
 	"gopkg.in/yaml.v3"
 
 	"github.com/mmcdole/dgdtools/pkg/token"
+	"github.com/mmcdole/dgdtools/pkg/vfs"
 )
 
-const FileName = "dgdtools.yml"
+// FileName is the canonical config file name; AltFileName is also found.
+const (
+	FileName    = "dgdtools.yml"
+	AltFileName = ".dgdtools.yml"
+)
 
 type Config struct {
+	// Extends names config files to inherit from, resolved relative to
+	// this file. Later entries win; this file wins over all of them.
+	// Scalars and lists replace, maps merge.
+	Extends StringList `yaml:"extends"`
+
 	Dialect DialectCfg `yaml:"dialect"`
 	// Root is the filesystem directory that is the lib's "/". Relative
 	// paths are resolved against the config file's directory.
-	Root    string   `yaml:"root"`
-	Exclude []string `yaml:"exclude"`
-	Format  Format   `yaml:"format"`
-	Lint    Lint     `yaml:"lint"`
+	Root string `yaml:"root"`
+	// DriverConfig is the DGD driver's own config file. include_dirs,
+	// include_file, auto_object and typechecking are read from it when
+	// not set under lint:.
+	DriverConfig string   `yaml:"driver_config"`
+	Exclude      []string `yaml:"exclude"`
+	Format       Format   `yaml:"format"`
+	Lint         Lint     `yaml:"lint"`
 
 	// Dir is the directory the config was loaded from ("." for defaults).
 	Dir string `yaml:"-"`
+	// Path is the config file path ("" for defaults).
+	Path string `yaml:"-"`
+}
+
+// StringList decodes from either a scalar or a sequence.
+type StringList []string
+
+func (s *StringList) UnmarshalYAML(n *yaml.Node) error {
+	if n.Kind == yaml.ScalarNode {
+		*s = []string{n.Value}
+		return nil
+	}
+	var l []string
+	if err := n.Decode(&l); err != nil {
+		return err
+	}
+	*s = l
+	return nil
 }
 
 type DialectCfg struct {
@@ -45,49 +77,75 @@ type Format struct {
 
 type Lint struct {
 	// IncludeDirs are lib-absolute search paths for #include <...> and
-	// "..." resolution (mirror the driver config's include_dirs).
+	// "..." resolution (the driver config's include_dirs).
 	IncludeDirs []string `yaml:"include_dirs"`
-	// IncludeFile is force-included into every compile by the driver
-	// (its #defines are visible everywhere).
+	// IncludeFile is force-included into every compile by the driver.
 	IncludeFile string `yaml:"include_file"`
-	// AutoObjects are lib paths implicitly inherited by every object
-	// (the driver's auto_object); their functions exist on all chains.
+	// AutoObjects are lib paths implicitly inherited by every object.
 	AutoObjects []string `yaml:"auto_objects"`
+	// Typechecking is the driver's typechecking level (0, 1, 2). Rules
+	// that only hold under typechecking stay silent when it is unknown.
+	Typechecking *int `yaml:"typechecking"`
+
 	// SpecifierMacros are empty-macro visibility markers ("public").
 	SpecifierMacros []string `yaml:"specifier_macros"`
-
-	Enable  []string `yaml:"enable"`
-	Disable []string `yaml:"disable"`
+	// Defines are names treated as defined when choosing #ifdef branches.
+	Defines []string `yaml:"defines"`
+	// Macros overrides the class the parser derives for a macro:
+	// type | specifier | statement | expression | opaque.
+	Macros map[string]string `yaml:"macros"`
 
 	// CallRegistry maps function names to the argument index (0-based)
-	// holding a callback function name targeting this_object(). Built-in,
-	// always present: call_other (cross-object, arg 1), call_out (arg 0),
-	// and the obj->name() call form.
+	// holding a callback function name targeting this_object().
 	CallRegistry map[string]int `yaml:"call_registry"`
 	// AutosaveMarkers are function or macro names whose presence marks an
 	// object as persisting via save_object/restore_object.
 	AutosaveMarkers []string `yaml:"autosave_markers"`
-
-	// ObjectRegistry maps path-taking functions to the argument index
-	// (0-based) holding an object path. Built-in: clone_object,
-	// compile_object, find_object (all arg 0).
+	// ObjectRegistry maps path-taking functions to the argument index.
 	ObjectRegistry map[string]int `yaml:"object_registry"`
-	// VirtualPaths are lib-path globs served by virtual-object daemons —
-	// objects that exist without a backing .c file.
+	// VirtualPaths are lib-path globs served by virtual-object daemons.
 	VirtualPaths []string `yaml:"virtual_paths"`
-	// FormatRegistry maps scanf/printf-style functions to the argument
-	// index (0-based) of their format string. Built-in: sscanf (arg 1).
+	// FormatRegistry maps scanf-style functions to their format argument.
 	FormatRegistry map[string]int `yaml:"format_registry"`
 
-	Rules     map[string]RuleSettings `yaml:"rules"`
-	PathRules []PathRule              `yaml:"path_rules"`
-	FailOn    string                  `yaml:"fail_on"` // info | warning | error
+	// Rules maps a rule name, code, or group to a severity
+	// (off|info|warning|error) or to a settings mapping.
+	Rules map[string]RuleSettings `yaml:"rules"`
+	// Enable/Disable are the legacy on/off lists (additive over defaults).
+	Enable  []string `yaml:"enable"`
+	Disable []string `yaml:"disable"`
+	// Overrides adjust rules for lib-relative path globs.
+	Overrides []Override `yaml:"overrides"`
+	// PathRules is the legacy form of Overrides (disable lists only).
+	PathRules []PathRule `yaml:"path_rules"`
+
+	FailOn string `yaml:"fail_on"` // info | warning | error
+	// Baseline is the baseline file (default dgdlint-baseline.json next
+	// to the config).
+	Baseline string `yaml:"baseline"`
 }
 
+// RuleSettings configures one rule (or group). In YAML it is either a bare
+// severity string or a mapping.
 type RuleSettings struct {
-	Severity string   `yaml:"severity"`
-	Deny     []string `yaml:"deny"`  // raw-inherit-path
-	Names    []string `yaml:"names"` // lifecycle-chain
+	Severity   string   `yaml:"severity"` // off | info | warning | error
+	Deny       []string `yaml:"deny"`     // raw-inherit-path
+	Names      []string `yaml:"names"`    // lifecycle-chain
+	MaxPerFile int      `yaml:"max_per_file"`
+}
+
+func (r *RuleSettings) UnmarshalYAML(n *yaml.Node) error {
+	if n.Kind == yaml.ScalarNode {
+		r.Severity = n.Value
+		return nil
+	}
+	type plain RuleSettings
+	return n.Decode((*plain)(r))
+}
+
+type Override struct {
+	Paths []string                `yaml:"paths"`
+	Rules map[string]RuleSettings `yaml:"rules"`
 }
 
 type PathRule struct {
@@ -100,38 +158,100 @@ func Default() *Config {
 	return &Config{Dir: ".", Root: "."}
 }
 
-// Load reads a config file.
-func Load(path string) (*Config, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
+// Load reads a config file from disk.
+func Load(path string) (*Config, error) { return LoadFS(vfs.OS{}, path) }
+
+// LoadFS reads a config file, applying extends.
+func LoadFS(fs vfs.FS, path string) (*Config, error) {
+	c := &Config{}
+	if err := loadInto(fs, path, c, map[string]bool{}); err != nil {
 		return nil, err
 	}
-	c := &Config{}
-	if err := yaml.Unmarshal(data, c); err != nil {
-		return nil, fmt.Errorf("%s: %w", path, err)
-	}
 	c.Dir = filepath.Dir(path)
+	c.Path = path
 	if c.Root == "" {
 		c.Root = "."
 	}
 	return c, nil
 }
 
-// Find searches dir and its parents for dgdtools.yml; returns Default()
+func loadInto(fs vfs.FS, path string, c *Config, seen map[string]bool) error {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return err
+	}
+	if seen[abs] {
+		return fmt.Errorf("%s: extends cycle", path)
+	}
+	seen[abs] = true
+	data, err := fs.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	var head struct {
+		Extends StringList `yaml:"extends"`
+	}
+	if err := yaml.Unmarshal(data, &head); err != nil {
+		return fmt.Errorf("%s: %w", path, err)
+	}
+	for _, base := range head.Extends {
+		if !filepath.IsAbs(base) {
+			base = filepath.Join(filepath.Dir(path), base)
+		}
+		if err := loadInto(fs, base, c, seen); err != nil {
+			return fmt.Errorf("%s: extends: %w", path, err)
+		}
+		// Relative root/driver_config in a base are relative to the base.
+		if c.Root != "" && !filepath.IsAbs(c.Root) {
+			c.Root = filepath.Join(filepath.Dir(base), c.Root)
+		}
+		if c.DriverConfig != "" && !filepath.IsAbs(c.DriverConfig) {
+			c.DriverConfig = filepath.Join(filepath.Dir(base), c.DriverConfig)
+		}
+	}
+	root, drv := c.Root, c.DriverConfig
+	c.Root, c.DriverConfig = "", ""
+	if err := yaml.Unmarshal(data, c); err != nil {
+		return fmt.Errorf("%s: %w", path, err)
+	}
+	if c.Root == "" {
+		c.Root = root
+	}
+	if c.DriverConfig == "" {
+		c.DriverConfig = drv
+	}
+	return nil
+}
+
+// Find searches dir and its parents for a config file; returns Default()
 // when none exists.
 func Find(dir string) (*Config, error) {
-	dir, err := filepath.Abs(dir)
+	p, err := FindPath(vfs.OS{}, dir)
 	if err != nil {
 		return nil, err
 	}
+	if p == "" {
+		return Default(), nil
+	}
+	return Load(p)
+}
+
+// FindPath returns the nearest config file at or above dir, or "".
+func FindPath(fs vfs.FS, dir string) (string, error) {
+	dir, err := filepath.Abs(dir)
+	if err != nil {
+		return "", err
+	}
 	for {
-		p := filepath.Join(dir, FileName)
-		if _, err := os.Stat(p); err == nil {
-			return Load(p)
+		for _, name := range []string{FileName, AltFileName} {
+			p := filepath.Join(dir, name)
+			if fs.Exists(p) && !fs.IsDir(p) {
+				return p, nil
+			}
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
-			return Default(), nil
+			return "", nil
 		}
 		dir = parent
 	}
