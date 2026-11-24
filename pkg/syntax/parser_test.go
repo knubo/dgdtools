@@ -326,7 +326,18 @@ func TestNeverPanics(t *testing.T) {
 	}
 	for _, s := range seeds {
 		for _, complete := range []bool{true, false} {
-			assert.NotPanics(t, func() { parse(s, complete) }, "%q", s)
+			assert.NotPanics(t, func() {
+				f := parse(s, complete)
+				// Spans stay ordered and inside the file even when the
+				// input ends mid-construct.
+				Inspect(f, func(n Node) bool {
+					a, b := n.Span()
+					if a > b || b >= len(f.Tok.Tokens) {
+						t.Errorf("%q: %T span [%d,%d] of %d", s, n, a, b, len(f.Tok.Tokens))
+					}
+					return true
+				})
+			}, "%q", s)
 		}
 	}
 }

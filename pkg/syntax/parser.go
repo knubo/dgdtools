@@ -392,7 +392,7 @@ func (p *parser) parseDeclRecover() (d Decl) {
 		}
 		_ = eof
 		p.file.Partial = true
-		d = &BadDecl{span: span{p.tokAt(start), last}, Opaque: opaque}
+		d = &BadDecl{span: span{p.tokAt(start), maxInt(last, p.tokAt(start))}, Opaque: opaque}
 	}()
 	return p.parseDecl()
 }
@@ -844,7 +844,7 @@ func (p *parser) parseStmt() (s Stmt) {
 				}
 			}
 		}
-		s = &BadStmt{span: span{p.tokAt(start), last}, Opaque: opaque}
+		s = &BadStmt{span: span{p.tokAt(start), maxInt(last, p.tokAt(start))}, Opaque: opaque}
 	}()
 	return p.stmt()
 }
