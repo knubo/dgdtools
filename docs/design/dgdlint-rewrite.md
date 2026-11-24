@@ -328,47 +328,99 @@ dgdlint is a library first; the CLI is one frontend.
 
 ```go
 fs  := vfs.NewOverlay(vfs.OS{})            // editor buffers shadow disk
-prj, _ := config.Discover(fs, paths, config.DiscoverOptions{})
+prj, _ := config.Discover(fs, paths, config.DiscoverOptions{WorkDir: cwd, ProfileDirs: dirs})
 l, _ := lint.New(prj, fs)                  // no globals; safe to keep alive
-res, _ := l.Run(ctx, lint.Request{Paths: paths})
-for _, d := range res.Diagnostics { ... }  // ranges, code, related, fixes
+
+res, _ := l.Run(ctx, lint.Request{Paths: paths})   // many files
+for _, d := range res.Diagnostics { ... }          // ranges, code, related, fixes
+
+doc, _ := l.Lint(ctx, path, lint.Options{})        // one document:
+doc.Diagnostics; doc.Tree; doc.File; doc.View      // findings + what they came from
 
 fs.Set(path, unsavedBytes)                 // editor change
-changed := l.Invalidate(path)              // files whose findings may differ
-res, _ = l.Run(ctx, lint.Request{Paths: []string{path}})
+affected := l.Invalidate(path)             // files whose findings may differ
+doc, _ = l.Lint(ctx, path, lint.Options{})
 ```
 
-Properties the core guarantees (each has a test in `pkg/lint`):
+Properties the core guarantees (each has a test in `pkg/lint` or
+`pkg/index`):
 
 - **No printing, no `os.Exit`, no `flag`**, no package-level mutable
   state. `lint.Rules()` returns a fresh copy of an immutable table; each
   `Linter` owns its index. `cmd/dgdlint` is `run(ctx, args, stdout,
   stderr) int` over the library.
+- **No process state.** The library reads no environment variable, no
+  home directory and no working directory. Paths are absolute; a front
+  end passes its working directory (`DiscoverOptions.WorkDir`) and the
+  profile search directories (`profile.UserDirs(env, userConfigDir,
+  home)`).
 - **All file access goes through `vfs.FS`** (read, exists, walk), config
   loading included, so an overlay can replace disk content with unsaved
-  buffers.
+  buffers. An overlay's unsaved new files exist and are walked.
+- **Generations.** The index is a sequence of immutable generations
+  (`index.Snapshot`). A snapshot reads files on first need and never
+  changes an answer it has given; `Invalidate` leaves the snapshots in
+  use alone and makes the next one, which shares every unit the change
+  did not reach. A `Run` or `Lint` holds one snapshot from start to end,
+  so linting and editing never wait for each other and need no locking
+  discipline from the caller. Results carry their generation
+  (`Result.Generation`, `Document.Generation`); one that is no longer
+  `Linter.Generation()` describes the lib before a change and is
+  computed again.
 - **Lazy index.** Units are lexed/parsed/indexed on first demand and
-  memoized as *facts only* (symbols, inherits, dependencies), not trees,
-  so a whole lib stays small in memory. Linting one file touches its
-  include closure, its inherit chain, and the targets of its calls. The
-  only whole-lib operation is the reverse "who inherits/includes me" map,
-  built on first need (a module's callback provided by its inheritors).
-- **Invalidation by file and include dependency.** Every unit records the
-  files it was built from. `Invalidate(p)` drops units that depend on `p`,
-  all memoized chains (cheap to rebuild), and the reverse map; it returns
-  the dropped files. A change to the force-included header drops
-  everything.
+  memoized as *facts only* (symbols with their positions, inherits,
+  dependencies), not trees, so a whole lib stays small in memory. Linting
+  one file touches its include closure, its inherit chain, and the
+  targets of its calls. A file is parsed once for both its tree and its
+  facts, and a header is lexed once for both its macros and its
+  declarations.
+- **True dependents.** For the current generation the index keeps
+  reverse edges: which units were built from a file (its include closure,
+  and the places an `#include` was looked for and not found), who inherits
+  or includes whom, which linted files asked about which object (a call
+  target, an object path), and which asked who inherits them.
+  `Invalidate(p)` follows them: it drops the units built from `p`, the
+  chains of everything that inherits one of those, and returns the files
+  whose diagnostics can differ: those, plus the linted files that asked
+  about one of those objects, plus (when an object changed) the files
+  that asked who inherits them. Creating a file that was looked for and
+  missing is a change like any other. Edges are removed with the unit
+  that owns them. A change to the force-included header (itself one
+  immutable value of the generation) or to the auto object affects every
+  file.
+- **The whole-lib scan is incremental.** Only "who inherits or includes
+  me" needs every file indexed (a module's callback provided by its
+  inheritors). The scan runs on first need, one at a time, each caller
+  waiting with its own context. Its state belongs to the index, not to a
+  generation: a change puts the dropped and the created files back on its
+  list, so after the first scan a reverse lookup costs the edits since.
+  `Options.NoScan` keeps a lint from starting it (such questions are then
+  unknown and `NeedsScan` is set); a server runs `Linter.Scan` in the
+  background and lints again. `Run` uses the same mechanism to parse each
+  file of a whole lib once.
 - **`context.Context`** is checked between files and during the whole-lib
-  scan; a cancelled reverse lookup answers "unknown", never "missing".
+  scan; a cancelled or superseded reverse lookup answers "unknown", never
+  "missing".
 - **Diagnostics** carry byte offsets (`Start`, `End`), 1-based line/column
-  for both ends, a stable `Code` and `Rule` name, `Related` locations
-  (the unclosed `{`, the definition whose arity is violated, the include
-  that breaks inherit order) and `Fixes` as text edits. `diag.UTF16Col`
-  converts a byte column to an LSP UTF-16 column; bytes that are not valid
-  UTF-8 (the corpus's Latin-1) count as one unit each, matching how
-  editors decode them.
+  for both ends, a stable `Code` and `Rule` name, a `Fingerprint` of the
+  source line (what baselines match on), `Related` locations (the
+  unclosed `{`, the definition whose arity is violated, the include that
+  breaks inherit order; their positions come from the index, no file is
+  read again) and `Fixes` as text edits. `diag.UTF16Col` converts a byte
+  column to an LSP UTF-16 column; bytes that are not valid UTF-8 (the
+  corpus's Latin-1) count as one unit each, matching how editors decode
+  them.
+- **Notes** about a run as a whole are `diag.Note` values with a stable
+  `Kind` (`no-lib`, `incomplete-lib`, `outside-lib`, `profile`,
+  `unplaced-checkout`, `internal-error`).
 - **One bad file cannot take down a run:** a panic while analyzing a file
   is caught, reported as a note, and the file is skipped.
+
+Measured on the 108,116-file lib (`TestCorpusEdit`, 681 single-file
+edits after a whole-lib run): `Invalidate` 1.5 ms median (2.9 ms at the
+95th percentile; 156 ms for a file 89,000 others inherit), linting the
+edited file 0.1 ms median, completing the scan again under 1 ms, one
+file read per edit, and findings identical to the whole-lib run's.
 
 ### 6.1 A future `dgdlint lsp`
 
@@ -379,10 +431,10 @@ project:
 | LSP feature | Maps onto |
 |---|---|
 | `textDocument/didOpen`, `didChange`, `didClose` | `overlay.Set/Delete` + `Linter.Invalidate(path)` |
-| `textDocument/publishDiagnostics` | `Linter.Run` for the changed file, debounced, with the previous run cancelled through its context. `Invalidate` returns the dependents; those that are open are re-run. `Diagnostic.code` = rule code, `codeDescription` = the `explain` text, `relatedInformation` = `Related`, positions via `diag.UTF16Col`. |
+| `textDocument/publishDiagnostics` | `Linter.Lint` for the changed document, debounced, with the previous lint cancelled through its context. `Invalidate` returns the dependents; those that are open are linted again. `Diagnostic.code` = rule code, `codeDescription` = the `explain` text, `relatedInformation` = `Related`, positions via `diag.UTF16Col`. |
 | `workspace/didChangeWatchedFiles` | `Invalidate` for disk changes; a config change rebuilds the `Linter`. |
 | `textDocument/codeAction` | `Fixes` on the diagnostics in range (quick-fix edits), plus generated "suppress with `dgdlint:disable-next-line`" actions. |
-| `textDocument/definition` | the index: resolve the identifier under the cursor through `Index.Chain` (functions; `::` and `label::` calls), `->` calls with a known receiver through `LookupCallable`, `inherit`/`#include` paths through `ObjectPath`/`ResolveInclude`, macros through the macro view. `ChainFunc` and `pp.Macro` already carry the defining file and offset. |
+| `textDocument/definition` | the index: resolve the identifier under the cursor through `Snapshot.Chain` (functions and variables; `::` and `label::` calls), `->` calls with a known receiver through `LookupCallable`, `inherit`/`#include` paths through `ObjectPath`/`ResolveInclude`, macros through the macro view. `ChainFunc`, `ChainVar` and `pp.Macro` carry the defining file and position; a definition in a profile stub is at `dgdlint-profile://NAME/std/room.c`. |
 | `textDocument/hover` | the same lookups: specifiers and argument range of a function, the object that provides it, a macro's body and class. |
 | `textDocument/documentSymbol`, `workspace/symbol` | `syntax.File.Decls`; the units' symbol tables. |
 | `textDocument/formatting` | `pkg/format`, already a pure function. |
@@ -624,9 +676,11 @@ A profile is a manifest plus stub files (`pkg/profile`):
 Stubs being source is the central decision. The lexer, the macro
 classifier, the parser, include resolution, inherit-chain flattening and
 every lookup already work on source; a profile needs **no second
-representation of facts and no second code path**. `profile.FS` lays the
-stubs under the lib root as a `vfs.FS`: a path the real file system does
-not have is answered from the profile, and a real file always wins. This
+representation of facts and no second code path**. A stub is not a file
+on disk and is not named like one: the stub for `/std/room.c` of profile
+`viking` is at `dgdlint-profile://viking/std/room.c`, `profile.FS`
+answers for those locations as a `vfs.FS`, and the index reads a lib file
+from disk when it is there and from its stub location otherwise. This
 is the `.d.ts` model, and it is also what makes the format dialect-
 neutral: a FluffOS profile would hold FluffOS-syntax stubs.
 
@@ -698,14 +752,16 @@ fewest wizard files (55 under `/players`, 189 under `/d`, against 845 and
   `~/.config/dgdtools/profiles` where that differs (macOS). A reference
   with a path separator or ending in `.profile` is a path. When nothing
   is found the error lists every location searched. The same resolution
-  is library API (`profile.SearchDirs`, `profile.Resolve`,
-  `profile.Load`), which is what a language server will call.
+  is library API (`profile.UserDirs`, `profile.Resolve`, `profile.Load`),
+  which is what a language server will call; the front end reads the
+  environment and passes the values in.
 - **Whole lib + profile:** if the profile's force-included header exists
   under the root, the project is a whole lib; the profile only supplies
   settings, and stubs fill nothing because every file is on disk. A whole
   lib with `profile_build.driver_config` needs no profile at all.
-- **Partial checkout:** otherwise the lib root is *virtual* (only stubs
-  live under it) and the checkout directory is mounted at its lib path.
+- **Partial checkout:** otherwise there is no lib root on disk: the
+  checkout directory stands for its lib path and the profile's stubs for
+  the rest.
   The lib path comes from `lib_path:`, or is read off the directory's
   path using the profile's `checkouts` patterns
   (`…/players/drake/rooms` is `/players/drake`).

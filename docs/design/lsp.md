@@ -2,9 +2,10 @@
 
 Status: plan only. Nothing here is implemented. It builds on the library
 described in `dgdlint-rewrite.md` (sections 6 and 10): `pkg/lint`
-(`Linter.Run`, `Invalidate`), `pkg/vfs` (`Overlay`), `pkg/index`
-(chains, macro views, declarations with types), `pkg/profile`,
-`pkg/format`, `pkg/config` (`Discover`).
+(`Linter.Lint`, `Invalidate`, `Scan`, `Generation`), `pkg/vfs`
+(`Overlay`), `pkg/index` (generations, chains, macro views, declarations
+with types and positions), `pkg/profile`, `pkg/format`, `pkg/config`
+(`Discover`).
 
 The server is a thin layer: transport, document state, scheduling and
 position conversion. Analysis stays in the library; any logic the server
@@ -50,9 +51,11 @@ make every optional field a pointer; we use perhaps 5% of the spec.
 **Dispatch:** notifications that change state (`didOpen`, `didChange`,
 `didClose`, `didChangeWatchedFiles`, `didChangeConfiguration`) are handled
 strictly in arrival order on one goroutine. Requests are handled
-concurrently against an immutable snapshot (document version + linter),
-each with a context cancelled by `$/cancelRequest` or by a newer version
-of its document.
+concurrently against an immutable snapshot (document version + the
+linter's index generation: every `Lint` reads one `index.Snapshot` from
+start to end, and `Invalidate` never disturbs one in use), each with a
+context cancelled by `$/cancelRequest` or by a newer version of its
+document.
 
 ## 3. Workspaces, projects and profiles
 
@@ -70,7 +73,10 @@ of its document.
 - **Zero-config wizards:** client settings `dgdlint.profile` and
   `dgdlint.libPath` (read with `workspace/configuration`, per folder) are
   passed as `DiscoverOptions.Profile/LibPath` for folders that have no
-  `dgdtools.yml`. A config file always wins over editor settings. No
+  `dgdtools.yml`. The server also passes what the library does not read
+  itself: `DiscoverOptions.ProfileDirs` from `profile.UserDirs` (the
+  `$DGDTOOLS_PROFILE_PATH` value and the user's config and home
+  directories) and absolute paths throughout. A config file always wins over editor settings. No
   profile is ever assumed (design doc 10.4); the extension's settings UI
   is where a wizard names their mud's profile (resolved with
   `profile.Resolve`, so a profile installed in the user config directory
@@ -108,22 +114,29 @@ of its document.
   (re)starts a 200 ms timer; when it fires, the document is linted at its
   then-current version with a fresh context.
 - A newer change to the same document cancels the running lint
-  (`context.CancelFunc`); the library already checks the context between
-  files and during the whole-lib scan, and a cancelled reverse lookup
-  answers "unknown", so a cancelled run can never publish a wrong
-  "missing".
+  (`context.CancelFunc`); the library checks the context between files
+  and during the whole-lib scan, and a cancelled reverse lookup answers
+  "unknown", so a cancelled run can never publish a wrong "missing".
 - Results are published only if the document's version still equals the
-  version the run started with; diagnostics carry that version.
+  version the lint started with and `Document.Generation` is still
+  `Linter.Generation()`; otherwise the document is linted again. (A lint
+  that was in flight when another file changed describes the lib before
+  that change, and `Invalidate` reports dependents of lints against the
+  current generation only.) Diagnostics carry the document version.
 - Dependents (open files that include or inherit the changed file) are
   queued behind the edited document at lower priority, with a longer
   debounce (1 s), so typing in a header does not re-lint twenty rooms per
   keystroke.
-- The first `callable-not-found` self-call in a module triggers the
-  index's one-time whole-lib scan (8 s on VikingMUD). It runs on a
-  background goroutine with `$/progress` ("indexing lib"); until it
-  completes those lookups are unknown and the document is re-linted when
-  it finishes. In a partial checkout the scan covers only the checkout
-  and takes milliseconds.
+- Documents are linted with `Options.NoScan`. The first lint that
+  comes back with `NeedsScan` (a self-call the module's own chain does
+  not provide) makes the server run `Linter.Scan` on a background
+  goroutine with `$/progress` ("indexing lib", a few seconds on
+  VikingMUD); until it completes those lookups are unknown, and the
+  documents that needed it are linted again when it finishes. The scan
+  survives edits: after the first one, `Scan` reads only the files that
+  changed, so the server simply calls it again after each `Invalidate`
+  that leaves a document with `NeedsScan`. In a partial checkout the
+  scan covers only the checkout and takes milliseconds.
 
 ## 6. Positions and encodings
 
@@ -190,10 +203,10 @@ knows the code base.
 
 | # | Feature | Maps onto | Needs first | Days |
 |---|---|---|---|---|
-| 1 | Skeleton: initialize/shutdown, projects, incremental sync, `publishDiagnostics` with code, `codeDescription`, related information, tags (`Unnecessary` for unreachable-code) | `Linter.Run`, `Invalidate`, `diag` | `PositionMapper`; `diag.ByteCol` | 5 |
+| 1 | Skeleton: initialize/shutdown, projects, incremental sync, `publishDiagnostics` with code, `codeDescription`, related information, tags (`Unnecessary` for unreachable-code) | `Linter.Lint`, `Invalidate`, `Scan`, `diag` | `PositionMapper`; `diag.ByteCol` | 5 |
 | 2 | `codeAction`: quick fixes from `Diagnostic.Fixes`; "suppress with `dgdlint:disable-next-line RULE`" and "…for this file" generated per diagnostic; "explain rule" as a command | fixes as text edits (already data) | a helper that renders a suppression comment in the file's comment style and indentation | 2 |
 | 3 | `formatting` (whole document) via dgdfmt; `rangeFormatting` deferred | `pkg/format` with its token-equality gate; a failed gate returns no edits and a log line | minimal-diff edit computation (line-based) so cursors and folds survive | 2 |
-| 4 | `definition`: `#include` targets, `inherit` paths, function calls (direct, `::`, `label::`, `->` with a known receiver, string callbacks in registrars), macros | `ResolveInclude`, `ObjectPath`, `Chain`, `LookupCallable`, macro view (`pp.Macro.Path/Off`) | `syntax.PathAt(file, offset)` (innermost node chain at a position); for stub targets, answer with a read-only virtual document `dgdlint-profile:/std/room.c` showing the stub | 4 |
+| 4 | `definition`: `#include` targets, `inherit` paths, function calls (direct, `::`, `label::`, `->` with a known receiver, string callbacks in registrars), macros | `ResolveInclude`, `ObjectPath`, `Chain`, `LookupCallable`, macro view (`pp.Macro.Path/Off`) | `syntax.PathAt(file, offset)` (innermost node chain at a position); a stub target is already located by its virtual document URI (`dgdlint-profile://NAME/std/room.c`, see `profile.Location`), which the server answers with the stub's text | 4 |
 | 5 | `hover` and `signatureHelp` | `ChainFunc.Decl/Type/DefinedIn`, `index.Params`, macro body and class, variable types | active-parameter computation from the argument list around the cursor; kfun table for built-ins (new data file) | 3 |
 | 6 | `documentSymbol`, `workspace/symbol` | `syntax.File.Decls`; units' symbol tables (whole-lib scan, cached) | fuzzy matcher | 2 |
 | 7 | `completion`: functions callable here (own chain, auto object, kfuns), `->` members for a known receiver, macros in view, `#include` and inherit paths, locals | chain + view + profile | local scopes (block-level symbol tables in `pkg/syntax`); tolerant parse at the cursor (the parser already recovers; completion context comes from tokens left of the cursor) | 5 |
@@ -208,8 +221,8 @@ that are also on the linter's own roadmap: local scopes and a kfun table.
 
 Library additions, all testable without a server: `syntax.PathAt`,
 `diag.ByteCol`, block scopes, kfun table (name, parameters, return type),
-reverse reference index, `Linter.Lint(ctx, path)` as a single-file
-convenience returning the parsed tree with the diagnostics.
+reverse reference index. `Linter.Lint(ctx, path, opts)` already returns
+the parsed tree, tokens, macro view and index unit with the diagnostics.
 
 ## 9. Syntax highlighting: two layers
 
@@ -350,7 +363,7 @@ depends on changes (a header's macros, a parent's functions), using the
 dependents `Invalidate` already returns.
 
 **Performance.** Tokens come from one walk of the tree the diagnostics
-run already built, plus chain lookups that are memoized; they are
+lint already built (`Document.Tree`), plus chain lookups that are memoized; they are
 computed in the same scheduled job as diagnostics for that document
 version and cached, so a tokens request never triggers its own parse.
 Target: under 10 ms for a 1,000-line file once its chain is loaded.
