@@ -1,10 +1,6 @@
 package lint
 
-import (
-	"sort"
-
-	"github.com/mmcdole/dgdtools/pkg/diag"
-)
+import "sort"
 
 // Groups, in display order.
 const (
@@ -27,6 +23,7 @@ func Rules() []*Rule {
 		ruleTargetObjectMissing, ruleCallbackArity, ruleLifecycleChain,
 
 		ruleAssignInCondition, ruleNoEffect, ruleSscanfFormat, ruleUnreachable,
+		ruleInvalidSuppression,
 
 		ruleRawInheritPath, ruleMissingVisibility, ruleUnformatted,
 		ruleStaticAutosaveVar, ruleUnresolvedInherit, ruleUnusedSuppression,
@@ -50,15 +47,4 @@ func groupRank(r *Rule) int {
 		return 2
 	}
 	return 3
-}
-
-var ruleUnusedSuppression = &Rule{
-	Code: "C006", Name: "unused-suppression", Group: GroupConvention,
-	Doc: "a dgdlint: suppression comment that suppresses nothing",
-	Explain: "Reported for dgdlint:disable, disable-line and disable-next-line " +
-		"comments that did not match any finding in this run. Stale suppressions " +
-		"hide future findings on the same line. Only meaningful when the rules the " +
-		"comment names are enabled.",
-	Default: false, Severity: diag.Warning,
-	Run: func(*Pass) {}, // implemented by the engine, which sees all findings
 }

@@ -126,27 +126,31 @@ other tool.
 ### 2.4 Skip markers
 
 ```c
-/* dgdfmt: off */
+/* dgdtools-ignore-start format */
 mapping exits = ([ "north" : "/room/hall",
                    "south" : "/room/yard",   ]);
-/* dgdfmt: on */
+/* dgdtools-ignore-end format */
 ```
 
-A comment whose whole text is `dgdfmt: off` turns the formatter off from
-that comment on; `dgdfmt: on` turns it back on after it. Either comment
-form works (`//` needs a driver with `SLASHSLASH`, so the block form is
-the one to document). Between the two, every byte is kept as it is.
-Without an `on` the rest of the file is kept: that is the whole-file
+A comment that begins with `dgdtools-ignore-start` and names `format`
+turns the formatter off from that comment on; `dgdtools-ignore-end
+format` (or an end that names nothing) turns it back on after it. Either
+comment form works (`//` needs a driver with `SLASHSLASH`, so the block
+form is the one to document). Between the two, every byte is kept as it
+is. Without an end the rest of the file is kept: that is the whole-file
 form, for generated files that are not excluded by path.
 
-- off/on, not a next-statement marker: the regions people protect are
+- A range, not a next-statement marker: the regions people protect are
   hand-aligned tables and ASCII art, which are ranges of lines, and one
-  mechanism is enough. clang-format and black use the same pair.
-- The name is the formatter's, not the binary's: `dgdfmt:` next to the
-  linter's `dgdlint:` comments, as Deno has `deno-fmt-ignore` and
-  `deno-lint-ignore`. Both stay short and greppable.
-- The marker must be the entire comment, so prose that mentions it is
-  not one.
+  mechanism is enough. clang-format and black have the same pair.
+- The comment is one of the tool's directives (`pkg/directive`; the
+  grammar and why there is one prefix for linter and formatter are in
+  [dgdlint-rewrite.md](dgdlint-rewrite.md), section 4). The formatter
+  reads the `format` target and nothing else; the form for a single
+  line, `dgdtools-ignore format`, is not defined for it, and the linter
+  says so (`invalid-suppression`).
+- A directive is the first thing in its comment, so prose that mentions
+  one is not one.
 - The tokens in a skipped region still go through the engine (its
   bracket and conditional state must stay right for the code after), and
   the gate still covers the whole file.

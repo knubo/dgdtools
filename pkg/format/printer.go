@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"slices"
 
+	"github.com/mmcdole/dgdtools/pkg/directive"
 	"github.com/mmcdole/dgdtools/pkg/token"
 )
 
@@ -50,8 +51,8 @@ type printer struct {
 	// gap being written: the number of significant tokens before it.
 	sel *selection
 	ord int
-	// off is set between a `dgdfmt: off` comment and the next
-	// `dgdfmt: on`.
+	// off is set between a `dgdtools-ignore-start format` comment and
+	// the `dgdtools-ignore-end` that answers it.
 	off bool
 	// taught is, per nesting level, the indentation an unselected line
 	// that begins a statement at that level has (nil: none seen). A
@@ -85,8 +86,8 @@ func (p *printer) run() {
 
 // gap writes the trivia between the previous significant token and the
 // one at index next (the EOF token after the last). A gap that is not
-// selected, and the part of any gap that lies in a `dgdfmt: off` region,
-// is copied as it is; the rest is laid out.
+// selected, and the part of any gap that lies in a region the formatter
+// is told to ignore, is copied as it is; the rest is laid out.
 func (p *printer) gap(gap []token.Token, next int) {
 	if !p.sel.has(p.ord) {
 		for _, g := range gap {
@@ -102,10 +103,10 @@ func (p *printer) gap(gap []token.Token, next int) {
 	for k, g := range gap {
 		switch was := p.off; {
 		case p.toggle(g) == was:
-		case was: // dgdfmt: on
+		case was: // ...-end: on again
 			p.raw(gap[start : k+1])
 			start, resumed = k+1, true
-		default: // dgdfmt: off
+		default: // ...-start: off
 			p.layout(gap[start:k+1], next, resumed, false)
 			start = k + 1
 		}
@@ -117,49 +118,19 @@ func (p *printer) gap(gap []token.Token, next int) {
 	p.layout(gap[start:], next, resumed, true)
 }
 
-// toggle turns the formatter off or on if g is a skip marker, and
-// reports the state after it.
+// toggle turns the formatter off or on if g is a comment that says so
+// (`dgdtools-ignore-start format`, `dgdtools-ignore-end format`, or an
+// end of everything), and reports the state after it.
 func (p *printer) toggle(g token.Token) bool {
-	switch skipMarker(p.f, g) {
-	case markerOff:
-		p.off = true
-	case markerOn:
-		p.off = false
+	if d, ok := directive.Parse(p.f, g); ok {
+		switch {
+		case d.Form == directive.Start && d.Has(directive.Format):
+			p.off = true
+		case d.Form == directive.End && (d.Has(directive.Format) || len(d.Targets) == 0):
+			p.off = false
+		}
 	}
 	return p.off
-}
-
-type marker uint8
-
-const (
-	markerNone marker = iota
-	markerOff
-	markerOn
-)
-
-// skipMarker recognizes a comment whose whole text is `dgdfmt: off` or
-// `dgdfmt: on`.
-func skipMarker(f *token.File, t token.Token) marker {
-	text := f.Text(t)
-	switch t.Kind {
-	case token.LineComment:
-		text = bytes.TrimPrefix(text, []byte("//"))
-	case token.BlockComment:
-		text = bytes.TrimSuffix(bytes.TrimPrefix(text, []byte("/*")), []byte("*/"))
-	default:
-		return markerNone
-	}
-	arg, ok := bytes.CutPrefix(bytes.TrimSpace(text), []byte("dgdfmt:"))
-	if !ok {
-		return markerNone
-	}
-	switch string(bytes.TrimSpace(arg)) {
-	case "off":
-		return markerOff
-	case "on":
-		return markerOn
-	}
-	return markerNone
 }
 
 // raw copies trivia as it is.

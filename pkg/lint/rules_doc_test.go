@@ -27,7 +27,9 @@ func TestRulesDoc(t *testing.T) {
 	}
 	got, err := os.ReadFile(path)
 	require.NoError(t, err)
-	assert.Equal(t, want, string(got), "docs/rules.md is not what the rule table says; run with -update")
+	if want != string(got) {
+		t.Error("docs/rules.md is not what the rule table says; run: go test ./pkg/lint -run TestRulesDoc -update")
+	}
 	for _, r := range lint.Rules() {
 		anchor := strings.TrimPrefix(r.URL(), lint.DocsURL)
 		assert.Contains(t, want, "\n### "+strings.TrimPrefix(anchor, "#")+"\n", "the section %s points to", r.URL())

@@ -123,7 +123,7 @@ func TestRulesAndExplain(t *testing.T) {
 	code, out, _ = dgdtools(t, "", "explain", "E005")
 	assert.Equal(t, 0, code)
 	assert.Contains(t, out, "declaration-after-statement")
-	assert.Contains(t, out, "dgdlint:disable-next-line")
+	assert.Contains(t, out, "/* dgdtools-ignore lint/declaration-after-statement */")
 	assert.NotContains(t, out, "Options")
 	_, opts, _ := dgdtools(t, "", "explain", "raw-inherit-path")
 	assert.Contains(t, opts, "Options, in lint.rules under raw-inherit-path:\n    deny: a list of strings; ")

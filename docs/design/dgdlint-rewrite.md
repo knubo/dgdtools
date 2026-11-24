@@ -367,14 +367,55 @@ line are designed in [config.md](config.md). What the linter adds:
 - **A nested file that is not valid fails the run** (a project key in a
   scope, an unknown rule): linting its files by other settings than the
   ones somebody wrote would be a silent wrong answer.
-- **Suppression comments:** `dgdlint:disable-next-line rule[,rule]`,
-  `dgdlint:disable-line`, and `dgdlint:disable rule` … `dgdlint:enable`
-  blocks, in any comment; rule names or codes. A file-scoped suppress-all
-  is deliberately not offered. `unused-suppression` (off by default)
-  reports directives that suppress nothing, as ESLint's
-  `--report-unused-disable-directives` and ruff's `RUF100` do. Comments
-  name the component they address (`dgdlint:` here, `dgdfmt:` for the
-  formatter's skip markers), not the binary.
+- **Comments addressed to the tool have one prefix and one grammar**
+  (`pkg/directive`), for the linter and the formatter alike:
+
+  ```
+  dgdtools-ignore TARGETS [: reason]         one line of code
+  dgdtools-ignore-start TARGETS [: reason]   from here ...
+  dgdtools-ignore-end [TARGETS]              ... to here (no targets: everything)
+  TARGETS = lint/RULE | lint | format, comma-separated
+  ```
+
+  The choice. The tool is one binary with one name, so there is one word
+  to learn and one word to grep for: every exemption in a lib is a
+  `grep -rn dgdtools-ignore`. Biome, the other tool that lints and
+  formats from one binary with one name, does it this way
+  (`biome-ignore lint/…`, `biome-ignore format`, `-start`/`-end` for
+  ranges), and the shape was taken from it: tool prefix, then what is
+  ignored as a path, then a reason after a colon. The alternatives were
+  looked at and not followed. Ruff has two unrelated spellings (`# noqa:
+  E501`, `# fmt: off`) because it had to read the comments flake8 and
+  black had already put into every codebase; that is compatibility, not
+  design, and there is nothing here to be compatible with. Deno and
+  ESLint+Prettier name the component in the prefix (`deno-lint-ignore`,
+  `deno-fmt-ignore`), which is two words to grep for and two names that
+  are not commands of this tool. clang-tidy's `NOLINT` and
+  clang-format's `off`/`on` are two tools.
+
+  What the linter reads from it. The plain form is about one line: the
+  line of code the comment stands on, or the next line when the comment
+  stands alone, so a trailing comment and a comment above both work and
+  there is one keyword instead of ESLint's `disable-line` and
+  `disable-next-line`. Rules are named as `lint/NAME` or `lint/CODE`;
+  `lint` alone is every rule, for one line only. A range names its
+  rules: a comment that turns everything off from here on is
+  deliberately not offered. A comment is a directive when it begins with
+  the prefix and its targets are on that line; one that merely mentions
+  the prefix is prose.
+- **A directive that cannot be followed is a finding.** Two rules are
+  about the comments themselves; they run after the others
+  (`Rule.Late`) and see what the comments did. `invalid-suppression`
+  (on by default): an unknown rule name, an unknown target, a comment
+  that names nothing, a range without rules, an end without a start, a
+  second start. A misspelled rule name is therefore reported instead of
+  silently suppressing nothing. `unused-suppression` (off by default)
+  reports each rule a comment names that had no finding there, as
+  ESLint's `--report-unused-disable-directives` and ruff's `RUF100` do;
+  a comment for a rule that did not run on the file is not judged. Both
+  report the target they are about, not the whole comment, and neither
+  can itself be suppressed by a comment. There is no special case for
+  them in the engine: they are rules with `Late` set.
 - **Baseline:** `dgdtools lint --write-baseline` records current
   findings in `dgdtools-baseline.json` next to the config
   (`lint.baseline` to rename); later runs subtract them, so legacy noise
@@ -599,7 +640,7 @@ A thin layer, the reserved `dgdtools lsp` subcommand, holding one
 | `textDocument/didOpen`, `didChange`, `didClose` | `overlay.Set/Delete` + `Linter.Invalidate(path)` |
 | `textDocument/publishDiagnostics` | `Linter.Lint` for the changed document, debounced, with the previous lint cancelled through its context. `Invalidate` returns the dependents; those that are open are linted again. `Diagnostic.code` = rule code, `codeDescription` = the `explain` text, `relatedInformation` = `Related`, positions via `diag.UTF16Col`. |
 | `workspace/didChangeWatchedFiles` | `Invalidate` for disk changes; a config change rebuilds the `Linter`. |
-| `textDocument/codeAction` | `Fixes` on the diagnostics in range (quick-fix edits), plus generated "suppress with `dgdlint:disable-next-line`" actions. |
+| `textDocument/codeAction` | `Fixes` on the diagnostics in range (quick-fix edits), plus generated "suppress with `dgdtools-ignore lint/RULE`" actions. |
 | `textDocument/definition` | the index: resolve the identifier under the cursor through `Snapshot.Chain` (functions and variables; `::` and `label::` calls), `->` calls with a known receiver through `LookupCallable`, `inherit`/`#include` paths through `ObjectPath`/`ResolveInclude`, macros through the file's `pp.Env`. `ChainFunc`, `ChainVar` and `pp.Macro` carry the defining file and position; a definition in a profile stub is at `dgdtools-profile://NAME/std/room.c`. |
 | `textDocument/hover` | the same lookups: specifiers and argument range of a function, the object that provides it, a macro's body and class. |
 | `textDocument/documentSymbol`, `workspace/symbol` | `syntax.File.Decls`; the units' symbol tables. |
@@ -700,7 +741,7 @@ the `unformatted` rule calls the same function with the same per-file
 options.
 
 **Gaps.** The printer's unit of work is the gap between two significant
-tokens. A skip marker (`dgdfmt: off` … `dgdfmt: on`) and a line
+tokens. A skip marker (`dgdtools-ignore-start format` … `dgdtools-ignore-end format`) and a line
 selection (`format.Lines`) are both "copy these gaps as they are": the
 tokens of a skipped gap still pass through the printer, so its bracket
 and conditional state stay right for what follows. A selected line

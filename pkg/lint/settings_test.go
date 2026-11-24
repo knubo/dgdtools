@@ -117,8 +117,8 @@ func TestUnformattedFollowsTheFormatter(t *testing.T) {
 		"/lib/ec/.editorconfig":        "[*.c]\nindent_style = tab\n",
 		"/lib/ec/e.c":                  tabs,
 		"/lib/ec/f.c":                  spaces,
-		"/lib/skip.c":                  "/* dgdfmt: off */\nint   *table,   *other;\n/* dgdfmt: on */\nint x;\n",
-		"/lib/skip2.c":                 "/* dgdfmt: off */\nint   *table,   *other;\n/* dgdfmt: on */\nint   x;\n",
+		"/lib/skip.c":                  "/* dgdtools-ignore-start format */\nint   *table,   *other;\n/* dgdtools-ignore-end format */\nint x;\n",
+		"/lib/skip2.c":                 "/* dgdtools-ignore-start format */\nint   *table,   *other;\n/* dgdtools-ignore-end format */\nint   x;\n",
 		"/lib/tabs/quiet/dgdtools.yml": "root: false\nlint:\n  rules: {unformatted: off}\n",
 		"/lib/tabs/quiet/g.c":          spaces,
 	}

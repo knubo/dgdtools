@@ -192,6 +192,14 @@ Statement directly after return, break, continue or goto in the same block.
 
 Code after an unconditional jump in the same block never runs. Labels and case labels restart reachability. Off by default: legal, and common as leftover debugging in old code.
 
+### invalid-suppression
+
+`S005` · warning · on by default · one file is enough
+
+A dgdtools-ignore comment that does not do what it was written to do.
+
+A comment that begins with dgdtools-ignore is an instruction, and one that cannot be followed protects nothing while looking as if it did: a rule name that does not exist (a typo), a target that is neither lint, lint/RULE nor format, a comment that names nothing, a range (dgdtools-ignore-start) that names no rule, an end with no start. The plain form is about one line: the line of code it stands on, or the next line when it stands alone; -start and -end are about what is between them; the formatter is turned off by range only. A comment that merely mentions dgdtools-ignore is not a directive.
+
 ## convention
 
 The lib's own policy.
@@ -222,7 +230,7 @@ Flags functions declared without private, static, nomask or one of the lib's spe
 
 File is not formatted as `dgdtools format` would format it.
 
-Formats the file exactly as `dgdtools format` does, with the format settings of that file, and reports a difference. What `dgdfmt: off` comments protect is left alone here too.
+Formats the file exactly as `dgdtools format` does, with the format settings of that file, and reports a difference. What dgdtools-ignore-start format comments protect is left alone here too.
 
 ### static-autosave-var
 
@@ -244,6 +252,6 @@ Informational: cross-file rules cannot verify anything involving this object's i
 
 `C006` · warning · off by default · one file is enough
 
-A dgdlint: suppression comment that suppresses nothing.
+A dgdtools-ignore comment for a finding that is not there.
 
-Reported for dgdlint:disable, disable-line and disable-next-line comments that did not match any finding in this run. Stale suppressions hide future findings on the same line. Only meaningful when the rules the comment names are enabled.
+Reported for each rule a dgdtools-ignore comment names that has no finding where the comment says. A suppression that is not needed hides the next finding that turns up there. A comment for a rule that did not run on the file (it is off, or needs a lib that is not known) is not reported: whether it is needed cannot be told.

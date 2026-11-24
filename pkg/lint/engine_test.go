@@ -20,8 +20,8 @@ import (
 // after the baseline. What it holds back is counted.
 func TestMaxPerFileCountsWhatIsShown(t *testing.T) {
 	src := `void f() {
-    a == 1;   /* dgdlint:disable-line no-effect-statement */
-    b == 2;   /* dgdlint:disable-line no-effect-statement */
+    a == 1;   /* dgdtools-ignore lint/no-effect-statement */
+    b == 2;   /* dgdtools-ignore lint/no-effect-statement */
     c == 3;
     d == 4;
     e == 5;

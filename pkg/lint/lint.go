@@ -67,6 +67,11 @@ type Rule struct {
 	CompiledOnly bool
 	// Tags are put on every finding of the rule.
 	Tags []diag.Tag
+	// Late rules are about the lint itself, not the code: they run after
+	// the other rules of the file, and see its suppression comments and
+	// which of them found something to suppress. What they report is not
+	// itself subject to suppression comments.
+	Late bool
 	// Options returns the rule's options at their defaults: a pointer to
 	// a struct whose fields carry the option's key as yaml tag and what
 	// it is for as doc tag. Those are the keys the rule's mapping in
@@ -113,6 +118,10 @@ type Pass struct {
 type fileShared struct {
 	calls *callFacts
 	stats fileStats
+	// sup are the file's suppression comments, and ran the names of the
+	// rules that have run on it: what a Late rule looks at.
+	sup *suppressions
+	ran map[string]bool
 }
 
 // Report records a finding covering the byte range [start, end) and
@@ -191,7 +200,7 @@ type Request struct {
 // Stats summarizes a run, including what could not be verified.
 type Stats struct {
 	Files      int `json:"files"`
-	Suppressed int `json:"suppressed"` // by dgdlint: comments
+	Suppressed int `json:"suppressed"` // by dgdtools-ignore comments
 	Baselined  int `json:"baselined"`
 	Capped     int `json:"capped"` // over a max_per_file limit; not reported
 
@@ -645,61 +654,44 @@ func (l *Linter) lintFile(ctx context.Context, s *index.Snapshot, file string, s
 	// that the baseline is subtracted, and only then is a rule's limit
 	// per file applied, so that a limit counts what would be shown.
 	local := opt.Local || !l.project.HasLib() || u.LibPath == ""
-	sup := scanSuppressions(parsed.Tok, l)
-	var found []*diag.Diagnostic
-	var unusedSup *active
+	shared.sup, shared.ran = l.suppressions(parsed.Tok), map[string]bool{}
+	var ds []diag.Diagnostic
 	limits := map[string]int{}
-	for i := range rules {
-		a, r := &rules[i], rules[i].rule
-		if r.Name == "unused-suppression" {
-			unusedSup = a
-			continue
-		}
-		if r.CrossFile && local {
-			continue
-		}
-		if ctx.Err() != nil {
-			break
-		}
-		if limits[r.Name] = opt.MaxPerFile; opt.MaxPerFile == 0 {
-			limits[r.Name] = a.maxPerFile
-		}
-		var out []*diag.Diagnostic
-		pass := &Pass{
-			Ctx: ctx, File: parsed.Tok, Tree: parsed.Tree, Env: parsed.Env,
-			Unit: u, Index: query, LibPath: u.LibPath,
-			Config: l.project.Config, Options: a.options, Format: l.format.With(set.Format),
-			shared: shared, registry: l.registry, rule: r, severity: a.severity, out: &out,
-		}
-		running = r.Name
-		r.Run(pass)
-		running = ""
-		for _, d := range out {
-			switch {
-			case r.CompiledOnly && guessed(parsed.Tree, d.Start):
-				stats.guessed++
-			case sup.suppressed(d.Rule, d.Line):
-				stats.suppressed++
-			default:
-				found = append(found, d)
+	for _, late := range []bool{false, true} {
+		for i := range rules {
+			a, r := &rules[i], rules[i].rule
+			if r.Late != late || (r.CrossFile && local) {
+				continue
 			}
-		}
-	}
-
-	ds := make([]diag.Diagnostic, 0, len(found))
-	for _, d := range found {
-		ds = append(ds, *d)
-	}
-	if unusedSup != nil {
-		r := l.byKey["unused-suppression"][0]
-		for _, s := range sup.unused() {
-			pos := parsed.Tok.Pos(s.off)
-			ds = append(ds, diag.Diagnostic{
-				Path: file, Line: pos.Line, Col: pos.Col, EndLine: pos.Line, EndCol: pos.Col,
-				Start: s.off, End: s.end, Severity: unusedSup.severity,
-				Rule: r.Name, Code: r.Code,
-				Message: "suppression comment does not suppress anything (" + s.what + ")",
-			})
+			if ctx.Err() != nil {
+				break
+			}
+			if limits[r.Name] = opt.MaxPerFile; opt.MaxPerFile == 0 {
+				limits[r.Name] = a.maxPerFile
+			}
+			var out []*diag.Diagnostic
+			pass := &Pass{
+				Ctx: ctx, File: parsed.Tok, Tree: parsed.Tree, Env: parsed.Env,
+				Unit: u, Index: query, LibPath: u.LibPath,
+				Config: l.project.Config, Options: a.options, Format: l.format.With(set.Format),
+				shared: shared, registry: l.registry, rule: r, severity: a.severity, out: &out,
+			}
+			running = r.Name
+			r.Run(pass)
+			running = ""
+			shared.ran[r.Name] = true
+			for _, d := range out {
+				switch {
+				case late:
+					ds = append(ds, *d)
+				case r.CompiledOnly && guessed(parsed.Tree, d.Start):
+					stats.guessed++
+				case shared.sup.suppressed(d.Rule, d.Line):
+					stats.suppressed++
+				default:
+					ds = append(ds, *d)
+				}
+			}
 		}
 	}
 	for i := range ds {

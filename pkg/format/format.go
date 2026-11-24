@@ -24,8 +24,9 @@
 //
 // There is one style and three settings (indentation with tabs or
 // spaces, its width, line endings); see docs/design/dgdfmt.md for why.
-// A comment `dgdfmt: off` turns the formatter off until `dgdfmt: on`, and
-// Lines formats only part of a file.
+// Between a comment `dgdtools-ignore-start format` and the
+// `dgdtools-ignore-end format` that answers it (pkg/directive) nothing is
+// touched, and Lines formats only part of a file.
 //
 // Style: KNF as practiced in DGD-era LPC. Function definitions get their
 // specifiers and return type on one line, the name at column 0, and the

@@ -25,11 +25,11 @@ func TestSkipMarkers(t *testing.T) {
 	in := strings.Join([]string{
 		"void f() {",
 		"x=1;",
-		"        /* dgdfmt: off */",
+		"        /* dgdtools-ignore-start format */",
 		"  exits = ([ \"north\" : \"/room/hall\",",
 		"             \"south\" : \"/room/yard\",   ]);",
 		"   if(x){y=1;}",
-		"        // dgdfmt: on",
+		"        // dgdtools-ignore-end format",
 		"y=2;",
 		"}",
 		"",
@@ -39,11 +39,11 @@ func TestSkipMarkers(t *testing.T) {
 		"f()",
 		"{",
 		"    x = 1;",
-		"    /* dgdfmt: off */",
+		"    /* dgdtools-ignore-start format */",
 		"  exits = ([ \"north\" : \"/room/hall\",",
 		"             \"south\" : \"/room/yard\",   ]);",
 		"   if(x){y=1;}",
-		"        // dgdfmt: on",
+		"        // dgdtools-ignore-end format",
 		"    y = 2;",
 		"}",
 		"",
@@ -52,24 +52,32 @@ func TestSkipMarkers(t *testing.T) {
 	assert.Equal(t, want, fmtSrc(t, want, Options{}))
 
 	// Without an "on" the rest of the file is kept, its end included.
-	in = "int   a;\n/* dgdfmt:off */\nint   b;\nvoid f() {\n}\n\n\n"
-	assert.Equal(t, "int a;\n/* dgdfmt:off */\nint   b;\nvoid f() {\n}\n\n\n", fmtSrc(t, in, Options{}))
+	in = "int   a;\n/* dgdtools-ignore-start format: a table */\nint   b;\nvoid f() {\n}\n\n\n"
+	assert.Equal(t, "int a;\n/* dgdtools-ignore-start format: a table */\nint   b;\nvoid f() {\n}\n\n\n", fmtSrc(t, in, Options{}))
 	// At the top it is the whole file.
-	in = "// dgdfmt: off\nint   a;\nvoid f() {\n}\n"
+	in = "// dgdtools-ignore-start format\nint   a;\nvoid f() {\n}\n"
 	assert.Equal(t, in, fmtSrc(t, in, Options{}))
 
 	// On the line of a statement, the marker acts from where it stands.
-	in = "int   a;   /* dgdfmt: off */   int   b;\nint   c; /* dgdfmt: on */ int   d;\n"
-	assert.Equal(t, "int a;   /* dgdfmt: off */   int   b;\nint   c; /* dgdfmt: on */ int d;\n", fmtSrc(t, in, Options{}))
+	in = "int   a;   /* dgdtools-ignore-start format */   int   b;\nint   c; /* dgdtools-ignore-end format */ int   d;\n"
+	assert.Equal(t, "int a;   /* dgdtools-ignore-start format */   int   b;\nint   c; /* dgdtools-ignore-end format */ int d;\n", fmtSrc(t, in, Options{}))
 
 	// A comment that only mentions a marker is not one.
-	in = "/* use dgdfmt: off to keep a table */\nint   a;\n/* dgdfmt: offline */\nint   b;\n"
-	assert.Equal(t, "/* use dgdfmt: off to keep a table */\nint a;\n/* dgdfmt: offline */\nint b;\n", fmtSrc(t, in, Options{}))
+	in = "/* use dgdtools-ignore-start format to keep a table */\nint   a;\n/* dgdtools-ignore-starting format */\nint   b;\n"
+	assert.Equal(t, "/* use dgdtools-ignore-start format to keep a table */\nint a;\n/* dgdtools-ignore-starting format */\nint b;\n", fmtSrc(t, in, Options{}))
+
+	// The targets are a list (the linter's may stand beside the
+	// formatter's), an end without targets ends everything, and the form
+	// for one line is not the formatter's.
+	in = "/* dgdtools-ignore-start lint/unformatted, format: laid out by hand */\nint   a;\n/* dgdtools-ignore-end */\nint   b;\n"
+	assert.Equal(t, "/* dgdtools-ignore-start lint/unformatted, format: laid out by hand */\nint   a;\n/* dgdtools-ignore-end */\nint b;\n", fmtSrc(t, in, Options{}))
+	in = "/* dgdtools-ignore format */\nint   a;\n/* dgdtools-ignore-start lint/unformatted */\nint   b;\n"
+	assert.Equal(t, "/* dgdtools-ignore format */\nint a;\n/* dgdtools-ignore-start lint/unformatted */\nint b;\n", fmtSrc(t, in, Options{}))
 
 	// The code after a skipped region is laid out from the right state:
 	// the brackets opened in it count.
-	in = "void\nf()\n{\n    x = foo(a,\n/* dgdfmt: off */\n  b,\n/* dgdfmt: on */\nc);\n}\n"
-	assert.Equal(t, "void\nf()\n{\n    x = foo(a,\n        /* dgdfmt: off */\n  b,\n/* dgdfmt: on */\n        c);\n}\n", fmtSrc(t, in, Options{}))
+	in = "void\nf()\n{\n    x = foo(a,\n/* dgdtools-ignore-start format */\n  b,\n/* dgdtools-ignore-end format */\nc);\n}\n"
+	assert.Equal(t, "void\nf()\n{\n    x = foo(a,\n        /* dgdtools-ignore-start format */\n  b,\n/* dgdtools-ignore-end format */\n        c);\n}\n", fmtSrc(t, in, Options{}))
 }
 
 const legacy = `void create() {
@@ -138,8 +146,8 @@ func TestLinesFollowTheFile(t *testing.T) {
 }
 
 func TestLinesAndSkipMarkers(t *testing.T) {
-	in := "int   a;\n/* dgdfmt: off */\nint   b;\n/* dgdfmt: on */\nint   c;\n"
-	assert.Equal(t, "int   a;\n/* dgdfmt: off */\nint   b;\n/* dgdfmt: on */\nint c;\n", fmtLines(t, in, Options{}, LineRange{3, 5}))
+	in := "int   a;\n/* dgdtools-ignore-start format */\nint   b;\n/* dgdtools-ignore-end format */\nint   c;\n"
+	assert.Equal(t, "int   a;\n/* dgdtools-ignore-start format */\nint   b;\n/* dgdtools-ignore-end format */\nint c;\n", fmtLines(t, in, Options{}, LineRange{3, 5}))
 }
 
 func TestEdits(t *testing.T) {

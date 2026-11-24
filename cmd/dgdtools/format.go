@@ -31,8 +31,9 @@ Each file is formatted by its own settings: the format: section of the
 dgdtools.yml files above it, then .editorconfig. With --check or --diff
 nothing is written.
 
-A comment "dgdfmt: off" keeps everything as it is until "dgdfmt: on".
---lines and --changed format only part of a file.
+A comment "dgdtools-ignore-start format" keeps everything as it is until
+"dgdtools-ignore-end format". --lines and --changed format only part of
+a file.
 
 Every result is proven before it is used: it has the same tokens as the
 source, and formatting it again changes nothing. A file that does not

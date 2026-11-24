@@ -242,15 +242,17 @@ else is decided:
 ### Leaving code alone
 
 ```c
-/* dgdfmt: off */
+/* dgdtools-ignore-start format */
 mapping exits = ([ "north" : "/room/hall",
                    "south" : "/room/yard",   ]);
-/* dgdfmt: on */
+/* dgdtools-ignore-end format */
 ```
 
-A comment that says `dgdfmt: off` (and nothing else) keeps every byte
-after it as written, until a comment that says `dgdfmt: on`, or to the
-end of the file. Either comment form works.
+Every byte between the two comments stays as written; without the
+second, to the end of the file. Either comment form works, and a reason
+may follow a colon (`/* dgdtools-ignore-start format: a table */`).
+[Comments for the tools](#comments-for-the-tools) has the whole
+grammar.
 
 ### Formatting part of a file
 
@@ -392,12 +394,13 @@ guessed. A file outside the root gets the file-local rules only.
 | S002 | `no-effect-statement` | warning | comparison used as a statement (`x == 1;`) |
 | S003 | `sscanf-format` | warning | more variables than `%`-conversions |
 | S004 | `unreachable-code` | off | statement directly after `return`/`break`/`continue`/`goto` |
+| S005 | `invalid-suppression` | warning | a `dgdtools-ignore` comment that cannot be followed (unknown rule, nothing named, an end without a start) |
 | C001 | `raw-inherit-path` | off | inherit using a literal path where the lib mandates macros |
 | C002 | `missing-visibility` | off | function with no visibility specifier |
 | C003 | `unformatted` | off | file that `dgdtools format` would change |
 | C004 | `static-autosave-var` | off | `static` global in an object that saves itself (`conventions.autosave_markers`) |
 | C005 | `unresolved-inherit` | off | inherit path the macro evaluator could not resolve (info) |
-| C006 | `unused-suppression` | off | a `dgdlint:` comment that suppresses nothing |
+| C006 | `unused-suppression` | off | a `dgdtools-ignore` comment for a finding that is not there |
 
 The `E` rules are things the DGD compiler rejects: an object with one does
 not load. They were checked against DGD 1.7.9 compiling a 108,000-file
@@ -422,17 +425,46 @@ and per directory with a settings scope (`root: false`, above).
 
 ### Suppressing a finding
 
-From any comment, by rule name or code:
+By rule name or code, in a comment on the line of the finding or on the
+line above it:
+
+```c
+x = "a" "b";                 /* dgdtools-ignore lint/adjacent-strings */
+
+/* dgdtools-ignore lint/callable-not-found: the daemon defines it at boot */
+"/sys/d"->late();
+
+/* dgdtools-ignore-start lint/lifecycle-chain, lint/R001 */
+...
+/* dgdtools-ignore-end lint/lifecycle-chain, lint/R001 */
+```
+
+`lint` alone, without a rule, is every rule on that one line. A range
+names its rules: there is no comment that turns everything off from
+here on. A comment that cannot be followed (a misspelled rule, a range
+without rules, an end without a start) is itself a finding,
+`invalid-suppression`, on by default; `unused-suppression` (off by
+default) reports the ones that are no longer needed.
+
+### Comments for the tools
+
+One prefix, `dgdtools-ignore`, addresses every part of the tool, and what
+is to be ignored follows it:
 
 ```
-/* dgdlint:disable-next-line callable-not-found */
-/* dgdlint:disable-line rule-a,rule-b */
-/* dgdlint:disable rule-a */   ... /* dgdlint:enable */
+dgdtools-ignore TARGETS [: reason]         one line of code
+dgdtools-ignore-start TARGETS [: reason]   from here ...
+dgdtools-ignore-end [TARGETS]              ... to here (no targets: everything)
+
+TARGETS   lint/RULE, ...   a lint rule, by name or code
+          lint             every lint rule (one line only)
+          format           the formatter (ranges only)
 ```
 
-File-scoped `disable` requires an explicit rule list. (Comments address
-the part of dgdtools they are for: `dgdlint:` the linter, `dgdfmt:` the
-formatter.)
+A comment is a directive when it begins with the prefix; a comment that
+merely mentions it is prose. The plain form is about the line of code it
+stands on, or the next line when it stands alone. `grep -rn
+dgdtools-ignore` finds every exemption in a lib.
 
 ### Conditional assignments
 

@@ -12,12 +12,12 @@ create()
 
 no_spec_fn()
 {
-    /* missing-visibility when enabled; dgdlint:disable-next-line makes
+    /* missing-visibility when enabled; a dgdtools-ignore comment makes
        line-scoped suppression testable on the following definition */
     return 0;
 }
 
-/* dgdlint:disable-next-line missing-visibility */
+/* dgdtools-ignore lint/missing-visibility */
 suppressed_fn()
 {
     return 0;

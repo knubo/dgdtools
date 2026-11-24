@@ -134,16 +134,16 @@ func TestOptInRulesAndSuppression(t *testing.T) {
 	assert.Contains(t, got, "missing-visibility messy.c:13")
 	assert.Contains(t, got, "raw-inherit-path messy.c:1")
 	assert.Contains(t, got, "unresolved-inherit broken.c:4")
-	assert.NotContains(t, got, "missing-visibility messy.c:21", "disable-next-line suppresses")
+	assert.NotContains(t, got, "missing-visibility messy.c:21", "the comment above it suppresses")
 	for _, k := range got {
 		assert.NotContains(t, k, "missing-visibility thing.c", "public counts as a specifier")
 		assert.NotContains(t, k, "unused-suppression", "the one suppression comment is used")
 	}
 	assert.Equal(t, 1, res.Stats.Suppressed)
 
-	// With the rule off, the same comment suppresses nothing.
+	// With the rule off, whether the comment is needed cannot be told.
 	res = run(t, minilibProject(t), vfs.OS{}, lint.Request{Options: lint.Options{Enable: []string{"unused-suppression"}}})
-	assert.Contains(t, keys(res.Diagnostics), "unused-suppression messy.c:20")
+	assert.NotContains(t, strings.Join(keys(res.Diagnostics), "\n"), "unused-suppression")
 }
 
 func TestRuleSelection(t *testing.T) {

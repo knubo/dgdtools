@@ -200,10 +200,10 @@ func relLines(out, base string) []string {
 }
 
 func TestFormatSkipMarkers(t *testing.T) {
-	src := "int   a;\n/* dgdfmt: off */\nint   table;\n/* dgdfmt: on */\nint   b;\n"
+	src := "int   a;\n/* dgdtools-ignore-start format */\nint   table;\n/* dgdtools-ignore-end format */\nint   b;\n"
 	code, out, _ := dgdtools(t, src, "format", "--no-config", "-")
 	assert.Equal(t, 0, code)
-	assert.Equal(t, "int a;\n/* dgdfmt: off */\nint   table;\n/* dgdfmt: on */\nint b;\n", out)
+	assert.Equal(t, "int a;\n/* dgdtools-ignore-start format */\nint   table;\n/* dgdtools-ignore-end format */\nint b;\n", out)
 }
 
 func TestFormatLines(t *testing.T) {
