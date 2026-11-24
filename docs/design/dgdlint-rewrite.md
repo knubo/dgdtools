@@ -492,7 +492,7 @@ only make sense when `#include`d elsewhere show as failing; its
 | include-not-found | 5,561 | 5,561 | 0 |
 | bad-directive | 1,858 | 1,858 | 0 |
 | inherit-after-declaration | 1,517 | 1,517 | 0 |
-| missing-parameter-type | 11,414 | 11,414 | 0 |
+| missing-parameter-type | 11,415 | 11,415 | 0 |
 | return-value | 13,601 | 13,601 | 0 |
 | **any syntax-group rule** | **30,643** | **30,643** | **0** |
 
@@ -532,10 +532,10 @@ by `TestCorpusLint`.
 
 | Rule | Old | New | Why |
 |---|---|---|---|
-| syntax-error, adjacent-strings, legacy-closure, declaration-initializer, declaration-after-statement, bad-directive, inherit-after-declaration, missing-parameter-type, return-value | 0 | 5,792 / 31,172 / 13,468 / 5,271 / 74 / 1,995 / 1,533 / 34,242 / 98,750 | new |
-| callable-not-found | 2,609 | 2,697 | −1,185: files the old scanner mis-read (function "missing" that is defined after a syntax error) are now unknown. +1,320: macro receivers (`D_FOO->fn()`), and `"/path"->fn()` no longer excused by the target's inheritors. |
+| syntax-error, adjacent-strings, legacy-closure, declaration-initializer, declaration-after-statement, bad-directive, inherit-after-declaration, missing-parameter-type, return-value | 0 | 5,781 / 31,176 / 13,468 / 5,274 / 74 / 1,995 / 1,533 / 34,245 / 98,757 | new |
+| callable-not-found | 2,609 | 2,693 | −1,189: files the old scanner mis-read (function "missing" that is defined after a syntax error) are now unknown. +1,320: macro receivers (`D_FOO->fn()`), and `"/path"->fn()` no longer excused by the target's inheritors. |
 | undefined-prototype | 1,724 | 857 | −819: old false positives of the same kind (`my_find_player` "never defined", defined 200 lines below a syntax error). |
-| target-object-missing | 10,889 | 7,024 | −4,908: old resolved `"obj/x"` relative to the referencing file (`/obj/obj/diploma`); DGD resolves from the root. Also `inherit ROOM "/forest"` mis-read as a label. +1,052: macro receivers. |
+| target-object-missing | 10,889 | 7,025 | −4,907: old resolved `"obj/x"` relative to the referencing file (`/obj/obj/diploma`); DGD resolves from the root. Also `inherit ROOM "/forest"` mis-read as a label. +1,052: macro receivers. |
 | callback-arity | 1,362 | 2,479 | macro receivers and direct object targets |
 | static-crossobj | 44 | 69 | macro receivers |
 | include-not-found | 6,630 | 6,424 | −214: old appended `.c` to extensionless include names (`"…/DEFINES"`); includes in undecided branches. |
@@ -545,7 +545,7 @@ by `TestCorpusLint`.
 | sscanf-format, static-autosave-var, raw-inherit-path, unresolved-inherit, missing-visibility | 28 / 68 / 633 / 2,976 / 335,743 | 27 / 68 / 633 / 2,860 / 336,464 | essentially unchanged |
 
 Late-bound call sites with a known receiver: 6.5% (old) → 22.5% (new;
-126,198 of 562,043).
+126,200 of 562,067).
 
 ### 9.4 Tests
 

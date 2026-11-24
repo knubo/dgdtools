@@ -484,7 +484,8 @@ static void create() {
 // so a self-call there proves nothing about any one object.
 func TestAutoObjectSelfCallsAreUnknown(t *testing.T) {
 	prj, m := memProject(map[string]string{
-		"sys/auto.c":  "inherit \"/sys/timer\";\nvoid a() { this_object()->reset(); }\n",
+		"sys/auto.c":  "inherit \"/sys/timer\";\n#include \"/sys/part.c\"\nvoid a() { this_object()->reset(); }\n",
+		"sys/part.c":  "void p() { this_object()->init(); }\n",
 		"sys/timer.c": "void tick() { this_object()->heart_beat(); call_out(\"heart_beat\", 1); }\n",
 		"obj/leaf.c":  "void f() { this_object()->nowhere(); }\n",
 	})

@@ -831,10 +831,15 @@ func (p *parser) parseStmt() (s Stmt) {
 		opaque := p.opaque && len(p.errs) == nerr
 		p.opaque = false
 		eof := p.sync(start, false)
-		if p.i <= start {
+		// Guarantee progress, but never by eating the '}' that closes
+		// the enclosing block: `if (x) y(); else }` is one error, not a
+		// missing brace as well. (The block loop handles the '}'.)
+		if p.i <= start && p.kind() != token.RBrace {
 			p.i = start + 1
 		}
-		p.markResume()
+		if p.i > start {
+			p.markResume()
+		}
 		last := p.prevIdx()
 		if !p.abort {
 			for _, e := range p.errs[nerr:] {

@@ -193,6 +193,8 @@ func TestErrors(t *testing.T) {
 		{"bad mapping", "mapping m() { return ([ \"bronze\" : , ]); }", []string{"unexpected ','"}},
 		{"trailing comma in call", body("foo(a,);"), []string{"unexpected ')'"}},
 		{"arrow without call", body("x = ob->name;"), []string{"expected '(' after '->name'"}},
+		{"else before brace", "void f() {\n if (x)\n  g();\n else\n}\nint h() { return 1 }\n", []string{"5:1 unexpected '}'", "6:19 missing ';'"}},
+		{"if before brace", "void f() {\n while (x) {\n  if (y)\n }\n z();\n}\nint h() { return 1 }\n", []string{"4:2 unexpected '}'", "7:19 missing ';'"}},
 		{"else without if", body("else x = 1;"), []string{"'else' without a matching 'if'"}},
 		{"missing close brace", "void f() {\n if (x) {\n  y();\n}\n", []string{"missing '}' to close '{' opened on line 1"}},
 		{"nested function", "void f() {\n if (x) {\n  y();\n\nstatic int g(int a) {\n return a;\n}\nvoid h() { z() }\n",

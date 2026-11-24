@@ -232,12 +232,19 @@ func (ix *Index) AutoFuncs() map[string]ChainFunc {
 	return ix.autoFuncs
 }
 
-// inAutoChain reports whether libPath is an auto object or one of the
-// programs an auto object is built from.
+// inAutoChain reports whether libPath is an auto object, one of the
+// programs an auto object inherits, or a file one of those #includes as
+// code.
 func (ix *Index) inAutoChain(libPath string) bool {
 	for _, auto := range ix.Cfg.Lint.AutoObjects {
 		for _, o := range ix.Chain(NormalizeLibPath(auto, "/")).Objects {
 			if o == libPath {
+				return true
+			}
+			ix.mu.Lock()
+			included := ix.incUsers[libPath][o]
+			ix.mu.Unlock()
+			if included {
 				return true
 			}
 		}
