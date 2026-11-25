@@ -214,6 +214,7 @@ type capabilities struct {
 	progress            bool // window/workDoneProgress
 	links               bool // a definition as LocationLinks
 	hoverMarkdown       bool // a hover as Markdown
+	hierarchy           bool // an outline as DocumentSymbols
 	// What a signature may carry: its documentation as Markdown, its
 	// parameters as offsets in the label, its own active parameter.
 	signatureMarkdown, labelOffsets, signatureActive bool
@@ -384,6 +385,18 @@ func (s *server) request(ctx context.Context, method string, params json.RawMess
 			return nil, err
 		}
 		result, err = s.signatureHelp(ctx, &p)
+	case "textDocument/documentSymbol":
+		var p DocumentSymbolParams
+		if err := unmarshal(params, &p); err != nil {
+			return nil, err
+		}
+		result, err = s.documentSymbol(ctx, &p)
+	case "workspace/symbol":
+		var p WorkspaceSymbolParams
+		if err := unmarshal(params, &p); err != nil {
+			return nil, err
+		}
+		result, err = s.workspaceSymbol(ctx, &p)
 	case "textDocument/formatting":
 		var p DocumentFormattingParams
 		if err := unmarshal(params, &p); err != nil {
@@ -512,6 +525,7 @@ func (s *server) initialize(params json.RawMessage) (any, error) {
 		progress:        c.Window.WorkDoneProgress,
 		links:           c.TextDocument.Definition.LinkSupport,
 		hoverMarkdown:   slices.Contains(c.TextDocument.Hover.ContentFormat, Markdown),
+		hierarchy:       c.TextDocument.DocumentSymbol.HierarchicalDocumentSymbolSupport,
 	}
 	si := &c.TextDocument.SignatureHelp.SignatureInformation
 	s.caps.signatureMarkdown = slices.Contains(si.DocumentationFormat, Markdown)
@@ -554,6 +568,8 @@ func (s *server) initialize(params json.RawMessage) (any, error) {
 	// when one is closed, which may leave the cursor in another's.
 	res.Capabilities.SignatureHelpProvider = &SignatureHelpOptions{
 		TriggerCharacters: []string{"(", ","}, RetriggerCharacters: []string{")"}}
+	res.Capabilities.DocumentSymbolProvider = true
+	res.Capabilities.WorkspaceSymbolProvider = true
 	res.Capabilities.DocumentFormattingProvider = true
 	res.Capabilities.DocumentRangeFormattingProvider = true
 	if c.TextDocument.CodeAction.CodeActionLiteralSupport != nil {

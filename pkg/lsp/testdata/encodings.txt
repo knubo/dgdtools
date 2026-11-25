@@ -26,6 +26,8 @@ exit
 <     "definitionProvider": true,
 <     "hoverProvider": true,
 <     "signatureHelpProvider": {"triggerCharacters": ["(", ","], "retriggerCharacters": [")"]},
+<     "documentSymbolProvider": true,
+<     "workspaceSymbolProvider": true,
 <     "documentFormattingProvider": true,
 <     "documentRangeFormattingProvider": true,
 <     "workspace": {

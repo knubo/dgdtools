@@ -36,6 +36,9 @@ type Snapshot struct {
 	base    *lazy[*baseState]
 	auto    *lazy[*autoState]
 	chains  *table[*Chain]
+	// symbols is where a search by name looks, once the whole lib has
+	// been scanned. It is not passed on.
+	symbols *lazy[*symbolTable]
 	// isFile remembers what exists. It is not passed on: the next
 	// generation looks again at whatever it still needs.
 	isFile *table[bool]
@@ -49,7 +52,7 @@ func newSnapshot(ix *Index, gen uint64, ext *extent) *Snapshot {
 		lib: ix.lib, ix: ix, gen: gen, ext: ext,
 		headers: newMemo[*header](), units: newMemo[*Unit](),
 		base: &lazy[*baseState]{}, auto: &lazy[*autoState]{},
-		chains: &table[*Chain]{}, isFile: &table[bool]{}, failed: map[string]string{},
+		chains: &table[*Chain]{}, symbols: &lazy[*symbolTable]{}, isFile: &table[bool]{}, failed: map[string]string{},
 	}
 }
 

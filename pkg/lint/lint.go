@@ -378,6 +378,15 @@ func (d *Document) Signature(off uint32) *resolve.SignatureHelp {
 	return d.resolver.Signature(off)
 }
 
+// Symbols lists the declarations of the document, for an outline of it
+// (the document's resolve.Resolver's Symbols).
+func (d *Document) Symbols() []resolve.Symbol {
+	if d.resolver == nil {
+		return nil
+	}
+	return d.resolver.Symbols()
+}
+
 // Linter lints one project. It is safe for concurrent use.
 type Linter struct {
 	project *config.Project

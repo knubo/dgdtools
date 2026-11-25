@@ -85,6 +85,9 @@ type InitializeParams struct {
 			Hover struct {
 				ContentFormat []string `json:"contentFormat"`
 			} `json:"hover"`
+			DocumentSymbol struct {
+				HierarchicalDocumentSymbolSupport bool `json:"hierarchicalDocumentSymbolSupport"`
+			} `json:"documentSymbol"`
 			SignatureHelp struct {
 				SignatureInformation struct {
 					DocumentationFormat  []string `json:"documentationFormat"`
@@ -123,6 +126,8 @@ type ServerCapabilities struct {
 	DefinitionProvider              bool                    `json:"definitionProvider"`
 	HoverProvider                   bool                    `json:"hoverProvider"`
 	SignatureHelpProvider           *SignatureHelpOptions   `json:"signatureHelpProvider,omitempty"`
+	DocumentSymbolProvider          bool                    `json:"documentSymbolProvider"`
+	WorkspaceSymbolProvider         bool                    `json:"workspaceSymbolProvider"`
 	DocumentFormattingProvider      bool                    `json:"documentFormattingProvider"`
 	DocumentRangeFormattingProvider bool                    `json:"documentRangeFormattingProvider"`
 	Workspace                       struct {
@@ -390,6 +395,35 @@ type SignatureInformation struct {
 // reads offsets (labelOffsetSupport), else as its text.
 type ParameterInformation struct {
 	Label any `json:"label"`
+}
+
+type DocumentSymbolParams struct {
+	TextDocument TextDocumentIdentifier `json:"textDocument"`
+}
+
+// DocumentSymbol is a declaration in the outline of a document: Range
+// is the whole of it and SelectionRange its name.
+type DocumentSymbol struct {
+	Name           string           `json:"name"`
+	Detail         string           `json:"detail,omitempty"`
+	Kind           int              `json:"kind"`
+	Range          Range            `json:"range"`
+	SelectionRange Range            `json:"selectionRange"`
+	Children       []DocumentSymbol `json:"children,omitempty"`
+}
+
+// SymbolInformation is a declaration found by its name: what
+// workspace/symbol answers with, and textDocument/documentSymbol for a
+// client that does not read DocumentSymbols.
+type SymbolInformation struct {
+	Name          string   `json:"name"`
+	Kind          int      `json:"kind"`
+	Location      Location `json:"location"`
+	ContainerName string   `json:"containerName,omitempty"`
+}
+
+type WorkspaceSymbolParams struct {
+	Query string `json:"query"`
 }
 
 type DocumentFormattingParams struct {

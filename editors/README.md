@@ -246,6 +246,12 @@ and what it formats is what `dgdtools format` writes. What it does:
   delay, ...)` the arguments that are passed on are `fn`'s. It works
   while the line is half written. A call on an unknown receiver has
   none.
+- **Symbols**: the outline of a file (its inherit statements, by the
+  object inherited, its functions, global variables and macros), and
+  the search for a name in the whole lib: the functions and variables
+  of its objects and the macros of its headers that have the letters
+  you type, in their order, the closest match first. With a profile
+  the names of the profile's stubs are found too, and say so.
 
 It keeps a log when asked to: `dgdtools lsp --log /tmp/dgdtools-lsp.log`,
 and with `--trace` every message in both directions. It never writes to
@@ -274,7 +280,9 @@ the client attached, `:lua vim.diagnostic.setqflist()` lists the
 findings, `gra` (or `:lua vim.lsp.buf.code_action()`) offers the fixes
 and the comments, `:lua vim.lsp.buf.format()` formats, and `gq` formats
 a selection; `CTRL-]` goes to a definition, `K` shows the hover, and
-`CTRL-S` in insert mode the signature of the call being written. To
+`CTRL-S` in insert mode the signature of the call being written; `gO`
+lists the outline, and `:lua vim.lsp.buf.workspace_symbol()` asks for a
+name to find in the lib. To
 format on save:
 
 ```lua
@@ -313,8 +321,9 @@ nvim -u NONE \
 screen: it runs the server under the `nvim` on `PATH`, waits for the
 diagnostics of a file, mends one finding by typing and one by the
 server's fix, and has the file formatted. `TestNeovimDefinition` goes
-to definitions the same way, and `TestNeovimHover` reads what `K` and
-`CTRL-S` show.
+to definitions the same way, `TestNeovimHover` reads what `K` and
+`CTRL-S` show, and `TestNeovimSymbols` lists the outline and searches
+the lib.
 
 ### Vim
 

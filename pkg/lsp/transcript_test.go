@@ -42,6 +42,8 @@ var update = flag.Bool("update", false, "rewrite the transcripts in testdata")
 //	definition FILE L:C          textDocument/definition
 //	hover FILE L:C               textDocument/hover
 //	signature FILE L:C           textDocument/signatureHelp
+//	symbols FILE                 textDocument/documentSymbol
+//	find QUERY                   workspace/symbol
 //	text FILE                    the editor's text
 //	write FILE "TEXT" | remove FILE         on disk
 //	watched created|changed|deleted FILE ...
@@ -310,6 +312,17 @@ func (p *player) play(script string) string {
 			params := lsp.DefinitionParams{TextDocument: lsp.TextDocumentIdentifier{URI: lsptest.URI(p.path(arg[0]))}, Position: pos}
 			var result json.RawMessage
 			method := map[string]string{"definition": "textDocument/definition", "hover": "textDocument/hover", "signature": "textDocument/signatureHelp"}[cmd]
+			if err := c.Call(method, params, &result); err != nil {
+				p.show(err.Error())
+				break
+			}
+			p.show(result)
+		case "symbols", "find":
+			method, params := "workspace/symbol", any(lsp.WorkspaceSymbolParams{Query: rest})
+			if cmd == "symbols" {
+				method, params = "textDocument/documentSymbol", lsp.DocumentSymbolParams{TextDocument: lsp.TextDocumentIdentifier{URI: lsptest.URI(p.path(arg[0]))}}
+			}
+			var result json.RawMessage
 			if err := c.Call(method, params, &result); err != nil {
 				p.show(err.Error())
 				break

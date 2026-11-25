@@ -2,8 +2,9 @@
 
 Status: a plan, of which the first three steps of section 12 are built:
 the editor-side grammars of section 10.1, under `editors/`; the server
-itself for steps 1 to 5 of section 8 (live diagnostics, code actions,
-formatting, go to definition, hover and signature help), as
+itself for steps 1 to 6 of section 8 (live diagnostics, code actions,
+formatting, go to definition, hover and signature help, the outline of a
+document and the search for a name in the lib), as
 `dgdtools lsp` and `pkg/lsp`; and the
 VS Code client of
 section 11, in `editors/vscode`, which has been built and checked but
@@ -88,6 +89,7 @@ is absolute.
 | `actions.go` | `textDocument/codeAction`, `formatting`, `rangeFormatting` |
 | `definition.go` | `textDocument/definition`: `lint.Document.Resolve`'s answer as links or locations |
 | `hover.go` | `textDocument/hover` and `textDocument/signatureHelp`: `lint.Document.Hover`'s and `Signature`'s answers laid out as Markdown or plain text |
+| `symbols.go` | `textDocument/documentSymbol` and `workspace/symbol`: `lint.Document.Symbols`' outline and `index.Snapshot.FindSymbols`' matches as the protocol's symbols |
 | `content.go` | `workspace/textDocumentContent`: the text of a profile's stub |
 | `position.go` | `PositionMapper`, URIs and paths |
 | `protocol.go` | the protocol's types, as far as used (some 60) |
@@ -98,7 +100,8 @@ offers it, else `utf-16`), `textDocumentSync` (open and close,
 incremental changes), `codeActionProvider` (`quickfix`,
 `source.fixAll.dgdtools`; only to a client with code action literals),
 `definitionProvider`, `hoverProvider`, `signatureHelpProvider` (asked
-for at `(` and `,`, and again at `)`),
+for at `(` and `,`, and again at `)`), `documentSymbolProvider`,
+`workspaceSymbolProvider`,
 `documentFormattingProvider`, `documentRangeFormattingProvider`,
 `workspace.workspaceFolders` (with change notifications),
 `workspace.textDocumentContent` for the scheme `dgdtools-profile`. Asked
@@ -112,7 +115,10 @@ much as the server's: `config.DiscoverOptions.Folders` (section 3) and
 step 4 it got `pkg/resolve`, what a place in a file refers to, which the
 server only asks (section 8, "As built, step 4"); for step 5 `pkg/kfun`,
 the driver's kernel functions, and in `pkg/resolve` what there is to
-tell about a place and what a call takes ("As built, step 5").
+tell about a place and what a call takes ("As built, step 5"); for step
+6 the outline of a file (`resolve.Resolver.Symbols`), the search of a
+generation of the index by name (`index.Snapshot.FindSymbols`) and the
+matcher under it (`internal/fuzzy`) ("As built, step 6").
 
 Where what is built is not what the sections below planned, the section
 says so in a paragraph that begins **As built**. In short:
@@ -422,7 +428,7 @@ knows the code base.
 | 3 **built** | `formatting` and `rangeFormatting`; format-on-save of modified lines is the client's use of the latter | `format.Source(prj, path, text, lines)`: a function of the buffer and the file's settings, behind the gate (the same tokens, the same comments, a fixed point; a refusal returns no edits and a log line); `format.Edits(file, out)` gives one text edit per changed gap, so cursors and folds survive | LSP range to line range (a range that ends at column 0 does not include that line) | 2 |
 | 4 **built** | `definition`: `#include` targets, `inherit` paths, function calls (direct, `::`, `label::`, `->` with a known receiver, string callbacks in registrars), macros | `Document.Snapshot` and a `Query` on it: `ResolveInclude`, `ObjectPath`, `Chain`, `LookupCallable`; the file's `pp.Env` (`pp.Macro.Path/Off`) | `syntax.PathAt(file, offset)` (innermost node chain at a position); a stub target is already located by its virtual document URI (`dgdtools-profile://NAME/std/room.c`, see `profile.Location`), which the server answers with the stub's text | 4 |
 | 5 **built** | `hover` and `signatureHelp` | `ChainFunc.Decl/Type/DefinedIn`, `index.Params`, macro body and class, variable types | active-parameter computation from the argument list around the cursor; kfun table for built-ins (new data file) | 3 |
-| 6 | `documentSymbol`, `workspace/symbol` | `syntax.File.Decls`; units' symbol tables (whole-lib scan, cached) | fuzzy matcher | 2 |
+| 6 **built** | `documentSymbol`, `workspace/symbol` | `syntax.File.Decls`; units' symbol tables (whole-lib scan, cached) | fuzzy matcher | 2 |
 | 7 | `completion`: functions callable here (own chain, auto object, kfuns), `->` members for a known receiver, macros in view, `#include` and inherit paths, locals | chain + view + profile | local scopes (block-level symbol tables in `pkg/syntax`); tolerant parse at the cursor (the parser already recovers; completion context comes from tokens left of the cursor) | 5 |
 | 8 | `references` (and `documentHighlight`) | new: a reverse index of call sites and macro uses per name, built with the whole-lib scan and invalidated per file | reverse index in `pkg/index`; in a partial checkout results are labelled as "in this checkout" | 4 |
 | 9 | `semanticTokens` (section 10.2): what a grammar cannot know. Ships in two parts: 9a macros by class, declarations, inherit labels, calls resolved through the chain (no scopes needed); 9b parameters/locals and unresolved names | tree + view + chain | 9b needs scopes (from 7) | 9a: 2, 9b: 2 |
@@ -689,6 +695,89 @@ checkout only links to); `->fn` on a receiver the code makes known a
 line earlier (`ob = clone_object("/obj/x")`), which waits for receiver
 flow as the linter does; a hover for locals and parameters (scopes,
 step 7); `signatureHelp` in the arguments of a function pointer.
+
+**As built, step 6.** Two answers of the library's, and
+`pkg/lsp/symbols.go` their protocol.
+
+```go
+for _, sym := range doc.Symbols() {   // []resolve.Symbol, in the order of the file
+    sym.Kind, sym.Name                // Object (an inherit), Function, Variable, Macro
+    sym.Detail                        // "static int (string what)", "private int *", "inherit side", "#define (x)"
+    sym.Start, sym.End                // the whole declaration
+    sym.NameStart, sym.NameEnd        // its name
+}
+
+snap := l.Index().Snapshot()
+snap.Scan(ctx)                                  // the whole lib; without it, what was read so far
+syms, more := snap.FindSymbols("set_sh", 200)   // []index.Symbol, the best first
+sym.Kind, sym.Name, sym.Loc                     // function, variable, macro; the file and the offset of the name
+sym.In, sym.Stub, sym.Score                     // "/std/room" or "/include/std.h"; from a profile's stub
+```
+
+**The outline** (`textDocument/documentSymbol`) is the declarations of
+the document as the tree and the preprocessor have them, in the order
+they stand:
+
+| declaration | name | detail | kind |
+|---|---|---|---|
+| an `inherit` statement | the object inherited, by its lib path however the statement writes it (`inherit ROOM;` is `/std/room`); the text as written when it does not resolve | `inherit`, `private inherit`, with the label | `Class`: the inherited program is the nearest thing LPC has to one |
+| a function, its definition and each prototype | its name; `operator+` for an operator | specifiers, return type and parameters: `static varargs int (int when, string why...)` | `Function` |
+| a global variable, each declarator | its name | specifiers and type: `private static int *` | `Variable` |
+| a `#define` the preprocessor reads | its name | `#define`, with the parameters of a macro that has them | `Constant` |
+
+The range of a symbol is the whole declaration (a function's with its
+body, a directive's line and its continuations), the selection range
+the name, of an inherit statement the path. Of several declarators in
+one declaration each has its own. There is one level: LPC nests no
+declarations, and locals and parameters are not listed (clangd,
+gopls and rust-analyzer list none either). What an included file
+declares is that file's; a `#define` in a branch that is skipped is not
+read and not listed; what did not parse is not there. A client that
+says `hierarchicalDocumentSymbolSupport` gets `DocumentSymbol`s;
+another gets `SymbolInformation`, which has no detail and no selection
+range. A document with nothing in it has `[]`, one nothing is said about
+`null`.
+
+**The search** (`workspace/symbol`) is over the functions and global
+variables of the lib's objects, from the units' symbol tables, and the
+macros of the headers the generation has read; a macro a `.c` file
+defines for itself is that file's and not searched. It needs the units
+of the whole lib, which is the scan the linter's "who inherits this"
+makes: `FindSymbols` searches what the generation has, and the server
+runs `Snapshot.Scan` first when the lib is not scanned yet, for two
+seconds at most; a scan cut short keeps what it read, so the next query
+goes on from there, and a query in between is answered from what is
+indexed. Once the scan is complete the list of units and header tables
+is kept with the generation (and made again by the next one; the units
+themselves are shared across generations as ever). There is no table of
+names beside the units: a search walks their tables, 50 ms on a lib of
+108,000 files.
+
+Matching is `internal/fuzzy`, some 60 lines: the letters typed, in
+their order, in either case. A name scores by how they are found: it is
+what was typed, begins with it, has it, or has its letters, and one
+more when the case is the case typed, so that `ROOM` finds the macro
+before the function. Within a score a shorter name comes first, then
+the name, then the file. That is gopls' and rust-analyzer's behavior
+seen from outside (a subsequence, smart about case, the tighter match
+first) without their scoring tables. An empty query finds nothing, as
+in gopls: the first two hundred names of a lib are nobody's question.
+The answer has at most 200 (`MaxWorkspaceSymbols`), the best.
+
+Each symbol is a `SymbolInformation` with the range of the name, in the
+text the generation reads (the buffer of an open file: a name being
+typed is found as typed), and as `containerName` the object that
+declares it (`/std/room`) or the header (`/include/std.h`). In a
+partial checkout the scan covers the checkout, and the profile's stubs
+are searched with it (`index.Layout.StubFiles`; a file of the checkout
+stands before the stub of its name): what a stub declares is at the
+stub's URI, and its container says `/std/room (profile NAME)`. The
+libs searched are those of the open documents and of the workspace
+folders, each once.
+
+Not built: `workspaceSymbol/resolve` (a location has its range at
+once); objects as symbols (an editor finds a file by its name);
+several words in a query.
 
 Steps 1 to 3 (9 days) are the "useful every day" milestone: live
 diagnostics, fixes, formatting. Steps 4 to 6 (9 days) make it a
@@ -1440,7 +1529,7 @@ network.
    a release packs it for each platform with the binary inside (11.2),
    and publishes it nowhere until the owner says where.
 4. `syntax.PathAt`; steps 4 to 6 (9 days); then semantic tokens 9a (2
-   days), which needs only what hover needs. **Steps 4 and 5 are done**
+   days), which needs only what hover needs. **Steps 4 to 6 are done**
    (section 8), and the kfun table of the next item with them.
 5. Scopes and kfun table in the library (also unlock linter rules:
    undeclared variable, undefined function, argument counts); step 7 and
@@ -1618,6 +1707,31 @@ grammars alone can ship in the first.
   `TestCorpusResolve` and `TestCorpusResolvePartial` are as they were,
   but for one `::destruct_object()` in what the auto object is made
   of, which is the driver's and no longer the auto object's own.
+- **As built, symbols (step 6).** `TestScore` (`internal/fuzzy`). In
+  `pkg/index`: `TestFindSymbols` (what is found before and after the
+  scan, the order of the matches, a function a header gives two
+  objects, the cap, the next generation) and `TestFindSymbolsInStubs`
+  (a checkout with stubs, a file of the checkout before the stub of its
+  name, no lib). In `pkg/resolve`: `TestSymbols` (every kind of
+  declaration, prototypes, several declarators, a macro over two lines
+  and one defined twice, what is skipped or did not parse, a header)
+  and `TestSymbolsOperator`. In `pkg/lsp`:
+  `TestDocumentSymbolIsResolve` holds the server's outline to the
+  library's for every file of a lib, in both encodings and both forms;
+  `TestWorkspaceSymbol` (positions in both encodings behind characters
+  of several bytes, an open document searched as the editor has it,
+  the cap), `TestWorkspaceSymbolInStubs`, `TestSymbolsOfNothing`; the
+  transcript `symbols.txt`. In `editors`: `TestNeovimSymbols`, the
+  `nvim` on `PATH` listing `vim.lsp.buf.document_symbol()` and
+  `workspace_symbol()`. On the corpus, `TestCorpusSymbols` lists the
+  outline of 2,004 files of the VikingMUD lib (7,472 functions, 1,972
+  inherit statements, 1,184 variables, 585 macros; 1.8 µs a file, 0.2
+  ms the slowest) and holds each to the file and to the index: every
+  function and variable the unit has of the file itself is in the
+  outline at its place. Then it scans the lib (4.7 s) and searches it:
+  41 to 119 ms a query, 48 ms on average over 400 names of the sample,
+  each of which is the first of its results; every symbol found is
+  held to the text at its place.
 - **Edit fuzzing** (`go test -fuzz`): start from a corpus file, apply a
   random sequence of range edits through incremental sync while applying
   the same edits to a plain string; after each step the server's buffer
@@ -1740,6 +1854,13 @@ Each with the alternative it was chosen over.
   called function's signature**, not the registrar's `mixed...`: that
   is the function being written to. The registrar's own arguments show
   its own.
+- **An outline has one level**, and an inherit statement is in it
+  under the object it inherits: that is what the file is made of.
+- **A search by name walks the units**, with no table of names of its
+  own: the units are there, shared across generations, and a table
+  would be a second copy of every name to rebuild at each change.
+- **Fuzzy matching is a subsequence and four ranks**, not a scoring
+  model: what gopls and rust-analyzer do as far as a user can tell.
 
 - **The VS Code extension is published under the repository owner's
   account**, to both the Visual Studio Marketplace and Open VSX (so

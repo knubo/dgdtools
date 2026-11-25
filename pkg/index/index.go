@@ -67,6 +67,10 @@ type Layout struct {
 	// Stubs+"/std/room.c". Empty without a profile. A file on disk always
 	// wins over its stub.
 	Stubs string
+	// StubFiles are the lib files the stubs are of ("/std/room.c"), for
+	// what looks through all of them: a search by name, the listing of a
+	// directory. Nothing else needs them: a stub is found by its name.
+	StubFiles []string
 	// Covered are lib directory prefixes ("/std/") the stubs describe
 	// completely, except for paths matching the Holes globs.
 	Covered []string
@@ -146,6 +150,7 @@ func Open(prj *config.Project, fsys vfs.FS) *Index {
 		stubs := profile.NewFS(fsys, p)
 		fsys = stubs
 		lay.Stubs, lay.Covered, lay.Holes = stubs.Location(), p.Covered, p.Holes
+		lay.StubFiles = slices.Sorted(maps.Keys(p.Files))
 	}
 	return New(prj.Config, lay, fsys)
 }

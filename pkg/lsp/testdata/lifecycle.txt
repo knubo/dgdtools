@@ -48,6 +48,8 @@ exit
 <     "definitionProvider": true,
 <     "hoverProvider": true,
 <     "signatureHelpProvider": {"triggerCharacters": ["(", ","], "retriggerCharacters": [")"]},
+<     "documentSymbolProvider": true,
+<     "workspaceSymbolProvider": true,
 <     "documentFormattingProvider": true,
 <     "documentRangeFormattingProvider": true,
 <     "workspace": {
@@ -188,7 +190,17 @@ exit
 < }
 < {"diagnostics": [], "uri": "file://$ROOT/lib/obj/a.c"}
 > request workspace/symbol {"query":"f"}
-< "jsonrpc2: code -32601 message: no method workspace/symbol"
+< [
+<   {
+<     "name": "f",
+<     "kind": 12,
+<     "location": {
+<       "uri": "file://$ROOT/lib/obj/a.c",
+<       "range": {"start": {"line": 0, "character": 5}, "end": {"line": 0, "character": 6}}
+<     },
+<     "containerName": "/obj/a"
+<   }
+< ]
 > shutdown
 < null
 > request textDocument/formatting {"textDocument":{"uri":"file:///nowhere.c"}}

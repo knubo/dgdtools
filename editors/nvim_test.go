@@ -368,3 +368,88 @@ func TestNeovimHover(t *testing.T) {
 	}, shown)
 	assert.NotContains(t, log, "level=ERROR")
 }
+
+// nvimSymbols is Neovim listing symbols as a user does: the outline of
+// the buffer (vim.lsp.buf.document_symbol, gO) and the names of the
+// workspace that match a query (vim.lsp.buf.workspace_symbol), each as
+// the list Neovim makes of the answer.
+const nvimSymbols = `
+local dir, out = vim.env.DGDLPC_DIR, { outline = {}, found = {} }
+local ok, err = pcall(function()
+  vim.opt.runtimepath:prepend(vim.env.DGDLPC_NVIM)
+  vim.opt.runtimepath:prepend(vim.env.DGDLPC_VIM)
+  vim.cmd('filetype plugin indent on')
+  vim.lsp.config('dgdtools', { cmd = { vim.env.DGDLPC_BIN, 'lsp', '--log', dir .. '/lsp.log' } })
+  vim.lsp.enable('dgdtools')
+  vim.cmd('edit ' .. vim.fn.fnameescape(dir .. '/lib/obj/a.c'))
+  local function wait(what, cond)
+    assert(vim.wait(20000, cond, 20), 'waited in vain for ' .. what)
+  end
+  wait('the server', function()
+    local c = vim.lsp.get_clients({ bufnr = 0 })[1]
+    return c ~= nil and c.initialized
+  end)
+  local caps = vim.lsp.get_clients({ bufnr = 0 })[1].server_capabilities
+  out.document, out.workspace = caps.documentSymbolProvider, caps.workspaceSymbolProvider
+
+  -- Neovim works out the column of a name in another file from the
+  -- line of that number in this one: only the outline's are told.
+  local function list(into, cols)
+    local done = false
+    return function(o)
+      for _, item in ipairs(o.items) do
+        local at = cols and string.format('%d:%d', item.lnum, item.col) or tostring(item.lnum)
+        table.insert(into, string.format('%s:%s %s', item.filename:sub(#dir + 2), at, item.text))
+      end
+      done = true
+    end, function() return done end
+  end
+  local on_list, done = list(out.outline, true)
+  vim.lsp.buf.document_symbol({ on_list = on_list })
+  wait('the outline', done)
+  for _, query in ipairs({ 'weight', 'BASE' }) do
+    on_list, done = list(out.found)
+    vim.lsp.buf.workspace_symbol(query, { on_list = on_list })
+    wait('the symbols for ' .. query, done)
+  end
+end)
+if not ok then out.error = tostring(err) end
+vim.fn.writefile({ vim.json.encode(out) }, dir .. '/result.json')
+vim.cmd('qall!')
+`
+
+// TestNeovimSymbols has the Neovim on PATH list the outline of a file
+// and search the lib for names through the language server, with
+// characters of several bytes before the names.
+func TestNeovimSymbols(t *testing.T) {
+	files := map[string]string{
+		"lib/dgdtools.yml":  "include_dirs: [/include]\n",
+		"lib/include/std.h": "/* blåbær \U0001F600 */ #define BASE \"/std/base\"\n",
+		"lib/std/base.c":    "/* grøt */ int weight;\nvarargs void set_weight(int grams, string why...) {}\nvoid create() {}\n",
+		"lib/obj/a.c": "#include <std.h>\n#define TWICE(x) ((x) + (x))\ninherit BASE;\nprivate int count;\n" +
+			"/* først \U0001F600 */ void create() { ::create(); set_weight(TWICE(1)); }\n",
+	}
+	_, data, log := nvimRun(t, files, nvimSymbols)
+	var got struct {
+		Error               string
+		Document, Workspace bool
+		Outline, Found      []string
+	}
+	require.NoError(t, json.Unmarshal(data, &got), "%s", data)
+	require.Empty(t, got.Error, "the server's log:\n%s", log)
+	assert.True(t, got.Document)
+	assert.True(t, got.Workspace)
+	// Neovim's columns are 1-based bytes, and it says the kind in words.
+	assert.Equal(t, []string{
+		"lib/obj/a.c:2:9 [Constant] TWICE",
+		"lib/obj/a.c:3:9 [Class] /std/base",
+		"lib/obj/a.c:4:13 [Variable] count",
+		"lib/obj/a.c:5:24 [Function] create",
+	}, got.Outline)
+	assert.Equal(t, []string{
+		"lib/std/base.c:1 [Variable] weight in /std/base",
+		"lib/std/base.c:2 [Function] set_weight in /std/base",
+		"lib/include/std.h:1 [Constant] BASE in /include/std.h",
+	}, got.Found)
+	assert.NotContains(t, log, "level=ERROR")
+}

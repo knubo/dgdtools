@@ -767,8 +767,8 @@ file read per edit, and findings identical to the whole-lib run's.
 
 Described in [lsp.md](lsp.md): a thin layer, `pkg/lsp` behind the
 `dgdtools lsp` subcommand, holding one `session.Session`. Diagnostics,
-code actions, formatting, go to definition, hover and signature help
-are built; the rows below them are planned.
+code actions, formatting, go to definition, hover, signature help and
+symbols are built; the rows below them are planned.
 What it maps onto:
 
 | LSP feature | Maps onto |
@@ -780,7 +780,8 @@ What it maps onto:
 | `textDocument/definition` | `Document.Resolve(off)`, which is `pkg/resolve` on the document: the token at the offset as a `Ref` (what it names: the file of an `#include`, the object of an `inherit` or of a path argument, a label, a function, a global variable, a macro) and its `Defs`, the declarations it resolves to through `ResolveInclude`, `ObjectFile`, `Snapshot.Chain` (functions and variables; `::` and `label::` calls), `AutoFunc`, the receivers `pkg/calls` knows (`->`, `call_other`, the registrars' callbacks) and the file's `pp.Env` (`Definition`). Each `Def` has the file, the range of the declared name and the index's facts (`FuncInfo`, `VarInfo`, `pp.Macro`); a declaration in a profile stub is at `dgdtools-profile://NAME/std/room.c`. What cannot be proved has no `Def` ([lsp.md](lsp.md) section 8). |
 | `textDocument/hover` | `Document.Hover(off)`: the `Ref` of the place and an `Info` for each of its `Defs`, with the declaration as LPC (`FuncInfo.Decl`, a variable's type, a macro's `#define` and class), the comment directly above it (`resolve.Comment`, in the text `Snapshot.ReadFile` gives) and where it is (`Origin`: the file's name in the lib and the line, the auto object, a profile). A function of the driver's is told from the project's kfun table (`Config.Kfuns`: `pkg/kfun` and `dialect.kfuns`), where the whole program is known; a call whose receiver is unknown is told as that. |
 | `textDocument/signatureHelp` | `Document.Signature(off)`: the innermost call whose arguments the offset is in, read from the tokens left of it (`pp.Selection.Sig`), so that it is there while the statement does not parse; the callee resolved as for a definition (`Chain`, `AutoFunc`, the kfun table, a receiver that is `this_object()` or a constant path, the arguments a `calls.Registry` form passes on); each declaration with its parameters' places in it (`index.ParamSpans`) and the one the argument is for. |
-| `textDocument/documentSymbol`, `workspace/symbol` | `syntax.File.Decls`; the units' symbol tables. |
+| `textDocument/documentSymbol` | `Document.Symbols()`: the file's inherit statements, functions, global variables and `#define`s in the order they stand (`syntax.File.Decls`, the directives the preprocessor reads), each with its detail and the ranges of the declaration and of its name. |
+| `workspace/symbol` | `Snapshot.FindSymbols(query, limit)`: the functions and variables in the units' symbol tables and the macros of the headers read, matched by `internal/fuzzy`, the best first; the whole lib after `Snapshot.Scan`, and a profile's stubs in a partial checkout (`Layout.StubFiles`). |
 | `textDocument/formatting`, `rangeFormatting` | `format.Source(prj, path, text, lines)`, a function of the buffer and the file's settings; `format.Edits` for the reply. |
 | `textDocument/rename` | `pkg/rename`, to be written: one engine for the editor and for `dgdtools rename` ([lsp.md](lsp.md) section 9). |
 

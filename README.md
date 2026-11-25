@@ -578,7 +578,10 @@ to definition (the header of an `#include`, the object of an `inherit`,
 the function of a call, a macro's `#define`, a global variable), a
 hover with the declaration, the comment above it and where it is, and
 signature help in the arguments of a call, for the lib's functions and
-for the driver's kfuns alike. Where the tools cannot know (a call on an
+for the driver's kfuns alike. It lists the outline of a file (inherits,
+functions, variables, macros) and finds a function, a variable or a
+header's macro anywhere in the lib by a few letters of its name. Where
+the tools cannot know (a call on an
 object held in a variable) they say so, or nothing, and never guess. It
 reads the same `dgdtools.yml` as the commands, so the editor and the
 command line cannot disagree.
