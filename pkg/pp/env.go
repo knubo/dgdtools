@@ -138,6 +138,28 @@ func (e *Env) Definition(name string) *Macro {
 	return found
 }
 
+// Outside reports whether anything but the file's own directives knows
+// name as a macro: the driver or the project predefines it, the project
+// configures a class for it, or a file read before the file or included
+// by it defines or #undefs it.
+func (e *Env) Outside(name string) bool {
+	if e == nil {
+		return false
+	}
+	if e.defined[name] {
+		return true
+	}
+	if _, ok := e.classes[name]; ok {
+		return true
+	}
+	for _, t := range e.layers {
+		if t.Macros[name] != nil || t.Undefs[name] || t.Unsure[name] {
+			return true
+		}
+	}
+	return false
+}
+
 // Names returns the names that are macros to the file's code, sorted:
 // those a file read defines, but for one the file itself #undefs and
 // leaves undefined, and those the project configures a class for. A

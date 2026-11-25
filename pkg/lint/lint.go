@@ -42,6 +42,7 @@ import (
 	"github.com/mmcdole/dgdtools/pkg/index"
 	"github.com/mmcdole/dgdtools/pkg/kfun"
 	"github.com/mmcdole/dgdtools/pkg/pp"
+	"github.com/mmcdole/dgdtools/pkg/rename"
 	"github.com/mmcdole/dgdtools/pkg/resolve"
 	"github.com/mmcdole/dgdtools/pkg/syntax"
 	"github.com/mmcdole/dgdtools/pkg/token"
@@ -357,6 +358,8 @@ type Document struct {
 
 	stats    fileStats
 	resolver *resolve.Resolver
+	// markers are the project's autosave markers, for rename.
+	markers []string
 
 	tokensOnce sync.Once
 	tokens     []resolve.SemanticToken
@@ -429,6 +432,28 @@ func (d *Document) Highlights(off uint32) []resolve.Site {
 		return nil
 	}
 	return d.resolver.Highlights(off)
+}
+
+// PrepareRename says what can be renamed at byte offset off of the
+// document (rename.Prepare): the symbol and the place of its name, or a
+// *rename.Refusal that says why it cannot be. A symbol other files could
+// name needs the whole-lib scan, which it runs for as long as ctx
+// allows.
+func (d *Document) PrepareRename(ctx context.Context, off uint32) (*rename.Target, error) {
+	if d.resolver == nil {
+		return nil, nil
+	}
+	return rename.Prepare(ctx, rename.File{Resolver: d.resolver, AutosaveMarkers: d.markers}, off)
+}
+
+// Rename plans the renaming of what is named at byte offset off of the
+// document to newName (rename.Rename): the occurrences and the edits, or
+// a *rename.Refusal.
+func (d *Document) Rename(ctx context.Context, off uint32, newName string) (*rename.Plan, error) {
+	if d.resolver == nil {
+		return nil, &rename.Refusal{Reason: "nothing here can be renamed"}
+	}
+	return rename.Rename(ctx, rename.File{Resolver: d.resolver, AutosaveMarkers: d.markers}, off, newName)
 }
 
 // Symbols lists the declarations of the document, for an outline of it
@@ -778,6 +803,7 @@ func (l *Linter) lintFile(ctx context.Context, s *index.Snapshot, file string, s
 	doc.resolver = resolve.New(resolve.File{
 		Tok: parsed.Tok, Tree: parsed.Tree, Env: parsed.Env, Unit: u, Snapshot: s, Registry: l.registry, Kfuns: l.kfuns,
 	})
+	doc.markers = l.project.Config.Conventions.AutosaveMarkers
 	rel, _ := l.project.Tree().Rel(file) // the file's lib-relative name
 	rules, err := sel.rules(file, rel, set)
 	if err != nil {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"path"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/mmcdole/dgdtools/pkg/config"
@@ -24,6 +25,13 @@ func objectFile(libPath string) string { return libPath + ".c" }
 // isStub reports whether p is the location of a profile stub.
 func (l *lib) isStub(p string) bool {
 	return l.lay.Stubs != "" && strings.HasPrefix(p, l.lay.Stubs+"/")
+}
+
+// Shared reports whether a profile has a stub of the lib file libFile
+// ("/std/room.c") beside the checkout's own: the file is one the rest of
+// the lib uses, which a partial checkout cannot see.
+func (l *lib) Shared(libFile string) bool {
+	return slices.Contains(l.lay.StubFiles, libFile)
 }
 
 // clean normalizes a path given by a caller.

@@ -266,6 +266,41 @@ func (s *Snapshot) usersOf(ctx context.Context, libPath string) ([]string, bool)
 	return s.users(libPath)
 }
 
+// Users returns the objects whose program includes libPath's: those
+// that inherit it, however indirectly, and those that #include it as
+// code, sorted. It needs the whole-lib scan and runs it if it has not
+// completed. The second result is false when the answer cannot be had:
+// the scan was cancelled, or the index has moved on to a newer
+// generation. In a partial checkout the answer is the checkout's.
+func (s *Snapshot) Users(ctx context.Context, libPath string) ([]string, bool) {
+	return s.usersOf(ctx, libPath)
+}
+
+// Includers returns the files that #include the file at path (a path on
+// disk), directly or through other files, sorted: those whose facts were
+// built from it. It needs the whole-lib scan and runs it if it has not
+// completed; the second result is false when the answer cannot be had,
+// as for Users.
+func (s *Snapshot) Includers(ctx context.Context, path string) ([]string, bool) {
+	if !s.Scan(ctx) {
+		return nil, false
+	}
+	ix := s.ix
+	ix.mu.RLock()
+	defer ix.mu.RUnlock()
+	if ix.cur != s || !ix.walked || len(ix.todo) > 0 {
+		return nil, false
+	}
+	var out []string
+	for key := range ix.builtFrom[path] {
+		if u, _ := s.units.get(key); u != nil && u.Path != path {
+			out = append(out, u.Path)
+		}
+	}
+	slices.Sort(out)
+	return out, true
+}
+
 // users answers usersOf from the index's reverse edges, which are those
 // of this generation only while it is the current one.
 func (s *Snapshot) users(libPath string) ([]string, bool) {
