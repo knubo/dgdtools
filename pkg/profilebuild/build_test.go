@@ -392,6 +392,24 @@ func TestProfileCarriesTheCreateFunction(t *testing.T) {
 	assert.Equal(t, want, findings(t, part, alone))
 }
 
+// A whole lib whose dgdtools.yml gives the driver settings in a driver:
+// block, with no driver config, builds the same profile.
+func TestProfileFromDriverBlock(t *testing.T) {
+	build := func(m vfs.Mem) *profile.Profile {
+		t.Helper()
+		prj, err := config.Discover(m, []string{"/mud/lib"}, config.DiscoverOptions{})
+		require.NoError(t, err)
+		p, err := profilebuild.Build(context.Background(), prj, m)
+		require.NoError(t, err)
+		return p
+	}
+	m := wholeLib()
+	delete(m, "/mud/etc/mud.dgd")
+	m["/mud/dgdtools.yml"] = strings.Replace(m["/mud/dgdtools.yml"], "driver_config: etc/mud.dgd\n",
+		"driver:\n  include_file: /sys/forced.h\n  include_dirs: [/std/include]\n  auto_object: /sys/auto\n  driver_object: /sys/driver\n  typechecking: 1\n", 1)
+	assert.Equal(t, build(wholeLib()), build(m))
+}
+
 // share_min_owners: files used by that many owners are shared; 0 shares
 // only what share: lists (and what every file needs).
 func TestShareMinOwners(t *testing.T) {
