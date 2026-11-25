@@ -137,7 +137,7 @@ only settings can differ from one directory to the next.
 | `dialect` | `slash_slash`, `closures`, `typechecking` (the driver's level; the rules that depend on it are silent while it is unknown), and `kfuns`: the kernel functions the driver has beyond stock DGD's, those of the extension modules it loads, each as a prototype (`"int *rusage()"`, `"string sha256(string text, varargs int rounds)"`). The editor shows them like the driver's own, which are built in. |
 | `include_dirs`, `include_file`, `auto_objects`, `create`, `driver_object` | What the driver's config says: the include search path, the header included into every file, the object every object inherits, the function a new object is initialized by, and the driver object (whose functions the driver calls by name, which a rename refuses). An include directory without a leading `/` is relative to each including file, as DGD resolves it by default; one that starts with `~` (the kernel library's `~/include`) is the lib's driver object's to place, so an include that may be there is unknown rather than missing. Usually read from `profile_build.driver_config` or the profile; set here they override both (a mudlib whose auto object receives the driver's `create` call and passes it on as another function names that function). |
 | `relative_object_paths` | What `"std/room"` (no leading slash) is relative to. DGD hands every `inherit` and every `call_other("path", …)` to the mudlib's driver object to resolve, so this is the mudlib's choice: `root` (the default, and what the driver's own functions such as `compile_object` do) or `file` (the directory of the file that says it, as in the kernel library). |
-| `conventions` | The mudlib's own habits; nothing here has a default. `specifier_macros: [public]` names empty macros that stand where a specifier does, and `macros: {FOREACH: statement}` says how to read a macro that cannot be classified from its `#define` (`expression`, `empty`, `specifier`, `type`, `string`, `statement`, `opaque`); `defines:` lists names to treat as defined in `#ifdef`. `call_registry`: the mudlib's functions that take the name of a function to call later, each with the argument that names the `function`, optionally the argument that says in which `object` (without it: `this_object()`) and the first of the `args` passed on; a function called in several ways lists its forms. `object_registry`: functions whose string argument is an object path (`compile_object`, `find_object`, `clone_object` are built in). `format_registry`: scanf-style functions and the position of their format string (`sscanf` is built in). `autosave_markers`: names whose mention marks an object as one that saves itself with `save_object`. `virtual_paths`: lib-path globs served by virtual-object daemons. |
+| `conventions` | The mudlib's own habits; nothing here has a default. `specifier_macros: [public]` names empty macros that stand where a specifier does, and `macros: {FOREACH: statement}` says how to read a macro that cannot be classified from its `#define` (`expression`, `empty`, `specifier`, `type`, `string`, `statement`, `opaque`); `defines:` lists names to treat as defined in `#ifdef`. `call_registry`: the mudlib's functions that take the name of a function to call later, each with the argument that names the `function`, optionally the argument that says in which `object` (without it: `this_object()`) and the first of the `args` passed on; a function called in several ways lists its forms (`call_other` and `call_out` are built in). `object_registry`: functions whose string argument is an object path (`compile_object`, `find_object`, `clone_object` are built in). `format_registry`: scanf-style functions and the position of their format string (`sscanf` is built in). `autosave_markers`: names whose mention marks an object as one that saves itself with `save_object`. `virtual_paths`: lib-path globs served by virtual-object daemons. |
 | `profile_build` | For whoever has the whole mudlib: `driver_config` (the DGD driver config), `share` (globs of shared code), `omit` (never put in a profile), `checkouts` (per-wizard tree patterns), `name`. Used by `dgdtools profile build`, and directly when linting the whole mudlib. |
 
 ### Settings
@@ -627,8 +627,8 @@ compiled or that does not parse. They are left unless
 lists those whose constant part the old name begins or ends with.
 
 By default nothing is written: the edits are printed as unified diffs,
-grouped by owner (a wizard's or a domain's tree, by `profile_build`'s
-`checkouts` patterns, `players/*` and `d/*` when none are set; `other`
+grouped by owner when the project has checkout patterns (a wizard's or a
+domain's tree, by `profile_build`'s `checkouts` or the profile's; `other`
 for the rest of the lib), and a summary goes to standard error: the
 counts of each class, the files and edits of each owner, the possible
 places, the warnings. `--write` writes the files, each replaced whole.
@@ -639,19 +639,25 @@ name means (a function, variable or macro already visible where an edit
 lands, a local that would hide the renamed variable, a kfun, a call that
 would reach the renamed function), the function the driver creates
 objects with (`create`) and the driver object's functions the driver
-calls by name (`path_read`, `compile_error`, ...), a symbol defined in a mudlib profile, and a
+calls by name (`path_read`, `compile_error`, ...), whether renamed from
+or to such a name, a symbol defined in a mudlib profile, and a
 variable that `save_object` writes: renamed, the values saved under the
 old name are not restored at the next reboot. `--force` renames that one
 all the same. It warns when an edited file is inherited or included by
-other objects (they keep the program they were compiled with: the rename
-takes effect everywhere at the scheduled reboot) and, in a wizard's
+other objects (they keep the program they were compiled with, and must be
+recompiled for the rename to take effect) and, in a wizard's
 checkout with a profile, that the rest of the mudlib is not renamed.
 
-With a file instead of a symbol, it moves the file:
+With a file or a directory instead of a symbol, it moves it. The file is
+a path on disk from the working directory when there is one, else a
+mudlib path, and the new place is of the same kind (or a name, for the
+same directory):
 
 ```
 dgdtools rename /std/room.c /std/base_room.c       # the diffs, nothing written
 dgdtools rename --write /std/room.c base_room.c    # a name: the same directory
+dgdtools rename lib/std/room.c lib/std/place.c     # paths on disk
+dgdtools rename /d/Ruins /d/Old                    # a directory, every file in it
 ```
 
 Every `inherit`, `#include` and object path that names the file
@@ -660,8 +666,12 @@ was written: from the mudlib root, relative to the file, from an include
 directory; and so are the moved file's own paths that name a file from
 where it was. Each new path is resolved as the driver will once the file
 has moved. A path made by a macro (`inherit ROOM;`) is possible and not
-changed, since the macro is every user's: the summary lists those
-places. `--write` writes the files and moves the file last. In an
+changed, since the macro is every user's, and so is a string that is the
+old path where nothing says it is one (`add_exit("/std/room", ...)`, a
+`#define`): the summary lists those places, and `--include-possible`
+rewrites the strings too. `--write` writes the files and moves the file
+or directory last. The diffs are grouped by owner when the project has
+checkout patterns (`profile_build.checkouts`, or the profile's). In an
 editor, renaming or moving a file or a folder does the same.
 
 Exit codes: `0` the rename is complete (no possible place left), `1`

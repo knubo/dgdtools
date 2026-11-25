@@ -7,6 +7,7 @@ import (
 	"errors"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 	"unicode/utf8"
 
@@ -172,4 +173,26 @@ func TestRenameIsTheLibrarys(t *testing.T) {
 		t.Logf("%s: %d places, %d to rename, %d refused, %d plans that edit other files, %d with possible edits",
 			c.Encoding, places, targets, refused, across, possible)
 	}
+}
+
+// A rename whose edits land in a file on disk that is not UTF-8 says so:
+// the edits are right for an editor that reads it as Latin-1.
+func TestRenameSaysNotUTF8(t *testing.T) {
+	files := resolveLib()
+	dir := tree(t, files)
+	c := start(t)
+	c.Initialize(lsptest.Capabilities{}, dir)
+	path := filepath.Join(dir, "obj", "a.c")
+	text := files["obj/a.c"]
+	c.Open(path, text)
+	off := strings.Index(text, "l::old") + len("l::o")
+	var edit *lsp.WorkspaceEdit
+	require.NoError(t, c.Call("textDocument/rename", lsp.RenameParams{
+		TextDocument: lsp.TextDocumentIdentifier{URI: lsptest.URI(path)},
+		Position:     lsptest.PositionOf(text, off, c.Encoding), NewName: "older"}, &edit))
+	require.NotNil(t, edit)
+	c.Idle()
+	shown := c.Received("window/showMessage")
+	require.NotEmpty(t, shown)
+	assert.Contains(t, string(shown[len(shown)-1].Params), "1 edited file is not valid UTF-8 (/std/latin.c)")
 }

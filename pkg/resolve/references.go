@@ -82,6 +82,9 @@ func (r *Resolver) uses() []index.Use {
 	for _, d := range r.calls().Dynamic {
 		u := index.Use{Name: index.DynamicName, Start: d.Start, End: d.End, Kind: index.UseDynamic,
 			Aux: d.Prefix + "*" + d.Suffix}
+		if d.Macro != "" {
+			u.Aux = d.Name
+		}
 		r.place(&u)
 		out = append(out, u)
 	}

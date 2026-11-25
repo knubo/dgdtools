@@ -42,12 +42,13 @@ void save() { save_object("/data/x"); }
 -- script --
 initialize lib
 open lib/obj/monster.c
+received window/logMessage
 prepare lib/obj/monster.c 3:9
 rename lib/obj/monster.c 3:9 f
 open lib/std/living.c
 prepare lib/std/living.c 3:5
 rename lib/obj/monster.c 3:9 query_short
-received window/showMessage
+received window/logMessage
 shutdown
 exit
 -- transcript --
@@ -102,6 +103,8 @@ exit
 <   "serverInfo": {"name": "dgdtools", "version": "test"}
 < }
 > open lib/obj/monster.c
+> received window/logMessage
+< {"message": "project $ROOT/lib/dgdtools.yml: mudlib $ROOT/lib", "type": 3}
 > prepare lib/obj/monster.c 3:9
 < {
 <   "range": {"start": {"line": 3, "character": 7}, "end": {"line": 3, "character": 17}},
@@ -203,10 +206,10 @@ exit
 | int hp;\n
 | \n
 | string query_short() { return \"living \" + ::query_short(); }\n
-> received window/showMessage
+> received window/logMessage
 < {
-<   "message": "rename query_name to query_short: 1 other place may be the renamed function and nobody can tell: it is in the preview, not ticked; edits in base files: /std/base.c (3 objects inherit it), /std/living.c (2 objects inherit it); an object keeps the program it was compiled with, so the rename needs the scheduled reboot to take effect everywhere",
-<   "type": 2
+<   "message": "rename function query_name to query_short: 1 place may be the renamed function, and nobody can tell: it is in the preview, not ticked: /obj/monster.c:8 (a call on an object nobody can tell, which may be one that has it); edits in base files: /std/base.c (3 objects inherit it), /std/living.c (2 objects inherit it): an object keeps the program it was compiled with, so the objects that inherit or include them must be recompiled for the rename to take effect",
+<   "type": 3
 < }
 > shutdown
 < null

@@ -10,6 +10,7 @@ import (
 	"github.com/mmcdole/dgdtools/pkg/config"
 	"github.com/mmcdole/dgdtools/pkg/fileset"
 	"github.com/mmcdole/dgdtools/pkg/pp"
+	"github.com/mmcdole/dgdtools/pkg/token"
 )
 
 // A file has two names. Its lib path is what LPC code calls it:
@@ -101,6 +102,9 @@ func (s *Snapshot) Covers(libPath string) bool {
 	}
 	return false
 }
+
+// Dialect returns the dialect the lib's files are lexed in.
+func (l *lib) Dialect() token.Dialect { return l.dialect }
 
 // IsVirtual reports whether libPath is served by a virtual-object daemon.
 func (l *lib) IsVirtual(libPath string) bool {

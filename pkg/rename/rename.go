@@ -248,7 +248,10 @@ func Rename(ctx context.Context, f File, off uint32, newName string) (*Plan, err
 			err = rn.planMacro(plan)
 		}
 	default:
-		if err = rn.valid(t.Symbol, newName); err == nil {
+		if err = rn.valid(t.Symbol, newName); err == nil && t.Kind == resolve.Function {
+			err = rn.calledByName(newName, rn.unit != nil && rn.unit.LibPath == rn.driver)
+		}
+		if err == nil {
 			err = rn.planNames(plan)
 		}
 	}

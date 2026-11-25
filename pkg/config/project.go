@@ -68,16 +68,16 @@ type Project struct {
 // disk, or part of it is and a profile or a lib path places it.
 func (prj *Project) HasLib() bool { return prj.Root != "" || prj.Partial }
 
-// NoLib says why cross-file analysis is not possible, and how to make it
-// so; "" when it is (HasLib).
+// NoLib says why there is no mudlib to analyze across files, and how to
+// give one; "" when there is (HasLib).
 func (prj *Project) NoLib() string {
 	switch {
 	case prj.HasLib():
 		return ""
 	case prj.ConfigPath == "":
-		return "no dgdtools.yml and no --root: running file-local rules only (cross-file rules need a mudlib root)"
+		return "no dgdtools.yml, and no --root (or --profile and --lib-path for a checkout)"
 	}
-	return fmt.Sprintf("%s does not say where the mudlib is (root:, profile: or lib_path:): running file-local rules only (`root: .` makes its directory the mudlib's /)", prj.ConfigPath)
+	return fmt.Sprintf("%s does not say where the mudlib is (root:, profile: or lib_path:; `root: .` makes its directory the mudlib's /)", prj.ConfigPath)
 }
 
 // Inputs returns the files the project was resolved from: its config

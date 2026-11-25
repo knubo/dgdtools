@@ -17,6 +17,14 @@
 // session.Session, which also keeps the unsaved buffers and replaces a
 // linter when its project's configuration changes. Fixes are returned as
 // text edits on diagnostics and are never applied here.
+//
+// It is also the front ends' one door to the analysis: a Linter owns the
+// project's index, and the Document a lint returns carries what the
+// packages below answer of that file (Resolve, Hover, References,
+// Complete, Tokens, PrepareRename and Rename, over pkg/resolve and
+// pkg/rename), so that a command and the editor server ask the same
+// questions of the same generation. There is no separate "analysis"
+// package; this is it.
 package lint
 
 import (
@@ -621,7 +629,7 @@ func (l *Linter) Run(ctx context.Context, req Request) (*Result, error) {
 	res := &Result{Generation: s.Generation()}
 	res.Notes = append(res.Notes, prj.Notes...)
 	if !prj.HasLib() {
-		res.Notes = append(res.Notes, diag.Note{Kind: diag.NoteNoLib, Message: prj.NoLib()})
+		res.Notes = append(res.Notes, diag.Note{Kind: diag.NoteNoLib, Message: prj.NoLib() + ": running file-local rules only (cross-file rules need a mudlib root)"})
 	}
 	// Rule names and the baseline are checked once, up front.
 	sel, err := l.selection(&req.Options)

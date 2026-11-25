@@ -10,11 +10,14 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/mmcdole/dgdtools/internal/par"
 	"github.com/mmcdole/dgdtools/pkg/fileset"
 	"github.com/mmcdole/dgdtools/pkg/index"
+	"github.com/mmcdole/dgdtools/pkg/lexer"
 	"github.com/mmcdole/dgdtools/pkg/pp"
 	"github.com/mmcdole/dgdtools/pkg/resolve"
 	"github.com/mmcdole/dgdtools/pkg/syntax"
+	"github.com/mmcdole/dgdtools/pkg/token"
 )
 
 // Move is a file or a directory of the lib that moves (is renamed), by
@@ -201,12 +204,17 @@ func Files(ctx context.Context, snap *index.Snapshot, moves []Move) (*Plan, erro
 			plan.Edits = append(plan.Edits, *e)
 		}
 	}
+	if err := fm.strings(ctx, plan, units); err != nil {
+		return nil, err
+	}
 	slices.SortFunc(plan.Occurrences, func(x, y Occurrence) int {
 		return cmp.Or(cmp.Compare(x.Path, y.Path), cmp.Compare(x.Start, y.Start))
 	})
-	slices.SortFunc(plan.Edits, func(x, y Edit) int {
+	byPlace := func(x, y Edit) int {
 		return cmp.Or(cmp.Compare(x.Path, y.Path), cmp.Compare(x.Start, y.Start))
-	})
+	}
+	slices.SortFunc(plan.Edits, byPlace)
+	slices.SortFunc(plan.PossibleEdits, byPlace)
 	fm.warn(ctx, plan)
 	if !snap.Current() {
 		return nil, refuse("files changed while the move was being planned: try again")
@@ -280,16 +288,26 @@ func literal(src []byte, start, end uint32) (cs, ce uint32, open byte, ok bool) 
 // be written so that it does.
 func (fm *fileMover) rewrite(u *index.Unit, use index.Use, src []byte) (*Occurrence, *Edit) {
 	snap := fm.snap
-	var target string // the file named, on disk
+	var target string // the file named: on disk, or a profile's stub
 	if use.Kind == index.UseInclude {
 		target = use.Name
 	} else {
-		target = filepath.Clean(snap.ObjectFile(use.Name))
+		target = snap.ObjectFile(use.Name) // a stub's is a URI, not to be cleaned
 	}
 	here, there := u.Path, fm.moved(u.Path)
 	newTarget := fm.moved(target)
 	if here == there && target == newTarget {
 		return nil, nil
+	}
+	cs, ce, open, ok := literal(src, use.Start, use.End)
+	if target == newTarget && use.Kind == index.UseObject {
+		// Only the file that names it moves: an object path names the
+		// same object from anywhere, unless the lib resolves one without
+		// a leading slash from the file that says it.
+		fromFile := snap.ObjectPath("x", "/d/f") != "/x"
+		if !fromFile || ok && strings.HasPrefix(string(src[cs:ce]), "/") {
+			return nil, nil
+		}
 	}
 	o := &Occurrence{Path: here, Start: use.Start, End: use.End, Line: use.Line, Col: use.Col}
 	possible := func(reason string) (*Occurrence, *Edit) {
@@ -300,7 +318,6 @@ func (fm *fileMover) rewrite(u *index.Unit, use index.Use, src []byte) (*Occurre
 	if newLib == "" {
 		return possible(fmt.Sprintf("names %s, which moves out of the mudlib", fm.name(target)))
 	}
-	cs, ce, open, ok := literal(src, use.Start, use.End)
 	if !ok {
 		what := "an expression"
 		if text := strings.TrimSpace(string(src[use.Start:use.End])); isName(text) {
@@ -317,7 +334,7 @@ func (fm *fileMover) rewrite(u *index.Unit, use index.Use, src []byte) (*Occurre
 		resolves := func(raw string) bool {
 			c := pp.Include{Name: raw[1 : len(raw)-1], Angle: raw[0] == '<'}
 			p, ok := snap.ResolveIncludeIf(there, c, fm.exists)
-			return ok && filepath.Clean(p) == newTarget
+			return ok && p == newTarget // both clean, and a stub's URI must stay one
 		}
 		if resolves(inc.Raw()) {
 			return nil, nil
@@ -387,6 +404,107 @@ func (fm *fileMover) rewrite(u *index.Unit, use index.Use, src []byte) (*Occurre
 		}
 	}
 	return possible(fmt.Sprintf("no path written as this one names %s from %s", newObj, fm.name(there)))
+}
+
+// strings adds the string literals of the lib that are a moved object's
+// path and that no occurrence covers: the path from the lib's root, with
+// or without ".c", and without its leading slash when the lib resolves
+// such a path from its root. A lib names its rooms and objects that way
+// in calls the index does not know take a path (add_exit("/room/church",
+// ...)), and in the bodies of macros. Each is Possible, with the edit
+// that names the new place in the same form.
+func (fm *fileMover) strings(ctx context.Context, plan *Plan, units []*index.Unit) error {
+	snap := fm.snap
+	fromRoot := snap.ObjectPath("x", "/d/f") == "/x"
+	type form struct{ old, new string }
+	var forms []form
+	var needles [][]byte
+	for _, m := range plan.Moves {
+		if filepath.Ext(m.From) != ".c" || filepath.Ext(m.To) != ".c" {
+			continue
+		}
+		oldObj, newObj := snap.LibPath(m.From), snap.LibPath(m.To)
+		if oldObj == "" || newObj == "" {
+			continue
+		}
+		for _, ext := range []string{"", ".c"} {
+			forms = append(forms, form{`"` + oldObj + ext + `"`, newObj + ext})
+			if fromRoot {
+				forms = append(forms, form{`"` + oldObj[1:] + ext + `"`, newObj[1:] + ext})
+			}
+		}
+		needles = append(needles, []byte(oldObj[1:]))
+	}
+	if len(forms) == 0 {
+		return nil
+	}
+	covered := map[string][][2]uint32{}
+	for _, o := range plan.Occurrences {
+		covered[o.Path] = append(covered[o.Path], [2]uint32{o.Start, o.End})
+	}
+	isCovered := func(path string, start, end uint32) bool {
+		for _, r := range covered[path] {
+			if r[0] < end && start < r[1] {
+				return true
+			}
+		}
+		return false
+	}
+	type found struct {
+		occ  []Occurrence
+		edit []Edit
+	}
+	results := make([]found, len(units))
+	idx := make([]int, len(units))
+	for i := range idx {
+		idx[i] = i
+	}
+	dialect := snap.Dialect()
+	par.Each(ctx, idx, func(i int) {
+		u := units[i]
+		src, err := snap.ReadFile(u.Path)
+		if err != nil || !slices.ContainsFunc(needles, func(n []byte) bool { return bytes.Contains(src, n) }) {
+			return
+		}
+		f := lexer.Lex(u.Path, src, dialect)
+		for _, t := range f.Tokens {
+			if t.Kind != token.StringLit && t.Kind != token.Directive {
+				continue
+			}
+			text := f.Text(t)
+			for _, fo := range forms {
+				for k := 0; ; {
+					j := bytes.Index(text[k:], []byte(fo.old))
+					if j < 0 {
+						break
+					}
+					start := t.Off + uint32(k+j) + 1 // inside the quotes
+					end := start + uint32(len(fo.old)) - 2
+					k += j + len(fo.old)
+					if t.Kind == token.StringLit && len(text) != len(fo.old) || isCovered(u.Path, start, end) {
+						continue
+					}
+					pos := f.Pos(start)
+					where := "a string"
+					if t.Kind == token.Directive {
+						where = "a string in a directive"
+					}
+					results[i].occ = append(results[i].occ, Occurrence{Path: u.Path, Start: start, End: end,
+						Line: uint32(pos.Line), Col: uint32(pos.Col), Class: Possible,
+						Reason: fmt.Sprintf("%s equal to the old path, not known to be an object path", where)})
+					results[i].edit = append(results[i].edit, Edit{Path: u.Path, Start: start, End: end, NewText: fo.new})
+				}
+			}
+		}
+	})
+	if ctx.Err() != nil {
+		return refuse("cancelled before every file was searched")
+	}
+	for _, r := range results {
+		plan.Occurrences = append(plan.Occurrences, r.occ...)
+		plan.PossibleEdits = append(plan.PossibleEdits, r.edit...)
+	}
+	return nil
 }
 
 // relPath returns the slash-separated path target relative to dir,
@@ -472,6 +590,6 @@ func (fm *fileMover) warn(ctx context.Context, plan *Plan) {
 	}
 	if len(bases) > 0 {
 		plan.Warnings = append(plan.Warnings, "moved base files: "+strings.Join(bases, ", ")+
-			"; an object keeps the program it was compiled with, so the move takes effect everywhere at the scheduled reboot")
+			": an object keeps the program it was compiled with, so the objects that inherit them must be recompiled for the move to take effect")
 	}
 }

@@ -157,8 +157,8 @@ func TestRenameFunctionAcross(t *testing.T) {
 	assert.Contains(t, got, "possible /lib/obj/dead.c:4:5 in code that is not compiled here (a branch of #if that is not taken)")
 	assert.Contains(t, got, "excluded /lib/obj/other.c:1:8 names the function 'query_name' (/obj/other.c)")
 	assert.Contains(t, got, "excluded /lib/obj/caller.c:4:19 names the function 'query_name' (/obj/other.c)")
-	assert.Contains(t, got, "! edits in base files: /std/base.c (5 objects inherit it), /std/living.c (4 objects inherit it); an object keeps")
-	assert.Contains(t, got, "needs the scheduled reboot to take effect everywhere")
+	assert.Contains(t, got, "! edits in base files: /std/base.c (5 objects inherit it), /std/living.c (4 objects inherit it): an object keeps")
+	assert.Contains(t, got, "must be recompiled for the rename to take effect")
 	assert.Contains(t, got, "? /lib/obj/caller.c:6 do_* false\n")
 	assert.Contains(t, got, "? /lib/obj/caller.c:7 * false\n")
 
@@ -240,7 +240,7 @@ func TestRenameMacroAcross(t *testing.T) {
 	got := w.renamed("/lib/std/living.c", "hp = MAX|_HP", "HP_MAX", false, false)
 	assert.Equal(t, "== /lib/include/hp.h\n#define HP_MAX 100\n== /lib/std/living.c\n"+
 		strings.Replace(wideLib()["/lib/std/living.c"], "MAX_HP", "HP_MAX", 1)+
-		"-- certain 2, possible 0, excluded 0\n! edits in base files: /std/living.c (4 objects inherit it), /include/hp.h (1 file includes it); an object keeps the program it was compiled with, so the rename needs the scheduled reboot to take effect everywhere\n", got)
+		"-- certain 2, possible 0, excluded 0\n! edits in base files: /std/living.c (4 objects inherit it), /include/hp.h (1 file includes it): an object keeps the program it was compiled with, so the objects that inherit or include them must be recompiled for the rename to take effect\n", got)
 
 	got = w.renamed("/lib/include/std.h", "#define LIV|ING", "LIVING_OB", false, false)
 	assert.Contains(t, got, "#define LIVING_OB \"/std/living\"")
@@ -313,7 +313,7 @@ func TestRenameDriverCalls(t *testing.T) {
 	w := newWorld(t, vfs.Mem{
 		"/lib/dgdtools.yml": "root: .\ndriver_object: /sys/driver\n",
 		"/lib/sys/base.c":   "string path_read(string p) { return p; }\n",
-		"/lib/sys/driver.c": "inherit \"/sys/base\";\nstring path_write(string p) { return p; }\n",
+		"/lib/sys/driver.c": "inherit \"/sys/base\";\nstring path_write(string p) { return p; }\nvoid helper() {}\n",
 		"/lib/obj/user.c":   "void receive_message(string s) {}\nstring path_write(string p) { return p; }\n",
 		"/lib/obj/other.c":  "string path_read(string p) { return p; }\n",
 	}, "/lib")
@@ -326,6 +326,14 @@ func TestRenameDriverCalls(t *testing.T) {
 	assert.Equal(t, "function path_read \"path_read\"", w.prepare("/lib/obj/other.c", "path_r|ead"))
 	got := w.renamed("/lib/obj/user.c", "receive_m|essage", "receive_text", false, false)
 	assert.Contains(t, got, "! the driver calls 'receive_message' by name in an object that is a connection")
+
+	// Nor is a function renamed to what the driver calls by name: the
+	// create function anywhere, the driver object's in the driver object.
+	assert.Equal(t, "refused: 'create' is the function the driver calls by name to initialize every object (create in the configuration): renamed so, the function is called when an object is made",
+		w.renamed("/lib/obj/other.c", "path_r|ead", "create", false, false))
+	assert.Equal(t, "refused: 'compile_error' is a function the driver calls by name in the driver object (/sys/driver): renamed so, the function is called by the driver",
+		w.renamed("/lib/sys/driver.c", "void hel|per", "compile_error", false, false))
+	assert.NotContains(t, w.renamed("/lib/obj/other.c", "path_r|ead", "compile_error", false, false), "refused", "not the driver object's")
 }
 
 // A macro used in a file an edit lands in, whose body names the new
@@ -340,4 +348,23 @@ func TestClashThroughMacroAcross(t *testing.T) {
 	assert.Equal(t, "refused: the macro DIM, used at /obj/r.c:3, names 'dimness' in its body: it would name the renamed global variable there",
 		w.renamed("/lib/std/room.c", "int li|ght", "dimness", false, false))
 	assert.NotContains(t, w.renamed("/lib/std/room.c", "int li|ght", "glow", false, false), "refused")
+}
+
+// A callback named by a macro whose body is the name as a string is a
+// possible place, at the string in the macro's body; a call whose name is
+// made when it runs is listed where it is.
+func TestRenameCallbackByMacro(t *testing.T) {
+	fs := vfs.Mem{
+		"/lib/dgdtools.yml": "root: .\ninclude_dirs: [/include]\n",
+		"/lib/include/m.h":  "#define NAME_FN \"query_name\"\n#define OTHER_FN \"other\"\n",
+		"/lib/std/living.c": "#include <m.h>\nstring query_name() { return \"x\"; }\n",
+		"/lib/obj/caller.c": "#include <m.h>\ninherit \"/std/living\";\nvoid f(string s) {\n    call_other(this_object(), NAME_FN);\n    call_other(this_object(), OTHER_FN);\n    call_out(s, 1);\n}\n",
+	}
+	w := newWorld(t, fs, "/lib")
+	require.True(t, w.l.Scan(context.Background()))
+	got := w.renamed("/lib/std/living.c", "string query_na|me", "qn", false, true)
+	assert.Contains(t, got, "== /lib/include/m.h\n#define NAME_FN \"qn\"\n#define OTHER_FN \"other\"\n")
+	assert.Contains(t, got, "possible /lib/include/m.h:1:18 the body of the macro NAME_FN, by which /obj/caller.c:4 names it; other places may use the macro too")
+	assert.Contains(t, got, "? /lib/obj/caller.c:6 * false")
+	assert.NotContains(t, got, "macro OTHER_FN")
 }

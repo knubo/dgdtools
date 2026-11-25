@@ -3,7 +3,6 @@ package main
 import (
 	"encoding/json"
 	"path/filepath"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -15,7 +14,7 @@ import (
 // nobody can tell, a variable save_object writes, a header's macro.
 func renameLib() map[string]string {
 	return map[string]string{
-		"lib/dgdtools.yml":               "root: .\ninclude_dirs: [/include]\n",
+		"lib/dgdtools.yml":               "root: .\ninclude_dirs: [/include]\nprofile_build: {checkouts: [\"players/*\", \"d/*\"]}\n",
 		"lib/include/std.h":              "#define LIVING \"/std/living\"\n",
 		"lib/std/living.c":               "#include <std.h>\nint hp;\nstring query_name() { return \"x\"; }\n",
 		"lib/obj/monster.c":              "#include <std.h>\ninherit LIVING;\nstring query_name() { return \"m\"; }\n",
@@ -65,7 +64,7 @@ func TestRenameDiff(t *testing.T) {
 `, out)
 	assert.Contains(t, errs, "rename function query_name to query_short (/std/living.c:3)\n  4 certain, 1 possible, 0 excluded;")
 	assert.Contains(t, errs, "  d/Ruins              1 file, 1 edit\n  players/ann          1 file, 1 edit\n  other                2 files, 2 edits\n")
-	assert.Contains(t, errs, "possible places not renamed (--include-possible renames them):\n    players/ann/pet.c:2:46: a call on an object nobody can tell")
+	assert.Contains(t, errs, "1 place may be the renamed function and is not renamed (--include-possible edits it too):\n    players/ann/pet.c:2:46: a call on an object nobody can tell")
 	assert.Contains(t, errs, "warning: edits in base files: /std/living.c (3 objects inherit it)")
 	assert.Contains(t, errs, "4 files would change (--write writes them)")
 	assert.Equal(t, renameLib()["lib/std/living.c"], read(t, filepath.Join(dir, "lib/std/living.c")))
@@ -186,7 +185,7 @@ func TestRenameErrors(t *testing.T) {
 	t.Chdir(t.TempDir())
 	code, _, errs := dgdtools(t, "", "rename", "/std/living::hp", "y")
 	assert.Equal(t, 2, code)
-	assert.True(t, strings.Contains(errs, "no mudlib"), errs)
+	assert.Contains(t, errs, "a rename needs a mudlib: no dgdtools.yml, and no --root")
 }
 
 // A FILE moves: the diffs of the paths that name it, the macro's place
@@ -211,8 +210,10 @@ func TestRenameMove(t *testing.T) {
 +inherit "/std/being";
  void f(object ob) { write(query_name()); ob->query_name(); }
 `, out)
-	assert.Contains(t, errs, "move /std/living.c to /std/being.c\n  2 certain, 1 possible, 0 excluded;")
-	assert.Contains(t, errs, "possible places not changed (a path made by a macro or an expression):\n    obj/monster.c:2:9: names /std/living.c by the macro LIVING")
+	assert.Contains(t, errs, "move /std/living.c to /std/being.c\n  2 certain, 2 possible, 0 excluded;")
+	assert.Contains(t, errs, "2 places may name a moved file and are not changed (--include-possible edits those it can):\n"+
+		"    include/std.h:1:17: a string in a directive equal to the old path, not known to be an object path\n"+
+		"    obj/monster.c:2:9: names /std/living.c by the macro LIVING")
 	assert.Contains(t, errs, "2 files would change (--write writes them and moves /std/living.c)")
 	assert.FileExists(t, filepath.Join(dir, "lib/std/living.c"))
 
@@ -226,8 +227,35 @@ func TestRenameMove(t *testing.T) {
 	// Errors: no such file, a place taken.
 	code, _, errs = dgdtools(t, "", "rename", "/std/living.c", "x.c")
 	assert.Equal(t, 2, code)
-	assert.Contains(t, errs, "/std/living.c: no such file in the mudlib")
+	assert.Contains(t, errs, "/std/living.c: no such file or directory, on disk or in the mudlib")
 	code, _, errs = dgdtools(t, "", "rename", "/std/being.c", "/obj/monster.c")
 	assert.Equal(t, 2, code)
 	assert.Contains(t, errs, "/obj/monster.c exists already")
+}
+
+// FILE is a path on disk when there is one, from the working directory,
+// and NEW is then one too; a directory moves with its files.
+func TestRenameMoveOnDisk(t *testing.T) {
+	files := renameLib()
+	files["dgdtools.yml"] = "root: lib\ninclude_dirs: [/include]\n"
+	delete(files, "lib/dgdtools.yml")
+	dir := tree(t, files)
+	t.Chdir(dir)
+	code, out, errs := dgdtools(t, "", "rename", "lib/std/living.c", "lib/std/being.c")
+	assert.Equal(t, 1, code, errs)
+	assert.NotContains(t, out, "# ", "no checkout patterns: the files are not grouped")
+	assert.Contains(t, out, "+inherit \"/std/being\";")
+	assert.Contains(t, errs, "move /std/living.c to /std/being.c\n")
+
+	t.Chdir(filepath.Join(dir, "lib/std"))
+	code, _, errs = dgdtools(t, "", "rename", "--write", "living.c", "being.c")
+	assert.Equal(t, 1, code, errs)
+	assert.FileExists(t, filepath.Join(dir, "lib/std/being.c"))
+
+	t.Chdir(dir)
+	code, _, errs = dgdtools(t, "", "rename", "--write", "/d/Ruins", "/d/Old")
+	assert.Equal(t, 0, code, errs)
+	assert.Contains(t, errs, "move /d/Ruins to /d/Old\n")
+	assert.FileExists(t, filepath.Join(dir, "lib/d/Old/guard.c"))
+	assert.NoDirExists(t, filepath.Join(dir, "lib/d/Ruins"))
 }

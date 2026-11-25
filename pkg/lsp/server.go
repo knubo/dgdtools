@@ -520,6 +520,11 @@ func (s *server) notification(method string, params json.RawMessage) {
 	}
 	switch method {
 	case "initialized":
+		if !s.caps.watch {
+			// gopls' model: what the client does not say has changed
+			// has not. Said once, for whoever wonders why.
+			s.logMessage(MessageInfo, "the client does not watch files for the server: a file changed outside the editor (by git, `dgdtools rename --write`, another editor) is seen when it is opened, or once the server is restarted")
+		}
 		s.settle()
 	case "textDocument/didOpen":
 		var p DidOpenTextDocumentParams

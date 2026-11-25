@@ -33,13 +33,14 @@ static void start() {
 -- script --
 initialize lib
 open lib/obj/a.c
+received window/logMessage
 prepare lib/obj/a.c 8:8
 prepare lib/obj/a.c 16:15
 prepare lib/obj/a.c 14:13
 prepare lib/obj/a.c 13:0
 rename lib/obj/a.c 9:9 i
 rename lib/obj/a.c 7:14 step
-received window/showMessage
+received window/logMessage
 rename lib/obj/a.c 5:13 i
 rename lib/obj/a.c 5:13 total
 rename lib/obj/a.c 3:9 MAX
@@ -100,6 +101,9 @@ exit
 <   "serverInfo": {"name": "dgdtools", "version": "test"}
 < }
 > open lib/obj/a.c
+> received window/logMessage
+< {"message": "project $ROOT/lib/dgdtools.yml: mudlib $ROOT/lib", "type": 3}
+< {"message": "mudlib scanned: 2 files in 0.0 s ($ROOT/lib)", "type": 3}
 > prepare lib/obj/a.c 8:8
 < {
 <   "range": {"start": {"line": 8, "character": 8}, "end": {"line": 8, "character": 9}},
@@ -200,10 +204,10 @@ exit
 |     step();\n
 |     call_out(\"tick\", 1);\n
 | }\n
-> received window/showMessage
+> received window/logMessage
 < {
-<   "message": "rename tick to step: line 17: call_out(\"tick\") cannot reach the private function 'tick' (DGD calls no private function by name), and is left as it is",
-<   "type": 2
+<   "message": "rename function tick to step: line 17: call_out(\"tick\") cannot reach the private function 'tick' (DGD calls no private function by name), and is left as it is",
+<   "type": 3
 < }
 > rename lib/obj/a.c 5:13 i
 < "jsonrpc2: code -32803 message: at line 11 the renamed variable would be hidden by the local variable 'i' declared at line 9"

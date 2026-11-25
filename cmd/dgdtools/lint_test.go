@@ -265,7 +265,7 @@ func TestLintRootIsNeverGuessed(t *testing.T) {
 	code, out, errs := dgdtools(t, "", "lint", filepath.Join(dir, "lib"))
 	assert.Equal(t, 0, code, out)
 	assert.Empty(t, out)
-	assert.Contains(t, errs, filepath.Join(dir, "dgdtools.yml")+" does not say where the mudlib is (root:, profile: or lib_path:)")
+	assert.Contains(t, errs, filepath.Join(dir, "dgdtools.yml")+" does not say where the mudlib is (root:, profile: or lib_path:;")
 
 	dir = tree(t, map[string]string{
 		"dgdtools.yml":             "root: lib\n",

@@ -157,7 +157,7 @@ exit
 | string query_short() { return \"living \" + ::query_short(); }\n
 > received window/showMessage
 < {
-<   "message": "rename query_name to query_short: 1 place that may be the renamed function was not renamed (/obj/monster.c:8): `dgdtools rename --include-possible` renames it too; edits in base files: /std/base.c (3 objects inherit it), /std/living.c (2 objects inherit it); an object keeps the program it was compiled with, so the rename needs the scheduled reboot to take effect everywhere",
+<   "message": "rename function query_name to query_short: 1 place may be the renamed function and is not renamed: /obj/monster.c:8 (a call on an object nobody can tell, which may be one that has it); `dgdtools rename --include-possible` renames it too; edits in base files: /std/base.c (3 objects inherit it), /std/living.c (2 objects inherit it): an object keeps the program it was compiled with, so the objects that inherit or include them must be recompiled for the rename to take effect",
 <   "type": 2
 < }
 > shutdown

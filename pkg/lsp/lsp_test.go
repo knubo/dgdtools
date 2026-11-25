@@ -848,3 +848,25 @@ func TestRandomSession(t *testing.T) {
 		})
 	}
 }
+
+// A client that watches no files for the server is told once, in the
+// log, that changes made outside the editor are not seen.
+func TestPlainClientIsToldOfWatching(t *testing.T) {
+	dir := tree(t, lib())
+	for _, plain := range []bool{false, true} {
+		c := start(t)
+		c.Initialize(lsptest.Capabilities{Plain: plain}, dir)
+		c.Idle()
+		said := 0
+		for _, m := range c.Received("window/logMessage") {
+			if strings.Contains(string(m.Params), "the client does not watch files for the server") {
+				said++
+			}
+		}
+		if plain {
+			assert.Equal(t, 1, said)
+		} else {
+			assert.Zero(t, said)
+		}
+	}
+}

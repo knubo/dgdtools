@@ -4,8 +4,7 @@ import (
 	"cmp"
 	"context"
 	"errors"
-	"fmt"
-	"strings"
+	"slices"
 
 	"github.com/mmcdole/dgdtools/pkg/index"
 	"github.com/mmcdole/dgdtools/pkg/lint"
@@ -16,10 +15,12 @@ import (
 // renames or moves files and folders, the edits that keep the inherit
 // statements, #includes and object paths of the lib naming them
 // (rename.Files), as a WorkspaceEdit of the files as they are now. The
-// places that may name a moved file and are not rewritten (a path made
-// by a macro), the warnings, or why nothing could be planned are shown
-// to the user; the rename itself goes ahead whatever is answered, so a
-// refusal is null and a message, not an error.
+// strings that are a moved object's path, where nothing says they are
+// one, are edits that need confirmation for a client that can confirm
+// edits. What the plan has to tell is shown to the user or logged as for
+// a rename (planMessage), and why nothing could be planned is shown; the
+// rename itself goes ahead whatever is answered, so a refusal is null and
+// a message, not an error.
 func (s *server) willRenameFiles(ctx context.Context, p *RenameFilesParams) (*WorkspaceEdit, error) {
 	s.mu.Lock()
 	sess := s.session
@@ -43,7 +44,13 @@ func (s *server) willRenameFiles(ctx context.Context, p *RenameFilesParams) (*Wo
 	}
 	byPath := map[string][]edit{}
 	var snaps []*index.Snapshot
-	var msgs []string
+	type told struct {
+		plan *rename.Plan
+		name func(string) string
+	}
+	var plans []told
+	var refusals []string
+	var all map[string]ChangeAnnotation
 	for _, l := range libs {
 		snap := l.Index().Snapshot()
 		if !snap.Scanned() {
@@ -57,7 +64,7 @@ func (s *server) willRenameFiles(ctx context.Context, p *RenameFilesParams) (*Wo
 		case ctx.Err() != nil:
 			return nil, ctx.Err()
 		case errors.As(err, &no):
-			msgs = append(msgs, "the inherit statements and #includes that name the moved files are not changed: "+no.Reason)
+			refusals = append(refusals, "the inherit statements and #includes that name the moved files are not changed: "+no.Reason)
 			continue
 		case err != nil:
 			return nil, err
@@ -65,18 +72,27 @@ func (s *server) willRenameFiles(ctx context.Context, p *RenameFilesParams) (*Wo
 			continue
 		}
 		snaps = append(snaps, snap)
+		perPlan := map[string][]edit{}
 		for _, e := range plan.Edits {
-			byPath[e.Path] = append(byPath[e.Path], edit{Edit: e})
+			perPlan[e.Path] = append(perPlan[e.Path], edit{Edit: e})
 		}
-		name := func(p string) string { return cmp.Or(snap.LibFile(p), p) }
-		if msg := filesMessage(plan, name); msg != "" {
-			msgs = append(msgs, msg)
+		annotations := s.annotate(plan, perPlan)
+		for k, v := range perPlan {
+			byPath[k] = append(byPath[k], v...)
 		}
+		for k, v := range annotations {
+			if all == nil {
+				all = map[string]ChangeAnnotation{}
+			}
+			all[k] = v
+		}
+		plans = append(plans, told{plan, func(p string) string { return cmp.Or(snap.LibFile(p), p) }})
 	}
 	var result *WorkspaceEdit
+	var notUTF8 []string
 	if len(byPath) > 0 {
 		var err error
-		result, err = s.workspaceEdit(byPath, nil, func(path string) ([]byte, error) {
+		result, notUTF8, err = s.workspaceEdit(byPath, all, func(path string) ([]byte, error) {
 			return snaps[0].ReadFile(path) // every snapshot reads the session's files
 		})
 		if err != nil {
@@ -88,41 +104,20 @@ func (s *server) willRenameFiles(ctx context.Context, p *RenameFilesParams) (*Wo
 			}
 		}
 	}
-	if len(msgs) > 0 {
-		s.mu.Lock()
-		s.tell(MessageWarning, strings.Join(msgs, "; "))
-		s.mu.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, msg := range refusals {
+		s.tell(MessageWarning, msg)
 	}
-	return result, nil
-}
-
-// filesMessage is what the user is told of a plan of moved files beside
-// its edits: the places that may name a moved file and were not
-// rewritten, and the warnings; "" when there is nothing to tell. name
-// says how a file is named.
-func filesMessage(plan *rename.Plan, name func(string) string) string {
-	var parts []string
-	n := plan.Count(rename.Possible)
-	if n > 0 {
-		var at []string
-		for _, o := range plan.Occurrences {
-			if o.Class == rename.Possible && len(at) < 5 {
-				at = append(at, fmt.Sprintf("%s:%d (%s)", name(o.Path), o.Line, o.Reason))
+	for _, t := range plans {
+		var own []string
+		for _, p := range notUTF8 {
+			if slices.ContainsFunc(t.plan.Edits, func(e rename.Edit) bool { return e.Path == p }) ||
+				slices.ContainsFunc(t.plan.PossibleEdits, func(e rename.Edit) bool { return e.Path == p }) {
+				own = append(own, p)
 			}
 		}
-		more := ""
-		if n > len(at) {
-			more = fmt.Sprintf(" and %d more", n-len(at))
-		}
-		were := "were"
-		if n == 1 {
-			were = "was"
-		}
-		parts = append(parts, fmt.Sprintf("%s that may name a moved file %s not changed: %s%s", count(n, "place"), were, strings.Join(at, ", "), more))
+		s.planMessage(t.plan, all != nil, t.name, own)
 	}
-	parts = append(parts, plan.Warnings...)
-	if len(parts) == 0 {
-		return ""
-	}
-	return "move " + plan.Symbol.Name + " to " + plan.New + ": " + strings.Join(parts, "; ")
+	return result, nil
 }

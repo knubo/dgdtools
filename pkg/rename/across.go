@@ -365,6 +365,11 @@ func (rn *renamer) planAcross(ctx context.Context, plan *Plan, a *across) error 
 	if err := rn.validName(sym, n); err != nil {
 		return err
 	}
+	if sym.Kind == resolve.Function {
+		if err := rn.calledByName(n, a.objects[rn.driver]); err != nil {
+			return err
+		}
+	}
 	plan.Files, plan.Partial = len(units), rn.snap.Partial()
 	s := rn.seer(a)
 	switch sym.Kind {
@@ -423,15 +428,31 @@ func (rn *renamer) planAcross(ctx context.Context, plan *Plan, a *across) error 
 		return err
 	}
 	occ = append(occ, more...)
+	if sym.Kind == resolve.Function && !a.private {
+		var byMacro []Occurrence
+		plan.Dynamic, byMacro = rn.dynamic(units, sym.Name)
+		occ = append(occ, byMacro...)
+	}
 	slices.SortFunc(occ, func(x, y Occurrence) int {
 		return cmp.Or(cmp.Compare(x.Path, y.Path), cmp.Compare(x.Start, y.Start))
 	})
 	occ = slices.CompactFunc(occ, func(x, y Occurrence) bool { return x.Path == y.Path && x.Start == y.Start })
 	plan.Occurrences = occ
-	if sym.Kind == resolve.Function && !a.private {
-		plan.Dynamic = rn.dynamic(units, sym.Name)
-	}
 	rn.warnAcross(ctx, plan, a)
+	return nil
+}
+
+// calledByName refuses a function's new name that the driver calls by
+// name: the create function, in every object, and in the driver object
+// (inDriver: the function is one of it) the functions the driver calls
+// there. The renamed function would be called when nothing called it.
+func (rn *renamer) calledByName(n string, inDriver bool) error {
+	switch {
+	case n == rn.create:
+		return refuse("'%s' is the function the driver calls by name to initialize every object (create in the configuration): renamed so, the function is called when an object is made", n)
+	case inDriver && driverCalls[n]:
+		return refuse("'%s' is a function the driver calls by name in the driver object (%s): renamed so, the function is called by the driver", n, rn.driver)
+	}
 	return nil
 }
 
@@ -1038,15 +1059,29 @@ type Dynamic struct {
 
 // dynamic returns the calls of the lib that name a function with a name
 // made when they run: those whose constant parts the old name begins or
-// ends with first.
-func (rn *renamer) dynamic(units []*index.Unit, old string) []Dynamic {
+// ends with first. The calls that name it by a macro whose body is the
+// old name as a string are possible occurrences instead: the edit is the
+// macro's, which other places may use too.
+func (rn *renamer) dynamic(units []*index.Unit, old string) ([]Dynamic, []Occurrence) {
 	var out []Dynamic
+	var byMacro []Occurrence
 	for _, u := range units {
 		for _, use := range u.Uses(index.DynamicName) {
 			if use.Kind != index.UseDynamic {
 				continue
 			}
-			prefix, suffix, _ := strings.Cut(use.Aux, "*")
+			prefix, suffix, pattern := strings.Cut(use.Aux, "*")
+			if !pattern {
+				if use.Aux != old {
+					continue
+				}
+				if o, ok := rn.macroString(u.Path, use, old); ok {
+					byMacro = append(byMacro, o)
+				} else {
+					out = append(out, Dynamic{Path: u.Path, Start: use.Start, End: use.End, Line: use.Line, Col: use.Col, Pattern: old, Matches: true})
+				}
+				continue
+			}
 			out = append(out, Dynamic{Path: u.Path, Start: use.Start, End: use.End, Line: use.Line, Col: use.Col,
 				Pattern: use.Aux,
 				Matches: prefix != "" && strings.HasPrefix(old, prefix) || suffix != "" && strings.HasSuffix(old, suffix)})
@@ -1061,7 +1096,46 @@ func (rn *renamer) dynamic(units []*index.Unit, old string) []Dynamic {
 		}
 		return 0
 	})
-	return out
+	return out, byMacro
+}
+
+// macroString returns the string in the body of the macro that a call of
+// the file at path names a function by (the Use), as a possible
+// occurrence: what the call names is the old name, and renaming it
+// renames it for every place that uses the macro. False when the macro's
+// #define cannot be read in the lib.
+func (rn *renamer) macroString(path string, use index.Use, old string) (Occurrence, bool) {
+	src, err := rn.snap.ReadFile(path)
+	if err != nil || int(use.End) > len(src) {
+		return Occurrence{}, false
+	}
+	name := string(src[use.Start:use.End])
+	p, err := rn.snap.Parse(path)
+	if err != nil || p.Env == nil {
+		return Occurrence{}, false
+	}
+	m := p.Env.Lookup(name)
+	if m == nil {
+		return Occurrence{}, false
+	}
+	if _, _, stub := splitStub(m.Path); stub {
+		return Occurrence{}, false
+	}
+	def, err := rn.snap.ReadFile(m.Path)
+	if err != nil || int(m.NameOff) > len(def) {
+		return Occurrence{}, false
+	}
+	line := def[m.NameOff:]
+	if i := bytes.IndexAny(line, "\r\n"); i >= 0 {
+		line = line[:i]
+	}
+	k := bytes.Index(line, []byte(`"`+old+`"`))
+	if k < 0 {
+		return Occurrence{}, false
+	}
+	start := m.NameOff + uint32(k) + 1
+	return Occurrence{Path: m.Path, Start: start, End: start + uint32(len(old)), Class: Possible,
+		Reason: fmt.Sprintf("the body of the macro %s, by which %s:%d names it; other places may use the macro too", name, rn.libName(path), use.Line)}, true
 }
 
 // warnAcross adds the warnings of a rename across files: a variable
@@ -1132,7 +1206,7 @@ func (rn *renamer) warnAcross(ctx context.Context, plan *Plan, a *across) {
 		list = append(list, fmt.Sprintf("%s (%d %s it)", rn.libName(b.path), b.n, what))
 	}
 	plan.Warnings = append(plan.Warnings, "edits in base files: "+strings.Join(list, ", ")+
-		"; an object keeps the program it was compiled with, so the rename needs the scheduled reboot to take effect everywhere")
+		": an object keeps the program it was compiled with, so the objects that inherit or include them must be recompiled for the rename to take effect")
 }
 
 // splitStub reports whether p is the location of a profile's stub, and

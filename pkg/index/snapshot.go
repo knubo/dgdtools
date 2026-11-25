@@ -152,6 +152,14 @@ func (s *Snapshot) locateIn(libFile string, exists func(string) bool) (p string,
 	return disk, absent
 }
 
+// File returns where the lib file libFile ("/include/std.h") is read
+// from: a path on disk or a stub's location; "" when nothing could hold
+// it.
+func (s *Snapshot) File(libFile string) string {
+	p, _ := s.locate(path.Clean(libFile))
+	return p
+}
+
 // ObjectFile returns where the source of the object at libPath is read
 // from: a path on disk or a stub's location; "" when nothing could hold
 // it. An object's source is the file of its name with ".c" added,

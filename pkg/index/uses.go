@@ -33,8 +33,11 @@ const (
 	// runs to call_other, call_out or a registrar (call_other(ob, fn)).
 	// Its Name is DynamicName, its place the argument that makes the
 	// name, and its Aux the pattern of the name, the constant parts
-	// around a '*' ("do_*"; "*" when nothing is constant). It names
-	// nothing; a rename lists it as a place no search can see into.
+	// around a '*' ("do_*"; "*" when nothing is constant), or, with no
+	// '*', the name itself, when the argument is a macro whose body is
+	// one string (#define NAME_FN "query_name"). It names nothing; a
+	// rename lists it as a place no search can see into, or, of the
+	// macro's name, as a possible place.
 	UseDynamic
 )
 

@@ -8,6 +8,7 @@ import (
 	"maps"
 	"slices"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/mmcdole/dgdtools/pkg/lint"
 	"github.com/mmcdole/dgdtools/pkg/rename"
@@ -46,11 +47,9 @@ func (s *server) prepareRename(ctx context.Context, p *PrepareRenameParams) (any
 // The certain edits are made. The possible ones (a call on an object
 // nobody can tell, a name in a macro's body, code that does not parse)
 // go to a client that can confirm edits (changeAnnotationSupport) under
-// annotations that need confirmation, one for each reason, so that its
-// preview shows them unticked; another client gets the certain edits
-// only, and is told so. What the plan warns of, the possible occurrences
-// left and the calls whose function's name is made when they run are
-// shown to the user (window/showMessage).
+// annotations that need confirmation (annotate); another client gets the
+// certain edits only, and is told so. What the plan has to tell is shown
+// or logged by planMessage.
 func (s *server) rename(ctx context.Context, p *RenameParams) (any, error) {
 	uri := p.TextDocument.URI
 	d, version, _, err := s.linted(ctx, uri)
@@ -69,38 +68,11 @@ func (s *server) rename(ctx context.Context, p *RenameParams) (any, error) {
 	if err != nil {
 		return nil, renameError(ctx, err)
 	}
-	annotate := s.caps.annotations && len(plan.PossibleEdits) > 0
 	byPath := map[string][]edit{}
 	for _, e := range plan.Edits {
 		byPath[e.Path] = append(byPath[e.Path], edit{Edit: e})
 	}
-	var annotations map[string]ChangeAnnotation
-	if annotate {
-		annotations = map[string]ChangeAnnotation{"certain": {Label: "Certain: the renamed " + what(plan.Symbol.Kind)}}
-		for k := range byPath {
-			for i := range byPath[k] {
-				byPath[k][i].annotation = "certain"
-			}
-		}
-		ids := map[string]string{}
-		reasons := map[[2]any]string{}
-		for _, o := range plan.Occurrences {
-			if o.Class == rename.Possible {
-				reasons[[2]any{o.Path, o.Start}] = o.Reason
-			}
-		}
-		for _, e := range plan.PossibleEdits {
-			reason := reasons[[2]any{e.Path, e.Start}]
-			id, ok := ids[reason]
-			if !ok {
-				id = fmt.Sprintf("possible-%d", len(ids)+1)
-				ids[reason] = id
-				annotations[id] = ChangeAnnotation{Label: "Possible: " + reason, NeedsConfirmation: true,
-					Description: "may be the renamed " + what(plan.Symbol.Kind) + ", and nobody can tell"}
-			}
-			byPath[e.Path] = append(byPath[e.Path], edit{Edit: e, annotation: id})
-		}
-	}
+	annotations := s.annotate(plan, byPath)
 	s.mu.Lock()
 	doc := s.docs[uri]
 	current := doc != nil && doc.path == d.Path && doc.version == version
@@ -108,7 +80,7 @@ func (s *server) rename(ctx context.Context, p *RenameParams) (any, error) {
 	if !current {
 		return nil, errContentModified
 	}
-	result, err := s.workspaceEdit(byPath, annotations, func(path string) ([]byte, error) {
+	result, notUTF8, err := s.workspaceEdit(byPath, annotations, func(path string) ([]byte, error) {
 		if path == d.Path {
 			return d.File.Src, nil
 		}
@@ -121,12 +93,133 @@ func (s *server) rename(ctx context.Context, p *RenameParams) (any, error) {
 		return nil, errContentModified
 	}
 	name := func(p string) string { return cmp.Or(d.Snapshot.LibFile(p), p) }
-	if msg := renameMessage(plan, annotate, name); msg != "" {
-		s.mu.Lock()
-		s.tell(MessageWarning, msg)
-		s.mu.Unlock()
-	}
+	s.mu.Lock()
+	s.planMessage(plan, annotations != nil, name, notUTF8)
+	s.mu.Unlock()
 	return result, nil
+}
+
+// annotate adds the plan's possible edits to byPath, which has its
+// certain ones, when the client can confirm edits (changeAnnotationSupport):
+// the certain edits under one annotation, the possible ones under
+// annotations that need confirmation, one for each reason, so that the
+// client's preview shows them unticked. It returns the annotations; nil,
+// and nothing added, when the client cannot confirm edits or the plan has
+// no possible edits.
+func (s *server) annotate(plan *rename.Plan, byPath map[string][]edit) map[string]ChangeAnnotation {
+	if !s.caps.annotations || len(plan.PossibleEdits) == 0 {
+		return nil
+	}
+	certain := "Certain: the renamed " + plan.What()
+	if plan.Moves != nil {
+		certain = "Certain: the paths that name the moved files"
+	}
+	annotations := map[string]ChangeAnnotation{"certain": {Label: certain}}
+	for k := range byPath {
+		for i := range byPath[k] {
+			byPath[k][i].annotation = "certain"
+		}
+	}
+	ids := map[string]string{}
+	reasons := map[[2]any]string{}
+	for _, o := range plan.Occurrences {
+		if o.Class == rename.Possible {
+			reasons[[2]any{o.Path, o.Start}] = o.Reason
+		}
+	}
+	desc := "may be the renamed " + plan.What() + ", and nobody can tell"
+	if plan.Moves != nil {
+		desc = "may name a moved file, and nobody can tell"
+	}
+	for _, e := range plan.PossibleEdits {
+		reason := reasons[[2]any{e.Path, e.Start}]
+		id, ok := ids[reason]
+		if !ok {
+			id = fmt.Sprintf("possible-%d", len(ids)+1)
+			ids[reason] = id
+			annotations[id] = ChangeAnnotation{Label: "Possible: " + reason, NeedsConfirmation: true, Description: desc}
+		}
+		byPath[e.Path] = append(byPath[e.Path], edit{Edit: e, annotation: id})
+	}
+	return annotations
+}
+
+// planMessage tells the user what the plan has to tell beside its edits
+// (rename.Plan.Notes), in one message: by window/showMessage when there is
+// something to look at (possible places left unchanged, calls that may
+// call the renamed function, an edited file that is not UTF-8), else only
+// in the log (window/logMessage). annotated says the possible edits are
+// in the edit, unticked; name says how a file is named; notUTF8 are the
+// edited files whose text is not valid UTF-8. Called with s.mu held.
+func (s *server) planMessage(plan *rename.Plan, annotated bool, name func(string) string, notUTF8 []string) {
+	var parts []string
+	look := false
+	possible := plan.Count(rename.Possible)
+	for _, n := range plan.Notes(false) {
+		text := n.Text
+		if n.Kind == rename.NotePossible && annotated && len(plan.PossibleEdits) == possible {
+			text = plan.PossiblePlaces() + ", and nobody can tell: " + verb(possible, "it is", "they are") + " in the preview, not ticked"
+		}
+		if len(n.Places) > 0 {
+			var at []string
+			for _, p := range n.Places[:min(len(n.Places), 5)] {
+				at = append(at, fmt.Sprintf("%s:%d (%s)", name(p.Path), p.Line, p.Detail))
+			}
+			text += ": " + strings.Join(at, ", ")
+			if more := len(n.Places) - len(at); more > 0 {
+				text += fmt.Sprintf(" and %d more", more)
+			}
+		}
+		if n.Kind == rename.NotePossible && len(plan.PossibleEdits) > 0 {
+			switch {
+			case annotated && len(plan.PossibleEdits) < possible:
+				text += "; those that can be edited are in the preview, not ticked"
+			case !annotated && plan.Moves == nil:
+				text += "; `dgdtools rename --include-possible` renames " + verb(possible, "it", "them") + " too"
+			}
+		}
+		look = look || n.Look(false) && !(n.Kind == rename.NotePossible && annotated && len(plan.PossibleEdits) == possible)
+		parts = append(parts, text)
+	}
+	if len(notUTF8) > 0 {
+		look = true
+		parts = append(parts, fmt.Sprintf("%s not valid UTF-8 (%s): its edits are right for an editor that reads it as Latin-1, as the driver does, and an editor that reads it as UTF-8 to apply them may change its other characters",
+			verbFiles(len(notUTF8)), strings.Join(names(notUTF8[:min(len(notUTF8), 5)], name), ", ")))
+	}
+	if len(parts) == 0 {
+		return
+	}
+	msg := plan.Title() + ": " + strings.Join(parts, "; ")
+	if look {
+		s.tell(MessageWarning, msg)
+	} else {
+		s.logMessage(MessageInfo, msg)
+	}
+}
+
+func verb(n int, one, more string) string {
+	if n == 1 {
+		return one
+	}
+	return more
+}
+
+// names names the files.
+func names(paths []string, name func(string) string) []string {
+	out := make([]string, len(paths))
+	for i, p := range paths {
+		out[i] = name(p)
+	}
+	return out
+}
+
+// verbFiles says how many files are something: "1 edited file is", "2
+// edited files are".
+func verbFiles(n int) string {
+	if n == 1 {
+		return "1 edited file is"
+	}
+	return fmt.Sprintf("%d edited files are", n)
 }
 
 // edit is an edit of a plan, with the id of its change annotation ("":
@@ -140,10 +233,13 @@ type edit struct {
 // documentChanges, each file's for the version of it they were made from
 // (an open document's; null for a file the client has not open, whose
 // text is the disk's), when the client reads that, else in changes. src
-// returns the text a file's edits were made in.
-func (s *server) workspaceEdit(byPath map[string][]edit, annotations map[string]ChangeAnnotation, src func(path string) ([]byte, error)) (*WorkspaceEdit, error) {
+// returns the text a file's edits were made in. notUTF8 are the files
+// whose text is not valid UTF-8: the edits' positions count each byte
+// that is not as a character, as an editor that reads the file as
+// Latin-1 does, and one that reads it as UTF-8 may damage it.
+func (s *server) workspaceEdit(byPath map[string][]edit, annotations map[string]ChangeAnnotation, src func(path string) ([]byte, error)) (result *WorkspaceEdit, notUTF8 []string, err error) {
 	paths := slices.Sorted(maps.Keys(byPath))
-	result := &WorkspaceEdit{ChangeAnnotations: annotations}
+	result = &WorkspaceEdit{ChangeAnnotations: annotations}
 	if !s.caps.documentChanges {
 		result.Changes = map[string][]TextEdit{}
 	}
@@ -158,7 +254,10 @@ func (s *server) workspaceEdit(byPath map[string][]edit, annotations map[string]
 	for _, path := range paths {
 		text, err := src(path)
 		if err != nil {
-			return nil, &rpcError{Code: codeRequestFailed, Message: "the edits reach " + path + ", which cannot be read: " + err.Error()}
+			return nil, nil, &rpcError{Code: codeRequestFailed, Message: "the edits reach " + path + ", which cannot be read: " + err.Error()}
+		}
+		if !utf8.Valid(text) {
+			notUTF8 = append(notUTF8, path)
 		}
 		pm := NewPositionMapper(text, s.caps.encoding())
 		es := byPath[path]
@@ -178,86 +277,7 @@ func (s *server) workspaceEdit(byPath map[string][]edit, annotations map[string]
 		}
 		result.DocumentChanges = append(result.DocumentChanges, TextDocumentEdit{TextDocument: td, Edits: out})
 	}
-	return result, nil
-}
-
-// renameMessage is what the user is told of a plan beside its edits:
-// the possible occurrences, the warnings, the calls whose function's
-// name is made when they run; "" when there is nothing to tell. name
-// says how a file is named.
-func renameMessage(plan *rename.Plan, annotated bool, name func(string) string) string {
-	var parts []string
-	if n := len(plan.PossibleEdits); n > 0 {
-		if annotated {
-			they := "they are"
-			if n == 1 {
-				they = "it is"
-			}
-			parts = append(parts, fmt.Sprintf("%s may be the renamed %s and nobody can tell: %s in the preview, not ticked", count(n, "other place"), what(plan.Symbol.Kind), they))
-		} else {
-			var at []string
-			for _, o := range plan.Occurrences {
-				if o.Class == rename.Possible && len(at) < 5 {
-					at = append(at, fmt.Sprintf("%s:%d", name(o.Path), o.Line))
-				}
-			}
-			more := ""
-			if n > len(at) {
-				more = fmt.Sprintf(" and %d more", n-len(at))
-			}
-			were, them := "were", "them"
-			if n == 1 {
-				were, them = "was", "it"
-			}
-			parts = append(parts, fmt.Sprintf("%s that may be the renamed %s %s not renamed (%s%s): `dgdtools rename --include-possible` renames %s too",
-				count(n, "place"), what(plan.Symbol.Kind), were, strings.Join(at, ", "), more, them))
-		}
-	}
-	parts = append(parts, plan.Warnings...)
-	matches, others := 0, 0
-	var at []string
-	for _, dy := range plan.Dynamic {
-		if dy.Matches {
-			matches++
-			if len(at) < 5 {
-				at = append(at, fmt.Sprintf("%s:%d (%s)", name(dy.Path), dy.Line, dy.Pattern))
-			}
-		} else {
-			others++
-		}
-	}
-	if matches > 0 {
-		parts = append(parts, fmt.Sprintf("%s make the name of the function they call when they run, with a part the old name has, and may call it: %s",
-			count(matches, "call"), strings.Join(at, ", ")))
-	}
-	if len(parts) == 0 {
-		return ""
-	}
-	if others > 0 {
-		parts = append(parts, fmt.Sprintf("%s in the mudlib make the name of the function they call when they run, and cannot be searched", count(others, "other call")))
-	}
-	return "rename " + plan.Symbol.Name + " to " + plan.New + ": " + strings.Join(parts, "; ")
-}
-
-// count says how many of a thing there are, in words.
-func count(n int, thing string) string {
-	if n == 1 {
-		return "1 " + thing
-	}
-	return fmt.Sprintf("%d %ss", n, thing)
-}
-
-// what names a kind of symbol in a message.
-func what(k resolve.Kind) string {
-	switch k {
-	case resolve.Variable:
-		return "global variable"
-	case resolve.Local:
-		return "local variable"
-	case resolve.Label:
-		return "inherit label"
-	}
-	return k.String()
+	return result, notUTF8, nil
 }
 
 // renameError is the protocol's error for a rename's: a refusal as a

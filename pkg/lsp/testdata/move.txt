@@ -89,15 +89,27 @@ exit
 < {
 <   "documentChanges": [
 <     {
+<       "textDocument": {"uri": "file://$ROOT/lib/include/std.h", "version": null},
+<       "edits": [
+<         {
+<           "range": {"start": {"line": 0, "character": 14}, "end": {"line": 0, "character": 23}},
+<           "newText": "/domain/room",
+<           "annotationId": "possible-1"
+<         }
+<       ]
+<     },
+<     {
 <       "textDocument": {"uri": "file://$ROOT/lib/obj/a.c", "version": 1},
 <       "edits": [
 <         {
 <           "range": {"start": {"line": 0, "character": 9}, "end": {"line": 0, "character": 18}},
-<           "newText": "/domain/room"
+<           "newText": "/domain/room",
+<           "annotationId": "certain"
 <         },
 <         {
 <           "range": {"start": {"line": 1, "character": 25}, "end": {"line": 1, "character": 34}},
-<           "newText": "/domain/room"
+<           "newText": "/domain/room",
+<           "annotationId": "certain"
 <         }
 <       ]
 <     },
@@ -106,11 +118,20 @@ exit
 <       "edits": [
 <         {
 <           "range": {"start": {"line": 0, "character": 10}, "end": {"line": 0, "character": 16}},
-<           "newText": "/std/room.h"
+<           "newText": "/std/room.h",
+<           "annotationId": "certain"
 <         }
 <       ]
 <     }
-<   ]
+<   ],
+<   "changeAnnotations": {
+<     "certain": {"label": "Certain: the paths that name the moved files"},
+<     "possible-1": {
+<       "label": "Possible: a string in a directive equal to the old path, not known to be an object path",
+<       "needsConfirmation": true,
+<       "description": "may name a moved file, and nobody can tell"
+<     }
+<   }
 < }
 ~ lib/obj/a.c
 | inherit \"/domain/room\";\n
@@ -120,7 +141,7 @@ exit
 | int light;\n
 > received window/showMessage
 < {
-<   "message": "move /std/room.c to /domain/room.c: 1 place that may name a moved file was not changed: /obj/b.c:2 (names /std/room.c by the macro ROOM, which other files may use too: not rewritten); moved base files: /std/room.c (2 objects inherit it); an object keeps the program it was compiled with, so the move takes effect everywhere at the scheduled reboot",
+<   "message": "move /std/room.c to /domain/room.c: 2 places may name a moved file and are not changed: /include/std.h:1 (a string in a directive equal to the old path, not known to be an object path), /obj/b.c:2 (names /std/room.c by the macro ROOM, which other files may use too: not rewritten); those that can be edited are in the preview, not ticked; moved base files: /std/room.c (2 objects inherit it): an object keeps the program it was compiled with, so the objects that inherit them must be recompiled for the move to take effect",
 <   "type": 2
 < }
 > move lib/std lib/base

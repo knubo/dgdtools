@@ -82,6 +82,11 @@ type Dynamic struct {
 	// ends with, when it is a sum of strings that does ("do_" + verb);
 	// "" when not known.
 	Prefix, Suffix string
+	// Name is the function's name when the argument is a macro (Macro)
+	// whose body is one string: a constant, but one the file names by a
+	// macro other places may use too, so that it is listed beside a
+	// rename and never renamed where it stands.
+	Name, Macro string
 }
 
 // Facts are the calls of one file.
@@ -203,6 +208,7 @@ func Extract(f File, reg *Registry) *Facts {
 					if !ok && dynamic == nil && !constant(fnArg) {
 						dynamic = &Dynamic{Via: name, Start: t.Off(fnArg), End: t.End(fnArg)}
 						dynamic.Prefix, dynamic.Suffix = affixes(fnArg, strLit)
+						dynamic.Name, dynamic.Macro = f.macroString(fnArg)
 					}
 					if !ok || !token.IsIdent(fname) {
 						continue
@@ -272,6 +278,23 @@ func affixes(e syntax.Expr, strLit func(syntax.Expr) (string, bool)) (prefix, su
 		x = b.Y
 	}
 	return prefix, suffix
+}
+
+// macroString returns the string a function's name given as e is when e
+// is a macro whose body is one string that is a name, and the macro.
+func (f File) macroString(e syntax.Expr) (name, macro string) {
+	id, ok := syntax.Unparen(e).(*syntax.Ident)
+	if !ok || f.Env == nil {
+		return "", ""
+	}
+	body := f.Env.Expansion(id.Name)
+	if len(body) != 1 || body[0].Kind != token.StringLit {
+		return "", ""
+	}
+	if s, ok := pp.Unquote(body[0].Text); ok && token.IsIdent(s) {
+		return s, id.Name
+	}
+	return "", ""
 }
 
 // target decides what object a receiver expression denotes:
