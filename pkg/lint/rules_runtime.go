@@ -15,12 +15,17 @@ import (
 // returns nil, when it runs. All of these need the lib index and report
 // only what the index can prove.
 
-// definedAt builds the related location of a function definition.
-func definedAt(fn index.ChainFunc, msg string) []diag.Related {
+// definedAt builds the related location of the definition of the
+// function called name: its name there.
+func definedAt(fn index.ChainFunc, name, msg string) []diag.Related {
 	if fn.Path == "" {
 		return nil
 	}
-	return []diag.Related{{Path: fn.Path, Line: fn.Line, Col: fn.Col, Start: fn.Off, End: fn.Off, Message: msg}}
+	n := len(name)
+	return []diag.Related{{
+		Path: fn.Path, Line: fn.Line, Col: fn.Col, EndLine: fn.Line, EndCol: fn.Col + n,
+		Start: fn.Off, End: fn.Off + uint32(n), Message: msg,
+	}}
 }
 
 var ruleCallableNotFound = &Rule{
@@ -81,7 +86,7 @@ var ruleStaticCrossObj = &Rule{
 					c.Func, lk.Fn.DefinedIn)
 			}
 			if d != nil {
-				d.Related = definedAt(lk.Fn, "defined here")
+				d.Related = definedAt(lk.Fn, c.Func, "defined here")
 			}
 		}
 	},
@@ -105,7 +110,7 @@ var ruleUndefinedPrototype = &Rule{
 			}
 			d := p.Report(c.Start, c.End, "'%s' in %s is declared but never defined — calling it is a runtime error",
 				c.Func, lk.Fn.DefinedIn)
-			d.Related = definedAt(lk.Fn, "prototype")
+			d.Related = definedAt(lk.Fn, c.Func, "prototype")
 		}
 
 		ch := p.Index.Chain(p.LibPath)
@@ -124,7 +129,7 @@ var ruleUndefinedPrototype = &Rule{
 			if !p.Index.ProvidedByUsers(p.Ctx, name) {
 				d := p.ReportNode(dc.Call.Fun, "'%s' is declared but never defined (prototype in %s) — calling it is a runtime error",
 					name, fn.DefinedIn)
-				d.Related = definedAt(fn, "prototype")
+				d.Related = definedAt(fn, name, "prototype")
 			}
 		}
 	},
@@ -189,7 +194,7 @@ var ruleCallbackArity = &Rule{
 					c.Func, lk.Fn.DefinedIn, lk.Fn.MaxArgs, c.NArgs)
 			}
 			if d != nil {
-				d.Related = definedAt(lk.Fn, "defined here")
+				d.Related = definedAt(lk.Fn, c.Func, "defined here")
 			}
 		}
 	},

@@ -2,12 +2,17 @@ name: ci
 
 on:
   push:
-    branches: [main]
   pull_request:
 
 jobs:
+  # The tests run where the releases run that can run them. The Windows
+  # binary is built and vetted, not tested: the tests' file trees are
+  # written with POSIX paths.
   test:
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -16,19 +21,22 @@ jobs:
       - run: go vet ./...
       - run: go test -race ./...
       - run: go build ./...
+      - if: matrix.os == 'ubuntu-latest'
+        run: GOOS=windows go build ./... && GOOS=windows go vet ./...
 
-  # Static analysis runs with the current Go release, which the current
-  # staticcheck is built for; the code is checked as the Go version of
-  # go.mod. Twice: as everybody builds it, and with the files only the
-  # corpus tests build, which use helpers the first run must not see as
-  # unused.
-  staticcheck:
+  # Formatting and static analysis run with the current Go release, which
+  # the pinned staticcheck is built with; the code is checked as the Go
+  # version of go.mod. staticcheck runs twice: as everybody builds the
+  # code, and with the files only the corpus tests build, which use
+  # helpers the first run must not see as unused.
+  lint:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version: stable
-      - run: go install honnef.co/go/tools/cmd/staticcheck@latest
+      - run: test -z "$(gofmt -l .)" || (gofmt -l . && exit 1)
+      - run: go install honnef.co/go/tools/cmd/staticcheck@2026.2.2
       - run: staticcheck ./...
       - run: staticcheck -tags corpus ./...

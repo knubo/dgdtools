@@ -183,7 +183,7 @@ func TestConfigCommand(t *testing.T) {
 	assert.Contains(t, out, "indent style:  space     (default)")
 
 	// A scope that is not valid is an error where it applies.
-	write(t, dir, map[string]string{"lib/players/ann/dgdtools.yml": "root: false\nprofile: viking\n"})
+	write(t, dir, map[string]string{"lib/players/ann/dgdtools.yml": "root: false\nprofile: mymud\n"})
 	code, _, errs = dgdtools(t, "", "config", "b.c")
 	assert.Equal(t, 2, code)
 	assert.Contains(t, errs, "dgdtools config: "+scope+": profile belongs in the project's root config")

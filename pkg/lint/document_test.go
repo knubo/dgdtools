@@ -59,6 +59,8 @@ func TestLintDocument(t *testing.T) {
 	assert.Equal(t, "/lib/std/base.c", static.Related[0].Path)
 	assert.Equal(t, 3, static.Related[0].Line)
 	assert.Equal(t, 12, static.Related[0].Col)
+	assert.Equal(t, 3, static.Related[0].EndLine)
+	assert.Equal(t, 18, static.Related[0].EndCol, "the name of the function there")
 	assert.Equal(t, 1, cfs.reads("/lib/std/base.c"), "the related location comes from the index, not from reading the file again")
 	for _, d := range doc.Diagnostics {
 		assert.NotEmpty(t, d.Fingerprint)

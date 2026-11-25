@@ -210,7 +210,7 @@ The lib's own policy.
 
 Inherit uses a literal path string where the lib mandates macros.
 
-For libs that name their inheritable objects with macros (inherit I_ROOM;), so that a moved file is one changed #define. The option deny restricts the rule to the parts of the lib that have such macros.
+For libs that name their inheritable objects with macros (inherit ROOM;), so that a moved file is one changed #define. The option deny restricts the rule to the parts of the lib that have such macros.
 
 Options:
 

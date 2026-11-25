@@ -265,7 +265,7 @@ var ruleInheritOrder = &Rule{
 						r := p.ReportNode(target, "inherit must precede all declarations, but %s (included above) declares functions or variables; include it after the inherits", inc.Raw())
 						it := p.File.Tokens[inc.Tok]
 						r.Related = append(r.Related, p.Related(it.Off, it.End, "included here"),
-							diag.Related{Path: file, Line: 1, Col: 1, Message: "declares functions or variables"})
+							diag.Related{Path: file, Line: 1, Col: 1, EndLine: 1, EndCol: 1, Message: "declares functions or variables"})
 						return
 					}
 				}

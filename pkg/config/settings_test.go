@@ -21,7 +21,7 @@ func scoped() vfs.Mem {
 		"/mud/lib/players/bob/.dgdtools.yml": "root: false\nformat: {indent_style: tab}\n" +
 			"lint:\n  rules: {missing-visibility: error}\n  overrides:\n    - paths: [\"old/**\"]\n      rules: {all: off}\n",
 		"/mud/lib/players/bob/old/b.c":      "",
-		"/mud/lib/players/cyd/dgdtools.yml": "profile: viking\nlib_path: /players/cyd\nformat: {line_endings: crlf}\nlint:\n  fail_on: warning\n",
+		"/mud/lib/players/cyd/dgdtools.yml": "profile: mymud\nlib_path: /players/cyd\nformat: {line_endings: crlf}\nlint:\n  fail_on: warning\n",
 		"/mud/lib/players/cyd/c.c":          "",
 	}
 }
@@ -127,7 +127,7 @@ func TestSettingsPerFile(t *testing.T) {
 func TestScopeValidation(t *testing.T) {
 	for name, c := range map[string]struct{ yml, want string }{
 		"root path":      {"root: false\nexclude: [\"old/**\"]\n", "exclude belongs in the project's root config"},
-		"profile":        {"root: false\nprofile: viking\n", "profile belongs in the project's root config"},
+		"profile":        {"root: false\nprofile: mymud\n", "profile belongs in the project's root config"},
 		"dialect":        {"root: false\ndialect: {closures: true}\n", "dialect belongs"},
 		"driver fact":    {"root: false\ninclude_dirs: [/inc]\n", "include_dirs belongs"},
 		"conventions":    {"root: false\nconventions: {defines: [X]}\n", "conventions belongs"},
@@ -485,7 +485,7 @@ func TestWorkspace(t *testing.T) {
 	// A root config further down is the project of what is under it, and
 	// resolved as one: this one names a profile that is not there.
 	_, err := ws.Project("/mud/lib/players/cyd/c.c")
-	assert.ErrorContains(t, err, `profile "viking" not found`)
+	assert.ErrorContains(t, err, `profile "mymud" not found`)
 	assert.Equal(t, "/other/dgdtools.yml", project("/other/x.c").ConfigPath)
 	// Paths without one share a project without a config.
 	loose := project("/loose/y.c")

@@ -69,14 +69,16 @@ type Diagnostic struct {
 	Fingerprint string
 }
 
-// Related is a secondary location that explains a diagnostic.
+// Related is a secondary location that explains a diagnostic: a range in
+// Path, which may be another file than the diagnostic's. Positions are as
+// in Diagnostic: 1-based lines and byte columns, the end exclusive, and
+// the same range as byte offsets.
 type Related struct {
-	Path    string
-	Line    int
-	Col     int
-	Start   uint32
-	End     uint32
-	Message string
+	Path            string
+	Line, Col       int
+	EndLine, EndCol int
+	Start, End      uint32
+	Message         string
 }
 
 // Tag classifies what a finding is about. The values are those an editor
@@ -207,4 +209,28 @@ func UTF16Col(line []byte, byteCol int) int {
 		i += size
 	}
 	return units
+}
+
+// ByteCol is the inverse of UTF16Col: it converts a 0-based UTF-16
+// code-unit offset within line, as an LSP position gives it, to a 1-based
+// byte column. An offset past the end of the line is the end of the line,
+// and one inside a character (between the halves of a surrogate pair) is
+// the character's start.
+func ByteCol(line []byte, utf16Col int) int {
+	i := 0
+	for units := 0; i < len(line); {
+		r, size := utf8.DecodeRune(line[i:])
+		n := 1
+		if r == utf8.RuneError && size <= 1 {
+			size = 1
+		} else if r >= 0x10000 {
+			n = 2
+		}
+		if units+n > utf16Col {
+			break
+		}
+		units += n
+		i += size
+	}
+	return i + 1
 }

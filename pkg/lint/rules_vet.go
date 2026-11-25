@@ -225,7 +225,7 @@ var ruleRawInheritPath = &Rule{
 	Code: "C001", Name: "raw-inherit-path", Group: GroupConvention,
 	Doc: "inherit uses a literal path string where the lib mandates macros",
 	Explain: "For libs that name their inheritable objects with macros (inherit " +
-		"I_ROOM;), so that a moved file is one changed #define. The option deny " +
+		"ROOM;), so that a moved file is one changed #define. The option deny " +
 		"restricts the rule to the parts of the lib that have such macros.",
 	Default: false, Severity: diag.Warning,
 	Options: func() any { return &inheritPathOptions{} },

@@ -157,8 +157,11 @@ func (p *Pass) ReportNode(n syntax.Node, format string, args ...any) *diag.Diagn
 
 // Related builds a related location in the file being linted.
 func (p *Pass) Related(start, end uint32, msg string) diag.Related {
-	pos := p.File.Pos(start)
-	return diag.Related{Path: p.File.Path, Line: pos.Line, Col: pos.Col, Start: start, End: end, Message: msg}
+	a, b := p.File.Pos(start), p.File.Pos(end)
+	return diag.Related{
+		Path: p.File.Path, Line: a.Line, Col: a.Col, EndLine: b.Line, EndCol: b.Col,
+		Start: start, End: end, Message: msg,
+	}
 }
 
 // Options select what a lint does. The zero value runs the configured
