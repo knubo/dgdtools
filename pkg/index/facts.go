@@ -142,15 +142,30 @@ type Unit struct {
 	// of the source it was built from.
 	gen uint64
 	sum uint64
-	// watch are the files, other than Path and the force-included header's,
-	// whose change makes the unit stale: its include closure, and the
-	// places an #include was looked for and not found.
-	watch []string
+	// The files, other than Path and the force-included header's, whose
+	// change makes the unit stale (watched): its include closure, the
+	// first incs of Deps but Path, and absent, the places an #include
+	// was looked for and not found.
+	incs   int
+	absent []string
 	// code are the lib paths of the #included files that contribute
 	// declarations to this program.
 	code []string
 	// uses are the file's Uses; nil when they were not read.
 	uses *uses
+}
+
+// watched yields the files, other than Path and the force-included
+// header's, whose change makes the unit stale: its include closure, and
+// the places an #include was looked for and not found.
+func (u *Unit) watched(yield func(string) bool) {
+	for _, list := range [][]string{u.Deps[min(1, u.incs):u.incs], u.absent} {
+		for _, p := range list {
+			if !yield(p) {
+				return
+			}
+		}
+	}
 }
 
 // Func returns the unit's function called name.
@@ -213,19 +228,12 @@ func collectDecls(u *Unit, tree *syntax.File) {
 // declaration (a later one replaces an earlier one).
 func sortDecls(u *Unit) {
 	u.Funcs = sortFuncs(u.Funcs)
-	slices.SortStableFunc(u.Vars, func(a, b VarInfo) int { return strings.Compare(a.Name, b.Name) })
-	vars := u.Vars[:0]
-	for i, v := range u.Vars {
-		if i+1 < len(u.Vars) && u.Vars[i+1].Name == v.Name {
-			continue
-		}
-		vars = append(vars, v)
-	}
-	u.Vars = slices.Clip(vars)
+	u.Vars = sortVars(u.Vars, true)
 }
 
-// sortFuncs sorts fs by name, keeping of each name the first definition,
-// else the first prototype.
+// sortFuncs returns fs sorted by name, keeping of each name the first
+// definition, else the first prototype; in an array of its own length,
+// since a whole lib of units keeps them.
 func sortFuncs(fs []FuncInfo) []FuncInfo {
 	slices.SortStableFunc(fs, func(a, b FuncInfo) int { return strings.Compare(a.Name, b.Name) })
 	out := fs[:0]
@@ -239,7 +247,21 @@ func sortFuncs(fs []FuncInfo) []FuncInfo {
 		out = append(out, fs[pick])
 		i = j
 	}
-	return slices.Clip(out)
+	return slices.Clone(out)
+}
+
+// sortVars returns vs sorted by name, keeping of each name the last, or
+// the first; in an array of its own length.
+func sortVars(vs []VarInfo, last bool) []VarInfo {
+	slices.SortStableFunc(vs, func(a, b VarInfo) int { return strings.Compare(a.Name, b.Name) })
+	out := vs[:0]
+	for i, v := range vs {
+		if last && i+1 < len(vs) && vs[i+1].Name == v.Name || !last && i > 0 && vs[i-1].Name == v.Name {
+			continue
+		}
+		out = append(out, v)
+	}
+	return slices.Clone(out)
 }
 
 // ParamRange derives the accepted argument-count range of a function: a

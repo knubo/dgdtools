@@ -519,7 +519,7 @@ func (ix *Index) register(u *Unit) {
 		}
 		set[u.Path] = struct{}{}
 	}
-	for _, d := range u.watch {
+	for d := range u.watched {
 		add(ix.builtFrom, d)
 	}
 	for _, parent := range u.parents() {
@@ -536,7 +536,7 @@ func (ix *Index) unregister(u *Unit) {
 			}
 		}
 	}
-	for _, d := range u.watch {
+	for d := range u.watched {
 		del(ix.builtFrom, d)
 	}
 	for _, parent := range u.parents() {

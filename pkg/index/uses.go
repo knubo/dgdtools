@@ -263,6 +263,13 @@ func keepUses(in []Use, wide bool) (*uses, bool) {
 	} else {
 		us.recs = make([]useRec, 0, len(in))
 	}
+	names := 0
+	for i := range in {
+		if i == 0 || in[i].Name != in[i-1].Name {
+			names++
+		}
+	}
+	us.names = make([]unique.Handle[string], 0, names)
 	auxes := map[useAux]uint32{}
 	for _, x := range in {
 		if len(us.names) == 0 || us.names[len(us.names)-1].Value() != x.Name {
@@ -304,8 +311,7 @@ func keepUses(in []Use, wide bool) (*uses, bool) {
 		}
 		us.recs = append(us.recs, r)
 	}
-	us.names = slices.Clip(us.names)
-	us.aux = slices.Clip(us.aux)
+	us.aux = slices.Clone(us.aux)
 	return us, true
 }
 

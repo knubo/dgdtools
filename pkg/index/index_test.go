@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/fs"
 	"runtime"
+	"slices"
 	"sync"
 	"testing"
 
@@ -227,7 +228,7 @@ func TestIncludes(t *testing.T) {
 	assert.Equal(t, `"gone.h"`, c.BadIncludes[0].Raw)
 	assert.Equal(t, `<gone2.h>`, c.BadIncludes[1].Raw)
 	assert.True(t, c.Partial)
-	assert.Equal(t, []string{"/lib/obj/defs.h", "/lib/obj/gone.h", "/lib/include/gone.h", "/lib/include/gone2.h"}, c.watch,
+	assert.Equal(t, []string{"/lib/obj/defs.h", "/lib/obj/gone.h", "/lib/include/gone.h", "/lib/include/gone2.h"}, slices.Collect(c.watched),
 		"the places an include was looked for are watched too")
 
 	d := s.Unit("/obj/d")

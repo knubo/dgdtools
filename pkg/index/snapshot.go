@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"unique"
 
 	"github.com/mmcdole/dgdtools/internal/par"
 	"github.com/mmcdole/dgdtools/pkg/diag"
@@ -296,7 +297,11 @@ func (s *Snapshot) includes(p string, t *pp.Table) *closure {
 // once per closure, where it is first met.
 func (s *Snapshot) include(c *closure, from string, inc pp.Include, depth int) {
 	p, absent := s.resolveInclude(from, inc)
-	c.absent = append(c.absent, absent...)
+	// The same few headers are in the closures of most units, each
+	// path made anew by each resolution: one string of each is kept.
+	for _, a := range absent {
+		c.absent = append(c.absent, unique.Make(a).Value())
+	}
 	if p == "" {
 		c.complete = false
 		return
@@ -304,6 +309,7 @@ func (s *Snapshot) include(c *closure, from string, inc pp.Include, depth int) {
 	if c.seen[p] {
 		return
 	}
+	p = unique.Make(p).Value()
 	c.seen[p] = true
 	c.deps = append(c.deps, p)
 	t := s.header(p).table
@@ -416,13 +422,16 @@ func (s *Snapshot) analyze(p string) *analysis {
 // facts derives the unit from an analysis.
 func (s *Snapshot) facts(a *analysis) *Unit {
 	f, tree, p := a.tok, a.tree, a.tok.Path
+	deps := make([]string, 0, len(a.inc.deps)+len(a.base.deps))
+	deps = append(append(deps, a.inc.deps...), a.base.deps...)
 	u := &Unit{
 		Path: p, LibPath: s.LibPath(p), Stub: s.isStub(p),
 		Partial: tree.Partial || a.env.Own().Partial,
-		Deps:    append(slices.Clone(a.inc.deps), a.base.deps...),
+		Deps:    deps,
 		gen:     s.gen,
 		sum:     a.sum,
-		watch:   append(slices.Clone(a.inc.deps[1:]), a.inc.absent...),
+		incs:    len(a.inc.deps),
+		absent:  slices.Clone(a.inc.absent),
 	}
 	for _, e := range tree.Errors {
 		if e.Severe {
@@ -455,7 +464,7 @@ func (s *Snapshot) facts(a *analysis) *Unit {
 	}
 	// The file's own variables, the last declaration of a name winning;
 	// then those of included code where the file has none of the name.
-	sortDecls(u)
+	u.Vars = sortVars(u.Vars, true)
 	own := len(u.Vars)
 
 	// Code in included files belongs to the including program: a
@@ -477,15 +486,9 @@ func (s *Snapshot) facts(a *analysis) *Unit {
 	}
 	u.Funcs = sortFuncs(u.Funcs)
 	if len(u.Vars) > own {
-		slices.SortStableFunc(u.Vars, func(a, b VarInfo) int { return strings.Compare(a.Name, b.Name) })
-		vars := u.Vars[:0]
-		for i, v := range u.Vars {
-			if i == 0 || u.Vars[i-1].Name != v.Name {
-				vars = append(vars, v)
-			}
-		}
-		u.Vars = slices.Clip(vars)
+		u.Vars = sortVars(u.Vars, false)
 	}
+	u.Inherits = slices.Clone(u.Inherits)
 	if s.uses != nil && !u.Stub {
 		u.setUses(s.uses(&Parsed{Unit: u, Tok: f, Tree: tree, Env: a.env}, s))
 	}
