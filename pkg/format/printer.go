@@ -401,19 +401,22 @@ func (p *printer) layout(gap []token.Token, next int, resumed, tail bool) {
 func (p *printer) finish(gap []token.Token) {
 	// The line break that ends a line here keeps its bytes, like every
 	// other the author wrote: the first of those that follow the line.
+	// Not a carriage return by itself, which ends no line for anybody
+	// who reads the file afterwards.
 	var newline, lastSpace []byte
+	sawNewline := false
 	for _, g := range gap {
 		switch g.Kind {
 		case token.Newline:
-			if newline == nil {
-				newline = p.f.Text(g)
+			if text := p.f.Text(g); !sawNewline && text[len(text)-1] == '\n' {
+				newline = text
 			}
-			lastSpace = nil
+			sawNewline, lastSpace = true, nil
 		case token.Space:
 			lastSpace = p.f.Text(g)
 		case token.LineComment, token.BlockComment:
 			if p.buf.Len() > 0 {
-				if newline != nil {
+				if sawNewline {
 					p.writeNewline(newline)
 				} else if len(lastSpace) > 0 {
 					p.buf.Write(lastSpace)
@@ -422,7 +425,7 @@ func (p *printer) finish(gap []token.Token) {
 				}
 			}
 			p.emitComment(g)
-			newline, lastSpace = nil, nil
+			sawNewline, newline, lastSpace = false, nil, nil
 		}
 	}
 	if p.buf.Len() > 0 && !p.runsOn() {

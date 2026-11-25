@@ -451,8 +451,11 @@ func TestOddTokensStayWhatTheyAre(t *testing.T) {
 		"#endif":         "#endif\n",
 		// The end of the file ends a line, before it is written to.
 		"A(){for(;;)\n{": "A()\n{\n    for (;;) {\n",
-		// A line break keeps its bytes, the last one too.
-		"\r\n\r\n0\n\n": "\r\n\r\n0\n",
+		// A line break keeps its bytes, the last one too, unless it is a
+		// carriage return alone.
+		"\r\n\r\n0\n\n":      "\r\n\r\n0\n",
+		"int x;\r\nint y;\n": "int x;\r\nint y;\n",
+		"int x;\nint y;\r":   "int x;\nint y;\n",
 	} {
 		assert.Equal(t, want, fmtSrc(t, in, Options{}), "%q", in)
 	}
