@@ -4,6 +4,7 @@
   "description": "DGD-dialect LPC: syntax highlighting, and the dgdtools language server (diagnostics as you type, fixes, formatting) for the language `dgdlpc`.",
   "version": "0.0.1",
   "publisher": "dgdtools",
+  "license": "MIT",
   "private": true,
   "repository": {
     "type": "git",

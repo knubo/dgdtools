@@ -1148,10 +1148,10 @@ job is simpler than planned, and nothing is published yet.
 - **What a listing needs.** `editors/vscode` has a `README.md` (the
   Marketplace's page), a `CHANGELOG.md` that points at the releases,
   and `.vscodeignore` keeps `src/`, `scripts/` and the tools out.
-  **Still the owner's:** a `LICENSE`. The repository has none to copy,
-  and one is not made up here; until there is one the packages are
-  made with `--skip-license` (vsce asks otherwise), with a warning. An
-  icon: there is none in the repository. The publisher, which is the
+  The repository is MIT-licensed; `editors/vscode/LICENSE` is a copy of
+  the root `LICENSE`, which `TestVSCodeClient` holds byte for byte, and
+  the manifest says `"license": "MIT"`. **Still the owner's:** an
+  icon. The publisher, which is the
   placeholder `dgdtools`, and `private`, which stays until it is set
   (section 14). And the two accounts and their tokens.
 - **Not checked:** a package installed in a VS Code, which is not on

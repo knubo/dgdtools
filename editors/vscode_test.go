@@ -211,11 +211,16 @@ func TestVSCodePackages(t *testing.T) {
 	for _, line := range ignored {
 		assert.NotContains(t, line, "bin", "the program is part of a package")
 	}
-	// What a marketplace shows of an extension. (A LICENSE is still to
-	// come, with the repository's own.)
-	for _, name := range []string{"README.md", "CHANGELOG.md"} {
+	// What a marketplace shows of an extension. The LICENSE is the
+	// repository's own, byte for byte.
+	for _, name := range []string{"README.md", "CHANGELOG.md", "LICENSE"} {
 		assert.FileExists(t, filepath.Join(vscodeDir, name))
 	}
+	repoLicense, err := os.ReadFile(filepath.Join(vscodeDir, "..", "..", "LICENSE"))
+	require.NoError(t, err)
+	extLicense, err := os.ReadFile(filepath.Join(vscodeDir, "LICENSE"))
+	require.NoError(t, err)
+	assert.Equal(t, string(repoLicense), string(extLicense), "editors/vscode/LICENSE is a copy of the repository's")
 
 	// The tools that pack and publish are the lockfile's, at one
 	// version each: nothing is fetched by name when a release is made.
