@@ -2,8 +2,9 @@
 
 Status: a plan, of which the first three steps of section 12 are built:
 the editor-side grammars of section 10.1, under `editors/`; the server
-itself for steps 1 to 3 of section 8 (live diagnostics, code actions,
-formatting), as `dgdtools lsp` and `pkg/lsp`; and the VS Code client of
+itself for steps 1 to 4 of section 8 (live diagnostics, code actions,
+formatting, go to definition), as `dgdtools lsp` and `pkg/lsp`; and the
+VS Code client of
 section 11, in `editors/vscode`, which has been built and checked but
 not yet run in a VS Code. "What is built" below says exactly what, and
 where it differs from the plan. The rest of section 8 is still a plan,
@@ -73,7 +74,7 @@ s.FS()                             // the files as the tools read them
 ### What is built
 
 `dgdtools lsp` speaks LSP 3.17 on standard input and output. `pkg/lsp`
-is some 2,100 lines over `session.Session`, the protocol's types among
+is some 2,400 lines over `session.Session`, the protocol's types among
 them. It makes one session, with `DiscoverOptions{ProfileDirs,
 UserConfig, Folders}` and no working directory: every path it is given
 is absolute.
@@ -84,6 +85,7 @@ is absolute.
 | `sync.go` | the open documents and their incremental changes; watched files; workspace folders and the two settings; the file watchers asked of the client |
 | `diagnostics.go` | when a document is linted, and what is published: the timers, the lint that a newer change stops, the whole-lib scan, `diag.Diagnostic` to the protocol's |
 | `actions.go` | `textDocument/codeAction`, `formatting`, `rangeFormatting` |
+| `definition.go` | `textDocument/definition`: `lint.Document.Resolve`'s answer as links or locations |
 | `content.go` | `workspace/textDocumentContent`: the text of a profile's stub |
 | `position.go` | `PositionMapper`, URIs and paths |
 | `protocol.go` | the protocol's types, as far as used (some 45) |
@@ -93,6 +95,7 @@ Capabilities announced: `positionEncoding` (`utf-8` when the client
 offers it, else `utf-16`), `textDocumentSync` (open and close,
 incremental changes), `codeActionProvider` (`quickfix`,
 `source.fixAll.dgdtools`; only to a client with code action literals),
+`definitionProvider`,
 `documentFormattingProvider`, `documentRangeFormattingProvider`,
 `workspace.workspaceFolders` (with change notifications),
 `workspace.textDocumentContent` for the scheme `dgdtools-profile`. Asked
@@ -102,7 +105,9 @@ of the client when it can: `workspace/configuration`,
 
 What the library got for it, since both are a script's or a command's as
 much as the server's: `config.DiscoverOptions.Folders` (section 3) and
-`lint.Suppress` (the suppression comments of section 8, step 2).
+`lint.Suppress` (the suppression comments of section 8, step 2). For
+step 4 it got `pkg/resolve`, what a place in a file refers to, which the
+server only asks (section 8, "As built, step 4").
 
 Where what is built is not what the sections below planned, the section
 says so in a paragraph that begins **As built**. In short:
@@ -410,7 +415,7 @@ knows the code base.
 | 1 **built** | Skeleton: initialize/shutdown, projects, incremental sync, `publishDiagnostics` with code, `codeDescription` (`Rule.URL`), related information, tags (`Diagnostic.Tags`: `unnecessary` for unreachable-code and unused suppressions) | `Session.Change`, `DiskChanged`, `Lint`, `Current`; `Linter.Scan`; `diag` | `PositionMapper` | 5 |
 | 2 **built**, but for "explain rule" | `codeAction`: quick fixes from `Diagnostic.Fixes` (a `safe` fix is `isPreferred` and joins "fix all"; an `unsafe` one is offered alone); "suppress with `dgdtools-ignore lint/RULE`" and "…for this file" (a `dgdtools-ignore-start lint/RULE` at its top) generated per diagnostic; "explain rule" as a command | fixes as text edits with their applicability (already data) | a helper that renders a suppression comment in the file's comment style and indentation | 2 |
 | 3 **built** | `formatting` and `rangeFormatting`; format-on-save of modified lines is the client's use of the latter | `format.Source(prj, path, text, lines)`: a function of the buffer and the file's settings, behind the gate (the same tokens, the same comments, a fixed point; a refusal returns no edits and a log line); `format.Edits(file, out)` gives one text edit per changed gap, so cursors and folds survive | LSP range to line range (a range that ends at column 0 does not include that line) | 2 |
-| 4 | `definition`: `#include` targets, `inherit` paths, function calls (direct, `::`, `label::`, `->` with a known receiver, string callbacks in registrars), macros | `Document.Snapshot` and a `Query` on it: `ResolveInclude`, `ObjectPath`, `Chain`, `LookupCallable`; the file's `pp.Env` (`pp.Macro.Path/Off`) | `syntax.PathAt(file, offset)` (innermost node chain at a position); a stub target is already located by its virtual document URI (`dgdtools-profile://NAME/std/room.c`, see `profile.Location`), which the server answers with the stub's text | 4 |
+| 4 **built** | `definition`: `#include` targets, `inherit` paths, function calls (direct, `::`, `label::`, `->` with a known receiver, string callbacks in registrars), macros | `Document.Snapshot` and a `Query` on it: `ResolveInclude`, `ObjectPath`, `Chain`, `LookupCallable`; the file's `pp.Env` (`pp.Macro.Path/Off`) | `syntax.PathAt(file, offset)` (innermost node chain at a position); a stub target is already located by its virtual document URI (`dgdtools-profile://NAME/std/room.c`, see `profile.Location`), which the server answers with the stub's text | 4 |
 | 5 | `hover` and `signatureHelp` | `ChainFunc.Decl/Type/DefinedIn`, `index.Params`, macro body and class, variable types | active-parameter computation from the argument list around the cursor; kfun table for built-ins (new data file) | 3 |
 | 6 | `documentSymbol`, `workspace/symbol` | `syntax.File.Decls`; units' symbol tables (whole-lib scan, cached) | fuzzy matcher | 2 |
 | 7 | `completion`: functions callable here (own chain, auto object, kfuns), `->` members for a known receiver, macros in view, `#include` and inherit paths, locals | chain + view + profile | local scopes (block-level symbol tables in `pkg/syntax`); tolerant parse at the cursor (the parser already recovers; completion context comes from tokens left of the cursor) | 5 |
@@ -439,6 +444,101 @@ link is on the diagnostic, and a command would need `executeCommand` and
 a place to show text, for the same words. Formatting takes the project's
 settings and passes over the request's `tabSize` and `insertSpaces`.
 
+**As built, step 4.** The answer is the library's, `pkg/resolve`, and
+`pkg/lsp/definition.go` is its 80 lines of protocol: the position to an
+offset, `lint.Document.Resolve(off)`, each declaration to a range in the
+text of its file. A client that says `linkSupport` gets `LocationLink`s,
+with the range of what was asked about (`originSelectionRange`: the
+name, the callback's name inside its quotes, the whole path of an
+inherit statement, the `<file>` of an `#include`) and the declared name
+as both target ranges; another gets `Location`s. Nothing to say is
+`null`. `declaration` and `typeDefinition` are not offered.
+
+```go
+doc, _ := s.Lint(ctx, path, lint.Options{NoScan: true})
+ref := doc.Resolve(off)        // *resolve.Ref, nil when the place names nothing
+ref.Kind, ref.Name             // include, object, label, function, variable, macro
+ref.Start, ref.End             // the text that names it
+ref.Decl                       // the place is itself a declaration of the name
+ref.Call                       // *calls.Named for ->fn, call_other, a registrar's callback
+for _, d := range ref.Defs {   // none: named, and declared nowhere the tools see
+    d.Path, d.Start, d.End     // file or stub location; the declared name in it
+    d.Object, d.Auto           // the object that has it; the auto object's
+    d.Func, d.Var, d.Macro     // index.FuncInfo, index.VarInfo, pp.Macro
+}
+```
+
+`resolve.New(resolve.File{...})` is the same for a caller without a
+lint; a `Resolver` is safe for concurrent use and reads the file's call
+sites (`calls.Extract`) once. Hover (step 5) reads the facts of a `Def`
+and, for a `Ref` without one, knows what was named (a function of the
+driver's for the kfun table); references and rename (steps 8, 10, 11)
+start from the same classification.
+
+What resolves:
+
+| at the cursor | goes to |
+|---|---|
+| an `#include` line, anywhere on it | the file `Snapshot.ResolveInclude` finds: beside the file, in the include directories, in a profile's stubs |
+| the path of an `inherit` statement, any token of it | the object's file. `inherit ROOM;` is about the room: the macro's `#define` is not offered there (in the shared directories of the lib measured, 95% of the inherit statements are written with a macro) |
+| an inherit label, in `label::fn()` or where it is given | the label in its inherit statement |
+| `fn(...)`, `&fn(...)` | the file's own function (one a header it includes as code declares, too), else the inherited one, else the auto object's; a definition before a prototype |
+| `::fn(...)`, `label::fn(...)` | the function of the inherited objects (of that label), and the auto object's for `::fn` when none has it. Two that are not each other's redefinition are both given: the call is ambiguous |
+| `x->fn(...)`, `call_other(x, "fn")`, a callback named by a string in `call_out` or a `conventions.call_registry` entry | with `x` being `this_object()` (or absent): as `fn(...)`. With `x` a string constant or a macro that is one: the function in that object's chain, else the auto object's |
+| the name of a function at its definition or prototype | the definition (a prototype's name goes to the definition) |
+| a macro's name, in code or in a directive (`#ifdef`, a `#define` body) | the name in its `#define`: in the file, a header, the force-included header, a stub (`pp.Env.Definition`, `pp.Macro.NameOff`) |
+| a global variable | its declarator: the file's, an inherited object's, one a header declares |
+| a string constant handed to `clone_object`, `compile_object`, `find_object` or a `conventions.object_registry` function | the object's file |
+
+What deliberately does not, each "prove it or stay silent":
+
+- **An unknown receiver.** `ob->fn()` is a `Ref` with `Call.Target ==
+  calls.TargetUnknown` and no `Def`: the server answers `null`. The same
+  for an object that is not there, and for one that is in neither the
+  checkout nor the profile.
+- **A function only an inheritor has.** `this_object()->fn()` and a
+  callback resolve in the file's own chain; when the name is provided
+  by whatever inherits the file (what the linter calls
+  `LookupFoundInUser`), which inheritor is running is nobody's to say,
+  and it would be a list. That is `implementation`, later.
+- **A function of the driver's.** A kfun has no source; the `Ref` is
+  there for hover's table.
+- **The auto object's function under an unseen object.** When the chain
+  has an object the index cannot see (an inherit that does not resolve,
+  an object that is not there: `index.Chain.Unseen`), that object may
+  redefine the name, as a lib's own objects do for many of the auto
+  object's functions, so the auto object's is given only when it is
+  `nomask` (`index.FuncInfo.Nomask`). The corpus found this: a wizard's
+  room whose `inherit` macro came from a header outside the checkout
+  went to the auto object's `set_light` where the whole lib goes to
+  `/std/object`'s (26 of 224,000 references; none now).
+- **What is private elsewhere.** A function or variable that is
+  `private` in an inherited object, or lies below a `private inherit` of
+  one, is not the file's; and it may hide one that is, so nothing is
+  said.
+- **Locals and parameters.** There are no scopes yet (step 7). A name
+  the enclosing function declares as a parameter or a local, anywhere in
+  it, is not taken for the global of that name, nor is one that a
+  statement the parser could not read mentions.
+- **Code that is not compiled or was not read.** A branch of a
+  conditional that is skipped, a comment, a statement that did not
+  parse and the first one after it (`BadStmt.Resumed` is not part of the
+  tree), the arguments of a macro that are no expressions, except for a
+  macro's own name there.
+- **Positions inside a file.** A macro is what the file's environment
+  has at its end (`Env.Definition`): of two `#define`s of a name the
+  later, wherever the use stands.
+- **From inside a stub.** A stub is shown, not analyzed: a definition
+  asked for in a `dgdtools-profile:` document is `null`. (It would take
+  the stub's project from the profile's name and `Snapshot.Parse` of the
+  stub's location; not built.)
+
+A place in another file is counted in the text the document's
+generation of the index reads (`Snapshot.ReadFile`): the editor's buffer
+for a file that is open, so the answer follows unsaved changes there;
+the disk; a stub's text, which is what `workspace/textDocumentContent`
+gives for its URI.
+
 Steps 1 to 3 (9 days) are the "useful every day" milestone: live
 diagnostics, fixes, formatting. Steps 4 to 6 (9 days) make it a
 navigation tool. Steps 7 to 9 (13 days) need two pieces of library work
@@ -446,7 +546,8 @@ that are also on the linter's own roadmap: local scopes and a kfun table.
 Steps 10 to 12 (15 days) are the editing tools, and stand on the scopes
 of step 7 and the reverse index of step 8.
 
-Library additions, all testable without a server: `syntax.PathAt`,
+Library additions, all testable without a server: `syntax.PathAt`
+(built, with `token.File.TokenAt`),
 block scopes, kfun table (name, parameters, return type), reverse
 reference index, `pkg/rename`. A lint already returns the parsed tree,
 tokens, `#define` environment, index unit and snapshot with the
@@ -1260,6 +1361,47 @@ grammars alone can ship in the first.
   document that waited for the first scan of the lib; 357 MB of heap at
   the end. Not built: the VS Code integration test (the client is the
   next step).
+- **As built, definitions (step 4).** In `pkg/resolve`: every kind of
+  reference on a whole lib, on a checkout with a profile (declarations
+  in stubs) and on a file with no lib, with what must stay silent
+  (`TestWholeLib`, `TestInherited`, `TestPartialCheckout`, `TestNoLib`);
+  under it `TestPathAt` (`pkg/syntax`), `TestDefinition` (`pkg/pp`),
+  `TestChain` and `TestAutoFuncAndReadFile` (`pkg/index`). In `pkg/lsp`:
+  `TestDefinitionIsResolve` holds the server to the library at every
+  place of every file of a lib, in both encodings, with characters of
+  several bytes and UTF-16 units before the names and a Latin-1 file on
+  disk; `TestDefinitionInStub` (the range is of the text
+  `workspace/textDocumentContent` gives); `TestDefinitionOfNothing`; the
+  transcripts `definition.txt` and `definition-plain.txt` (links;
+  locations and UTF-8; a target that is an unsaved buffer). In
+  `editors`: `TestNeovimDefinition`, the `nvim` on `PATH` going to
+  definitions with `vim.lsp.buf.definition()`. On the corpus (`-tags
+  corpus`, in `pkg/resolve`):
+  - `TestCorpusResolve` asks what every identifier, string constant and
+    directive word of 2,004 of the VikingMUD lib's 108,117 files refers
+    to: 189,105 places, 79,429 references, 65,798 of them resolved
+    (82.8%), about a microsecond a question. Every one of the 65,799
+    declarations was held to its file: the name stands at the place
+    given and reading the file again finds a declaration of that kind
+    and name there. By form: direct calls 31,314 of 36,950 (84.7%; the
+    rest are the driver's `this_object`, `sizeof`, `strlen`, ..., and
+    calls in files whose chain has an unseen object); `::fn()` 1,649 of
+    1,751 and `label::fn()` 425 of 427; `->fn` and `call_other` on a
+    known object 1,035 of 1,077 (96.1%) and on `this_object()` 253 of
+    282; string callbacks 1,066 of 1,074 (99.3%); `#include` 2,499 of
+    2,618; inherit paths 1,864 of 1,924 (96.9%); path arguments 130 of
+    159; macros 8,098 and globals 9,147, all. The 7,603 `->fn` and
+    `call_other` on an unknown receiver are references without a
+    declaration, by design.
+  - `TestCorpusResolvePartial` builds the lib's profile (723 stubs) and
+    resolves every name of ten wizard trees (4,206 files) twice, in a
+    copy with nothing but the profile and in place with the whole lib:
+    219,421 references resolve to the same lib file on both sides,
+    114,814 of the checkout's declarations being in stubs; 1,949 are
+    lost (code in neither the checkout nor the profile); none resolves
+    in the checkout only, and none to something else. All 219,423
+    declarations of the checkout side were held to their files and
+    stubs.
 - **Edit fuzzing** (`go test -fuzz`): start from a corpus file, apply a
   random sequence of range edits through incremental sync while applying
   the same edits to a plain string; after each step the server's buffer
@@ -1357,6 +1499,12 @@ Each with the alternative it was chosen over.
   disagree with the command line.
 - **A closed document has no diagnostics**: what nothing keeps true is
   not shown.
+- **A definition is proved or not given**, as a finding is: an unknown
+  receiver, a function only an inheritor has, and the auto object's
+  function below an object the index cannot see all answer nothing,
+  rather than the likeliest place (section 8, "As built, step 4").
+- **An `inherit` statement goes to the object**, whatever its path is
+  written with; a macro elsewhere goes to its `#define`.
 
 - **The VS Code extension is published under the repository owner's
   account**, to both the Visual Studio Marketplace and Open VSX (so

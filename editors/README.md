@@ -222,6 +222,15 @@ and what it formats is what `dgdtools format` writes. What it does:
   that is safe to apply unseen.
 - **Formatting** of a file or a selection, with the project's settings
   (`format:` in `dgdtools.yml`, else `.editorconfig`), not the editor's.
+- **Go to definition**: from an `#include` to the header, from an
+  `inherit` statement to the object, from a call to the function (the
+  file's, an inherited one, the auto object's; `::fn` and `label::fn`;
+  `->fn`, `call_other` and string callbacks when the receiver is
+  `this_object()` or a path), from a macro to its `#define`, from a
+  global variable to its declaration. With a profile, what is not in
+  your folder opens as the profile's read-only stub. Where the tools
+  cannot know (a call on an object held in a variable, a local
+  variable), nothing happens rather than a guess.
 
 It keeps a log when asked to: `dgdtools lsp --log /tmp/dgdtools-lsp.log`,
 and with `--trace` every message in both directions. It never writes to
@@ -286,7 +295,8 @@ nvim -u NONE \
 `go test ./editors -run TestNeovimClient` does the same without a
 screen: it runs the server under the `nvim` on `PATH`, waits for the
 diagnostics of a file, mends one finding by typing and one by the
-server's fix, and has the file formatted.
+server's fix, and has the file formatted. `TestNeovimDefinition` goes
+to definitions the same way.
 
 ### Vim
 

@@ -62,6 +62,9 @@ pkg/index    lazy cross-file index over syntax trees: symbols, inherit
 pkg/calls    the late-bound call sites of one file (obj->fn(),
              call_other, call_out, the lib's registrars) and the
              registry of functions that take a function name
+pkg/resolve  what a place in a file refers to (the file of an #include,
+             the object of an inherit, the function of a call, a macro's
+             #define, a global variable) and where that is declared
 pkg/format   the formatter: a layout plan from the syntax tree, a
              token-stream printer, the token-equality gate (section 8)
 pkg/lint     the embeddable linter: rules with typed options, the layers
@@ -570,6 +573,8 @@ for _, d := range res.Diagnostics { ... }          // ranges, code, related, fix
 doc, _ := l.Lint(ctx, path, lint.Options{})        // one document:
 doc.Diagnostics; doc.Tree; doc.File; doc.Env       // findings + what they came from
 doc.Snapshot                                       // the lib as they saw it
+ref := doc.Resolve(off)                            // what the token there refers to,
+ref.Kind; ref.Name; ref.Defs                       // and where that is declared
 
 out, _ := format.Source(prj, path, text, nil)      // one file's text, formatted
 ```
@@ -750,7 +755,8 @@ file read per edit, and findings identical to the whole-lib run's.
 
 Described in [lsp.md](lsp.md): a thin layer, `pkg/lsp` behind the
 `dgdtools lsp` subcommand, holding one `session.Session`. Diagnostics,
-code actions and formatting are built; the rows below them are planned.
+code actions, formatting and go to definition are built; the rows below
+them are planned.
 What it maps onto:
 
 | LSP feature | Maps onto |
@@ -759,7 +765,7 @@ What it maps onto:
 | `textDocument/publishDiagnostics` | `Session.Lint` for the changed document, debounced, with the previous lint cancelled through its context, published when `Session.Current(doc)`. A change returns the dependents; those that are open are linted again. `Diagnostic.code` = rule code, `codeDescription` = `Rule.URL`, `relatedInformation` = `Related` (a range), `tags` = `Tags`, positions via `diag.UTF16Col` and `diag.ByteCol`. |
 | `workspace/didChangeWatchedFiles` | `Session.DiskChanged(paths...)`: sources, directories, and every kind of configuration file alike. |
 | `textDocument/codeAction` | `Fixes` on the diagnostics in range (quick-fix edits), plus the "suppress with `dgdtools-ignore lint/RULE`" actions of `lint.Suppress`. |
-| `textDocument/definition` | the document's snapshot (`Document.Snapshot`): resolve the identifier under the cursor through `Snapshot.Chain` (functions and variables; `::` and `label::` calls), `->` calls with a known receiver through `LookupCallable`, `inherit`/`#include` paths through `ObjectPath`/`ResolveInclude`, macros through the file's `pp.Env`. `ChainFunc`, `ChainVar` and `pp.Macro` carry the defining file and position; a definition in a profile stub is at `dgdtools-profile://NAME/std/room.c`. |
+| `textDocument/definition` | `Document.Resolve(off)`, which is `pkg/resolve` on the document: the token at the offset as a `Ref` (what it names: the file of an `#include`, the object of an `inherit` or of a path argument, a label, a function, a global variable, a macro) and its `Defs`, the declarations it resolves to through `ResolveInclude`, `ObjectFile`, `Snapshot.Chain` (functions and variables; `::` and `label::` calls), `AutoFunc`, the receivers `pkg/calls` knows (`->`, `call_other`, the registrars' callbacks) and the file's `pp.Env` (`Definition`). Each `Def` has the file, the range of the declared name and the index's facts (`FuncInfo`, `VarInfo`, `pp.Macro`); a declaration in a profile stub is at `dgdtools-profile://NAME/std/room.c`. What cannot be proved has no `Def` ([lsp.md](lsp.md) section 8). |
 | `textDocument/hover` | the same lookups: specifiers and argument range of a function, the object that provides it, a macro's body and class. |
 | `textDocument/documentSymbol`, `workspace/symbol` | `syntax.File.Decls`; the units' symbol tables. |
 | `textDocument/formatting`, `rangeFormatting` | `format.Source(prj, path, text, lines)`, a function of the buffer and the file's settings; `format.Edits` for the reply. |
@@ -767,8 +773,8 @@ What it maps onto:
 
 What the server adds itself: JSON-RPC transport, position conversion,
 debouncing, and per-document versioning. No analysis logic lives there.
-What the core still lacks for it: a "node at offset" helper and scopes for
-local variables (section 11).
+What the core still lacks for it: scopes for local variables (section
+11). The "node at offset" helper is `syntax.PathAt`.
 
 ## 7. Rules
 
@@ -1054,7 +1060,8 @@ constant, a macro that evaluates to one, or `this_object()`.
 - `pkg/config` (discovery, settings scopes, `.editorconfig`, the
   user-level fallback, validation), `pkg/editorconfig`, `pkg/pp`,
   `pkg/diag`, `pkg/directive`, `pkg/calls` (the driver's calls, declared
-  registry forms), `cmd/dgdtools` (every subcommand: exit codes, output
+  registry forms), `pkg/resolve` (every kind of reference, on a whole
+  lib, a checkout with a profile and a file alone), `cmd/dgdtools` (every subcommand: exit codes, output
   formats, baseline workflow, discovery from anywhere, check/diff/stdin,
   line ranges, git-changed lines, configuration verification).
 - Golden files, rewritten with `-update`: `pkg/report` (a result with
