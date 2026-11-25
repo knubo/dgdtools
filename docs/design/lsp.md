@@ -1251,10 +1251,10 @@ job is simpler than planned, and nothing is published yet.
   and `.vscodeignore` keeps `src/`, `scripts/` and the tools out.
   The repository is MIT-licensed; `editors/vscode/LICENSE` is a copy of
   the root `LICENSE`, which `TestVSCodeClient` holds byte for byte, and
-  the manifest says `"license": "MIT"`. **Still the owner's:** an
-  icon. The publisher, which is the
-  placeholder `dgdtools`, and `private`, which stays until it is set
-  (section 14). And the two accounts and their tokens.
+  the manifest says `"license": "MIT"`. The publisher is `mmcdole`, so
+  the extension is `mmcdole.dgdtools`, and the manifest is no longer
+  `private`. **Still the owner's:** an icon, and the two accounts'
+  tokens as the secrets `VSCE_PAT` and `OVSX_PAT`.
 - **Not checked:** a package installed in a VS Code, which is not on
   the machine this was written on, so neither is the program started
   from `bin/` by the client; the release job, which runs on a tag (its
@@ -1508,8 +1508,8 @@ Each with the alternative it was chosen over.
 
 - **The VS Code extension is published under the repository owner's
   account**, to both the Visual Studio Marketplace and Open VSX (so
-  VSCodium and Cursor users get it too), when the client ships. Until
-  then the manifest stays `private` with a placeholder publisher.
+  VSCodium and Cursor users get it too): publisher `mmcdole`, extension
+  `mmcdole.dgdtools`.
 - **The VS Code client is TypeScript bundled into one file**, with one
   runtime dependency, not plain JavaScript without a build: the types
   are its first test, and the client library has to be fetched either

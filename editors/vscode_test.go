@@ -28,9 +28,10 @@ func TestVSCodeClient(t *testing.T) {
 		Enum  []string `json:"enum"`
 	}
 	var pkg struct {
-		Main    string `json:"main"`
-		Private bool   `json:"private"`
-		Engines struct {
+		Main      string `json:"main"`
+		Private   bool   `json:"private"`
+		Publisher string `json:"publisher"`
+		Engines   struct {
 			VSCode string `json:"vscode"`
 		} `json:"engines"`
 		Capabilities struct {
@@ -142,8 +143,9 @@ func TestVSCodeClient(t *testing.T) {
 
 	// Semantic token scopes come with the server's semantic tokens.
 	assert.Empty(t, pkg.Contributes.SemanticTokenScopes)
-	// Not published yet (docs/design/lsp.md, section 14).
-	assert.True(t, pkg.Private)
+	// Publishable under the owner's publisher (docs/design/lsp.md, section 14).
+	assert.False(t, pkg.Private)
+	assert.Equal(t, "mmcdole", pkg.Publisher)
 }
 
 // A release has the extension as a package for each platform, with that
