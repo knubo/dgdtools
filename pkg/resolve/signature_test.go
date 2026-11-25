@@ -329,3 +329,36 @@ func TestSignatureOfNothing(t *testing.T) {
 		}
 	}
 }
+
+// A file as it is typed, a byte at a time, is mostly no program; at the
+// end of every such text the questions are asked, and answered or not,
+// and nothing falls over.
+func TestEveryPrefix(t *testing.T) {
+	if testing.Short() {
+		t.Skip("lints a file once for each of its bytes")
+	}
+	lib := signatureLib()
+	text := lib["/lib/obj/s.c"]
+	answered := 0
+	for n := 0; n <= len(text); n++ {
+		fs := vfs.Mem{}
+		for k, v := range lib {
+			fs[k] = v
+		}
+		fs["/lib/obj/s.c"] = text[:n]
+		w := newWorld(t, fs, "/lib")
+		doc, err := w.l.Lint(context.Background(), "/lib/obj/s.c", lint.Options{NoScan: true})
+		require.NoError(t, err)
+		for _, off := range []uint32{uint32(n), uint32(max(n-1, 0))} {
+			doc.Hover(off)
+			if help := doc.Signature(off); help != nil {
+				answered++
+				for _, s := range help.Signatures {
+					require.Less(t, s.Active, len(s.Params)+1, "%q", text[:n])
+				}
+			}
+		}
+	}
+	// Most of the file is the arguments of calls.
+	assert.Greater(t, answered, len(text)/4)
+}

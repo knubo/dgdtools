@@ -18,6 +18,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -589,4 +590,282 @@ func TestCorpusResolvePartial(t *testing.T) {
 	assert.NotZero(t, total.same)
 	assert.NotZero(t, total.stubs)
 	assert.LessOrEqual(t, (total.gained+total.differ)*1000, 5*(total.same+total.lost), "the checkout resolves a name to something else than the whole lib does")
+}
+
+// TestCorpusHover asks, in the sample of TestCorpusResolve, for the
+// hover of every place that names something, and for the signature just
+// inside the '(' of every call of the code.
+//
+// Invariants: nothing panics. A hover has something to say for each
+// declaration the place resolves to, in text that is UTF-8, and says of
+// a function what the index has of it. A call's signatures are the
+// declarations its name resolves to, or the kfun's; a call whose
+// receiver is not known has none, and its hover says so. That holds the
+// reading of a call from the tokens left of the cursor (Signature) to
+// the reading of the tree (At).
+//
+// Logged, not asserted: how many places have a hover, by what they
+// name; how many calls have a signature, by how they are made; the kfuns
+// called, and the names called in a program all of which is known that
+// neither a function of the lib nor the kfun table has. Those are calls
+// of nothing, or kfuns the table lacks.
+func TestCorpusHover(t *testing.T) {
+	cfgPath := os.Getenv("DGDTOOLS_CONFIG")
+	if cfgPath == "" {
+		t.Skip("DGDTOOLS_CONFIG not set")
+	}
+	want := 2000
+	if n, err := strconv.Atoi(os.Getenv("LPC_SAMPLE")); err == nil {
+		want = n
+	}
+	ctx := context.Background()
+	fsys := vfs.OS{}
+	prj, err := config.Discover(fsys, nil, config.DiscoverOptions{ConfigPath: cfgPath})
+	require.NoError(t, err)
+	require.NotEmpty(t, prj.Root, "the configuration needs the whole lib")
+	l, err := lint.New(prj, fsys)
+	require.NoError(t, err)
+	kfuns, err := prj.Config.Kfuns()
+	require.NoError(t, err)
+
+	var files []string
+	require.NoError(t, prj.Tree().Walk(ctx, fsys, prj.Root, []string{".c"}, fileset.NewMatcher(prj.Config.Exclude),
+		func(p string) { files = append(files, p) }))
+	slices.Sort(files)
+	var sample []string
+	for i := 0; i < len(files) && len(sample) < want; i += max(len(files)/want, 1) {
+		sample = append(sample, files[i])
+	}
+
+	failures := 0
+	fail := func(format string, args ...any) {
+		if failures++; failures <= 30 {
+			t.Errorf(format, args...)
+		}
+	}
+	type count struct{ n, with int }
+	hovers, signatures := map[string]*count{}, map[string]*count{}
+	tally := func(m map[string]*count, kind string, with bool) {
+		c := m[kind]
+		if c == nil {
+			c = &count{}
+			m[kind] = c
+		}
+		c.n++
+		if with {
+			c.with++
+		}
+	}
+	kfunCalls, unknownCalls := map[string]int{}, map[string]int{}
+	var documented, unjudged, linted, hoverAsked, sigAsked int
+	var hoverTook, sigTook time.Duration
+
+	for _, file := range sample {
+		doc, err := l.Lint(ctx, file, lint.Options{NoScan: true})
+		if err != nil {
+			continue
+		}
+		linted++
+		src, toks := doc.File.Src, doc.File.Tokens
+		// All of the program is known: what is not a function of the
+		// lib is a kfun or nothing.
+		whole := doc.Unit.LibPath != "" && !doc.Snapshot.AutoUnseen() && !doc.Snapshot.Chain(doc.Unit.LibPath).Unseen
+
+		// Every place that names something.
+		seen := map[uint32]bool{}
+		ask := func(ti int, off uint32) {
+			ref := doc.Resolve(off)
+			if ref == nil || seen[ref.Start] {
+				return
+			}
+			seen[ref.Start] = true
+			start := time.Now()
+			h := doc.Hover(off)
+			hoverTook += time.Since(start)
+			hoverAsked++
+			kind := form(doc, ti, ref)
+			tally(hovers, kind, h != nil)
+			if h == nil {
+				if len(ref.Defs) > 0 {
+					fail("%s:%d: %s %s resolves, and has no hover", file, off, ref.Kind, ref.Name)
+				}
+				return
+			}
+			if len(h.Infos) == 0 || len(ref.Defs) > 0 && len(h.Infos) != len(ref.Defs) {
+				fail("%s:%d: %s %s: %d declarations, %d told", file, off, ref.Kind, ref.Name, len(ref.Defs), len(h.Infos))
+				return
+			}
+			for i, info := range h.Infos {
+				if !utf8.ValidString(info.Code) || !utf8.ValidString(info.Doc) || !utf8.ValidString(info.Origin.String()) {
+					fail("%s:%d: %s %s: a hover that is not UTF-8", file, off, ref.Kind, ref.Name)
+				}
+				if info.Doc != "" {
+					documented++
+				}
+				switch {
+				case len(ref.Defs) == 0:
+					if !info.Kfun && info.Note == "" && !info.Configured {
+						fail("%s:%d: %s %s: told of nothing: %+v", file, off, ref.Kind, ref.Name, info)
+					}
+					if info.Kfun && (kfuns.Lookup(ref.Name) == nil || info.Code != kfuns.Lookup(ref.Name).Decl || !whole) {
+						fail("%s:%d: %s is told as a kfun: %+v", file, off, ref.Name, info)
+					}
+				case ref.Kind == resolve.Function && info.Code != ref.Defs[i].Func.Decl,
+					ref.Kind != resolve.Object && info.Code == "",
+					info.Origin.File == "" && ref.Kind != resolve.Label:
+					fail("%s:%d: %s %s: %+v", file, off, ref.Kind, ref.Name, info)
+				}
+			}
+		}
+		for ti, tok := range toks {
+			switch tok.Kind {
+			case token.Ident:
+				ask(ti, tok.Off)
+			case token.StringLit:
+				ask(ti, tok.Off+(tok.End-tok.Off)/2)
+			case token.Directive:
+				ask(ti, tok.Off)
+				for off := tok.Off + 1; off < tok.End; off++ {
+					if token.IsIdentByte(src[off]) && !token.IsIdentByte(src[off-1]) {
+						ask(ti, off)
+					}
+				}
+			}
+		}
+
+		// Every call of the code, just inside its '('.
+		call := func(name *syntax.Ident, lparen int) {
+			nameOff := doc.Tree.Off(name)
+			ref := doc.Resolve(nameOff)
+			inside := toks[lparen].End
+			start := time.Now()
+			help := doc.Signature(inside)
+			sigTook += time.Since(start)
+			sigAsked++
+			at := fmt.Sprintf("%s:%d: %s(", file, nameOff, name.Name)
+			if ref == nil {
+				// A name in what At does not read: the arguments of a
+				// macro that are no expressions.
+				tally(signatures, "a call At does not read", help != nil)
+				return
+			}
+			var labels []string
+			if help != nil {
+				for _, s := range help.Signatures {
+					labels = append(labels, s.Label)
+					if !utf8.ValidString(s.Label) || !utf8.ValidString(s.Doc) || s.Active >= len(s.Params) || help.Arg != 0 {
+						fail("%s a signature that cannot be: %+v", at, s)
+					}
+					for _, p := range s.Params {
+						if p[0] < 0 || p[0] >= p[1] || p[1] > len(s.Label) {
+							fail("%s a parameter outside the label %q: %v", at, s.Label, p)
+						}
+					}
+				}
+			}
+			if ref.Kind == resolve.Macro {
+				tally(signatures, "macro", help != nil)
+				return
+			}
+			if ref.Kind != resolve.Function {
+				fail("%s the callee is a %s", at, ref.Kind)
+				return
+			}
+			kind := form(doc, name.First, ref)
+			var decls []string
+			for _, d := range ref.Defs {
+				decls = append(decls, d.Func.Decl)
+			}
+			h := doc.Hover(nameOff)
+			isKfun := h != nil && h.Infos[0].Kfun
+			if isKfun {
+				decls = []string{h.Infos[0].Code}
+				kind = "kfun"
+				kfunCalls[name.Name]++
+			}
+			tally(signatures, kind, help != nil)
+			if !slices.Equal(decls, labels) {
+				fail("%s the name resolves to %q, the signatures are %q", at, decls, labels)
+			}
+			if c := ref.Call; c != nil && c.Target == calls.TargetUnknown && (help != nil || h == nil || h.Infos[0].Note != resolve.UnknownReceiver) {
+				fail("%s the receiver is not known, and something is said: %q", at, labels)
+			}
+			if ref.Call == nil && len(ref.Defs) == 0 && !isKfun {
+				if whole {
+					unknownCalls[name.Name]++
+				} else {
+					unjudged++
+				}
+			}
+		}
+		doc.Tree.Funcs(func(fn *syntax.FuncDecl) bool {
+			if fn.Body == nil {
+				return true
+			}
+			syntax.Inspect(fn.Body, func(n syntax.Node) bool {
+				switch n := n.(type) {
+				case *syntax.CallExpr:
+					if !n.Opaque {
+						call(n.Fun, n.LParen)
+					}
+				case *syntax.ArrowExpr:
+					_, last := n.Name.Span()
+					for i := last + 1; i < len(toks); i++ {
+						if toks[i].Kind == token.LParen {
+							call(n.Name, i)
+							break
+						}
+						if !toks[i].Kind.IsTrivia() {
+							break
+						}
+					}
+				}
+				return true
+			})
+			return true
+		})
+	}
+
+	report := func(title string, m map[string]*count) {
+		t.Logf("%-38s %9s %9s", title, "places", "with one")
+		total := count{}
+		for _, kind := range slices.Sorted(maps.Keys(m)) {
+			c := m[kind]
+			total.n += c.n
+			total.with += c.with
+			t.Logf("%-38s %9d %9d %5.1f%%", kind, c.n, c.with, 100*float64(c.with)/float64(c.n))
+		}
+		t.Logf("%-38s %9d %9d %5.1f%%", "all", total.n, total.with, 100*float64(total.with)/float64(max(total.n, 1)))
+	}
+	t.Logf("%d of %d files; a hover takes %v on average, a signature %v", linted, len(files),
+		(hoverTook / time.Duration(max(hoverAsked, 1))).Round(100*time.Nanosecond), (sigTook / time.Duration(max(sigAsked, 1))).Round(100*time.Nanosecond))
+	report("hover, by what is named", hovers)
+	t.Logf("%d of the declarations told have a comment above them", documented)
+	report("signature, by the call", signatures)
+	top := func(m map[string]int, n int) string {
+		names := slices.SortedFunc(maps.Keys(m), func(a, b string) int {
+			if m[a] != m[b] {
+				return m[b] - m[a]
+			}
+			return strings.Compare(a, b)
+		})
+		var out []string
+		for _, name := range names[:min(len(names), n)] {
+			out = append(out, fmt.Sprintf("%s (%d)", name, m[name]))
+		}
+		return strings.Join(out, ", ")
+	}
+	sum := func(m map[string]int) (n int) {
+		for _, c := range m {
+			n += c
+		}
+		return n
+	}
+	t.Logf("kfuns called: %d calls of %d of the table's %d: %s", sum(kfunCalls), len(kfunCalls), len(kfuns.Names()), top(kfunCalls, 200))
+	t.Logf("called in a program all of which is known, and neither a function of the lib nor in the kfun table: %d calls of %d names: %s",
+		sum(unknownCalls), len(unknownCalls), top(unknownCalls, 200))
+	t.Logf("not judged, the program having an object nobody sees: %d calls", unjudged)
+	assert.Zero(t, failures, "see the log")
+	assert.NotZero(t, len(kfunCalls))
+	assert.Empty(t, l.Index().Snapshot().Crashed())
 }

@@ -230,6 +230,7 @@ func (r *Resolver) info(ref *Ref, d *Def, texts *texts) Info {
 		info.Code = "#include " + string(r.Tok.Src[ref.Start:ref.End])
 	case Object:
 	}
+	info.Code = utf8Text(info.Code)
 	return info
 }
 
