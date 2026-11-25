@@ -35,9 +35,46 @@ sources too, they stay C. A file is `dgdlpc` because of where it lies:
 ## VS Code
 
 The extension is the folder `vscode/`: the grammar, and a client that
-starts `dgdtools lsp` ([below](#vs-code-1)). It is not published yet,
-and it is built before it is used, which needs Node.js (its tests need
-22.18 or later) and installs nothing outside the folder:
+starts `dgdtools lsp` ([below](#vs-code-1)). It is not published in a
+marketplace yet. A release of dgdtools has it as files, one package for
+each platform with that platform's `dgdtools` inside
+(`dgdtools-darwin-arm64-0.4.0.vsix`, and so on for `darwin-x64`,
+`linux-x64`, `linux-arm64`, `win32-x64` and `win32-arm64`) and one
+without the program for every other platform (`dgdtools-0.4.0.vsix`);
+`code --install-extension FILE` installs one.
+
+From a checkout it is built before it is used, which needs Node.js
+(22.18 or later) and installs nothing outside the folder. **As a
+package**, for the machine you are on and with the `dgdtools` of the
+checkout inside it, which needs Go too:
+
+```
+cd /path/to/dgdtools
+make vsix        # go build, npm ci, and vsce package --target for this platform
+code --install-extension editors/vscode/dgdtools-darwin-arm64-0.0.1.vsix
+```
+
+The file's name has the platform (`linux-x64`, `win32-arm64`, ...) and
+the version of `package.json`, which a release replaces with its own.
+`make vsix` is `scripts/vsix.mts --binary bin/dgdtools`, and the script
+takes another program and another platform, a version, and a directory
+to write to:
+
+```
+cd /path/to/dgdtools
+GOOS=linux GOARCH=amd64 go build -o /tmp/dgdtools ./cmd/dgdtools
+cd editors/vscode
+npm ci
+node scripts/vsix.mts --binary /tmp/dgdtools --target linux-x64 --version 0.4.0 --out /tmp
+```
+
+`--dist DIR` makes all seven packages of a release from what GoReleaser
+wrote to `DIR` (`goreleaser build --snapshot --clean` writes `dist/`),
+which is what the release workflow runs. The packing is `vsce`'s, the
+one `package-lock.json` pins; nothing here publishes anything.
+
+**From the folder as it is**, without a package and without a program
+in it (the `dgdtools` on `PATH` is run):
 
 ```
 cd /path/to/dgdtools/editors/vscode
@@ -53,11 +90,8 @@ npm run build    # writes dist/extension.js, the one file VS Code runs
   ln -s /path/to/dgdtools/editors/vscode ~/.vscode/extensions/dgdtools.dgdtools-0.0.1
   ```
 
-  A packaged extension is the other way, and the one that is sure to be
-  listed: `npx @vscode/vsce package --no-dependencies` in the folder
-  writes `dgdtools-0.0.1.vsix`, and `code --install-extension
-  dgdtools-0.0.1.vsix` installs it. (Neither was run here: there is no
-  VS Code on the machine this was written on.)
+(The packages were built here and looked into; none was installed:
+there is no VS Code on the machine this was written on.)
 
 Then say which files are LPC. The command **dgdtools: Treat This Folder
 as an LPC Lib** does (the command palette, or a folder's menu in the
@@ -291,14 +325,19 @@ standard input and output.
 ### VS Code
 
 The extension (built and installed as [above](#vs-code)) starts the
-server when a workspace has a `dgdtools.yml` or a file is `dgdlpc`, and
-needs `dgdtools` itself on the machine: it is not in the extension. It
-runs the `dgdtools` on `PATH`, or the program `dgdtools.path` names, and
-says what to do when there is neither.
+server when a workspace has a `dgdtools.yml` or a file is `dgdlpc`.
+Which `dgdtools` it runs: the program `dgdtools.path` names, when it is
+set; else the one in the extension's own folder (`bin/dgdtools`, which a
+package made for a platform has, and which is the `dgdtools` of the same
+release); else the `dgdtools` on `PATH`. It says what to do when there
+is none. To have the editor run what your shell runs although the
+package has a program, set `dgdtools.path` to `dgdtools`. The *dgdtools*
+channel of the Output panel says which program was started, and its
+version.
 
 | setting | |
 |---|---|
-| `dgdtools.path` | the executable: an absolute path (`~` is the home directory) or a command name on `PATH`. Empty: `dgdtools` on `PATH` |
+| `dgdtools.path` | the executable: an absolute path (`~` is the home directory) or a command name on `PATH`. Empty: the one the extension came with, else `dgdtools` on `PATH` |
 | `dgdtools.profile`, `dgdtools.libPath` | the two settings [above](#the-language-server), for a folder with no `dgdtools.yml`; each workspace folder can have its own |
 | `dgdtools.logFile` | a file for the server's debug log (`--log`) |
 | `dgdtools.trace.server` | `messages` or `verbose`: how much is traced while the log level of the *dgdtools* channel of the Output panel is *Trace* |
@@ -328,8 +367,9 @@ whose text the server gives (`workspace/textDocumentContent`).
 
 To work on the extension: `npm run check` checks the types, `npm test`
 runs the tests of what needs no VS Code (finding the executable, the
-association patterns), and `go test ./editors` holds the manifest to
-the code. None of them starts VS Code: the client has not been run in
+association patterns, what the packaging script makes of a release),
+and `go test ./editors` holds the manifest to the code and the
+script's platforms to GoReleaser's. None of them starts VS Code: the client has not been run in
 one here, which is the first thing to do with it.
 
 ## Helix, Zed

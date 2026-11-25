@@ -1,0 +1,118 @@
+# DGD LPC (dgdtools)
+
+Support for the [DGD](https://github.com/dworkin/dgd) dialect of LPC in
+VS Code, from [dgdtools](https://github.com/mmcdole/dgdtools#readme),
+the linter and formatter for it:
+
+- **Syntax highlighting** that knows DGD's own tokens (`({ })` and
+  `([ ])` literals, `<-`, `..`, `nil`, `atomic`, `rlimits`, labeled
+  inherits), with no server and on a file that does not parse.
+- **Diagnostics as you type**: what `dgdtools lint` finds, for the files
+  that are open. What the driver will reject when it loads the object
+  (syntax errors, constructs DGD does not accept, missing includes) and
+  what it will not notice at all (calls to functions and objects that do
+  not exist).
+- **Fixes** in the lightbulb: a finding's fix when it has one, a comment
+  that suppresses it for the line or the file, and *fix all*
+  (`source.fixAll.dgdtools`).
+- **Formatting** of a file or a selection, as `dgdtools format` writes
+  it: one style, and only whitespace changes.
+
+The language is called `dgdlpc`, *DGD LPC* in the language picker. The
+editor shows what the command line prints: both read the lib's
+`dgdtools.yml`.
+
+## Installing
+
+The extension comes as one package for each platform, with that
+platform's `dgdtools` inside: on macOS, Linux and Windows (x64 and arm64
+each) there is nothing else to install. On any other platform the
+package is the extension without the program:
+[install dgdtools](https://github.com/mmcdole/dgdtools#installation)
+yourself, on your `PATH`.
+
+The packages are also files of each
+[release of dgdtools](https://github.com/mmcdole/dgdtools/releases),
+`dgdtools-<platform>-<version>.vsix` and, without the program,
+`dgdtools-<version>.vsix`. One is installed with *Extensions: Install
+from VSIX…* in the command palette, or
+
+```
+code --install-extension dgdtools-darwin-arm64-0.4.0.vsix
+```
+
+## Saying which files are LPC
+
+The extension claims no file by its name: a `.c` file is C on your
+machine everywhere but in a lib. Open the lib's folder and run
+**dgdtools: Treat This Folder as an LPC Lib** (the command palette, or a
+folder's menu in the explorer); the extension offers it by itself when
+the folder has a `dgdtools.yml`. It writes `files.associations` to the
+workspace's settings and never to your own:
+
+```json
+{
+  "files.associations": { "*.c": "dgdlpc", "*.h": "dgdlpc" }
+}
+```
+
+A lib whose files are Latin-1 should say that too, or saving a file
+opened as UTF-8 damages it:
+
+```json
+{
+  "[dgdlpc]": { "files.encoding": "iso88591" }
+}
+```
+
+To fix and format on saving:
+
+```json
+{
+  "[dgdlpc]": {
+    "editor.formatOnSave": true,
+    "editor.codeActionsOnSave": { "source.fixAll.dgdtools": "explicit" }
+  }
+}
+```
+
+## Commands
+
+| command | |
+|---|---|
+| **dgdtools: Treat This Folder as an LPC Lib** | the `*.c` and `*.h` files of a folder are `dgdlpc`, in the workspace's settings |
+| **dgdtools: Stop Treating This Folder as an LPC Lib** | takes out what the first command put in |
+| **dgdtools: Restart Server** | stops the language server and starts it again |
+
+## Settings
+
+| setting | |
+|---|---|
+| `dgdtools.path` | the `dgdtools` executable to run: an absolute path (`~` is your home directory) or a command name on `PATH`. Empty: the one this extension came with, else `dgdtools` on `PATH` |
+| `dgdtools.profile` | the mudlib profile to work against in a folder that has no `dgdtools.yml`: a name or a file, as `profile:` in a config file |
+| `dgdtools.libPath` | where a folder that has no `dgdtools.yml` sits in the lib (for example `/players/me`), as `lib_path:` in a config file |
+| `dgdtools.logFile` | a file the server appends its debug log to |
+| `dgdtools.trace.server` | `messages` or `verbose`: how much is traced while the log level of the *dgdtools* channel of the Output panel is *Trace* |
+
+A `dgdtools.yml` always wins over `dgdtools.profile` and
+`dgdtools.libPath`, and everything else about the tools is the lib's to
+say, in that file: an editor cannot make the server disagree with the
+command line.
+
+## Which dgdtools runs
+
+The program `dgdtools.path` names, when it is set. Else the one in the
+extension's package, which is the one of the extension's own release.
+Else `dgdtools` on `PATH`. To have the editor run what your shell runs,
+set `dgdtools.path` to `dgdtools`. The *dgdtools* channel of the Output
+panel says which program was started, and its version. In a workspace
+that is not trusted, what the workspace itself says of `dgdtools.path`
+and `dgdtools.logFile` is not listened to.
+
+## More
+
+- [dgdtools](https://github.com/mmcdole/dgdtools#readme): the rules, the
+  formatter, `dgdtools.yml`, mudlib profiles.
+- [Editor support](https://github.com/mmcdole/dgdtools/blob/main/editors/README.md):
+  what the grammar and the server do in detail, Vim and Neovim, other
+  editors, and how to build this extension from a checkout.

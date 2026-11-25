@@ -1,7 +1,10 @@
 # What a packaged extension is: the manifest, the grammar, the language
-# configuration and dist/extension.js, which the build writes with the
-# client library inside it. Everything else stays out.
+# configuration, dist/extension.js, which the build writes with the
+# client library inside it, the README, the change log and the license,
+# and in a package made for one platform bin/, which has that platform's
+# dgdtools (scripts/vsix.mts puts it there). Everything else stays out.
 src/**
+scripts/**
 node_modules/**
 dist/**/*.map
 tsconfig.json

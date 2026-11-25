@@ -11,6 +11,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gopkg.in/yaml.v3"
 
 	"github.com/mmcdole/dgdtools/pkg/profile"
 )
@@ -143,6 +144,90 @@ func TestVSCodeClient(t *testing.T) {
 	assert.Empty(t, pkg.Contributes.SemanticTokenScopes)
 	// Not published yet (docs/design/lsp.md, section 14).
 	assert.True(t, pkg.Private)
+}
+
+// A release has the extension as a package for each platform, with that
+// platform's dgdtools inside (docs/design/lsp.md, 11.2). The platforms
+// are GoReleaser's, the packages are made by vscode/scripts/vsix.mts,
+// and the client looks for the program where the script puts it; the
+// script's own tests are npm's. Here: that the script knows a VS Code
+// platform for exactly what GoReleaser builds, and that the package
+// takes the program in and leaves the tools out.
+func TestVSCodePackages(t *testing.T) {
+	var releaser struct {
+		Builds []struct {
+			Binary string   `yaml:"binary"`
+			GOOS   []string `yaml:"goos"`
+			GOARCH []string `yaml:"goarch"`
+		} `yaml:"builds"`
+	}
+	data, err := os.ReadFile("../.goreleaser.yaml")
+	require.NoError(t, err)
+	require.NoError(t, yaml.Unmarshal(data, &releaser))
+	require.Len(t, releaser.Builds, 1)
+	build := releaser.Builds[0]
+	var built []string
+	for _, goos := range build.GOOS {
+		for _, goarch := range build.GOARCH {
+			built = append(built, goos+"/"+goarch)
+		}
+	}
+	sort.Strings(built)
+
+	script, err := os.ReadFile(filepath.Join(vscodeDir, "scripts", "vsix.mts"))
+	require.NoError(t, err)
+	// The table of the script: 'GOOS/GOARCH': 'the platform of VS Code'.
+	var known, platforms []string
+	for _, m := range regexp.MustCompile(`(?m)^  '([a-z0-9]+/[a-z0-9]+)': '([a-z0-9]+-[a-z0-9]+)',$`).FindAllStringSubmatch(string(script), -1) {
+		known = append(known, m[1])
+		platforms = append(platforms, m[2])
+	}
+	sort.Strings(known)
+	sort.Strings(platforms)
+	assert.Equal(t, built, known, "a package for each binary of a release, and for nothing else")
+	assert.Equal(t, []string{"darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-arm64", "win32-x64"}, platforms)
+
+	// The program has one name in the release and in the package, and
+	// one place in the package and in the client.
+	server, err := os.ReadFile(filepath.Join(vscodeDir, "src", "server.ts"))
+	require.NoError(t, err)
+	assert.Contains(t, string(server), "export const defaultCommand = '"+build.Binary+"';")
+	assert.Contains(t, string(server), "export const bundledDir = 'bin';")
+	assert.Contains(t, string(script), "import { bundledDir } from '../src/server.ts';")
+
+	// What is packed is everything .vscodeignore does not name: bin/
+	// goes in, and the sources and the tools stay out.
+	ignore, err := os.ReadFile(filepath.Join(vscodeDir, ".vscodeignore"))
+	require.NoError(t, err)
+	var ignored []string
+	for _, line := range strings.Split(string(ignore), "\n") {
+		if line != "" && !strings.HasPrefix(line, "#") {
+			ignored = append(ignored, line)
+		}
+	}
+	for _, want := range []string{"src/**", "scripts/**", "node_modules/**", "package-lock.json", "**/*.vsix"} {
+		assert.Contains(t, ignored, want)
+	}
+	for _, line := range ignored {
+		assert.NotContains(t, line, "bin", "the program is part of a package")
+	}
+	// What a marketplace shows of an extension. (A LICENSE is still to
+	// come, with the repository's own.)
+	for _, name := range []string{"README.md", "CHANGELOG.md"} {
+		assert.FileExists(t, filepath.Join(vscodeDir, name))
+	}
+
+	// The tools that pack and publish are the lockfile's, at one
+	// version each: nothing is fetched by name when a release is made.
+	var pkg struct {
+		DevDependencies map[string]string `json:"devDependencies"`
+	}
+	data, err = os.ReadFile(filepath.Join(vscodeDir, "package.json"))
+	require.NoError(t, err)
+	require.NoError(t, json.Unmarshal(data, &pkg))
+	for _, tool := range []string{"@vscode/vsce", "ovsx"} {
+		assert.Regexp(t, `^\d+\.\d+\.\d+$`, pkg.DevDependencies[tool], tool)
+	}
 }
 
 // keys returns the keys of m, sorted.

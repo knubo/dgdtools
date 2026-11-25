@@ -23,8 +23,10 @@
 //     an editor session has it lint, fix and format a file;
 //   - the manifest of the VS Code extension is compared with the code
 //     of its client: the commands, the settings, the names both share
-//     with the server. The client's own checks (its types, its tests,
-//     its build) need Node and are run by npm in vscode/.
+//     with the server; and the platforms it is packaged for, with the
+//     binary inside, are compared with those a release is built for.
+//     The client's own checks (its types, its tests, its build) need
+//     Node and are run by npm in vscode/.
 //
 // See docs/design/lsp.md, sections 10.1 and 11.
 package editors

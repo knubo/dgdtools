@@ -144,7 +144,7 @@
   "scripts": {
     "build": "esbuild src/extension.ts --bundle --platform=node --format=cjs --target=node20 --external:vscode --sourcemap --outfile=dist/extension.js",
     "check": "tsc -p .",
-    "test": "node --test \"src/**/*.test.ts\"",
+    "test": "node --test \"src/**/*.test.ts\" \"scripts/**/*.test.mts\"",
     "vscode:prepublish": "npm run check && npm run build -- --minify"
   },
   "dependencies": {
@@ -153,7 +153,9 @@
   "devDependencies": {
     "@types/node": "^20.19.0",
     "@types/vscode": "1.91.0",
+    "@vscode/vsce": "4.1.1",
     "esbuild": "0.28.2",
+    "ovsx": "1.4.0",
     "typescript": "7.0.2"
   }
 }

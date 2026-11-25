@@ -24,3 +24,66 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # The binaries of this release, for the packages of the extension.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error
+          retention-days: 1
+
+  # The VS Code extension of the release (docs/design/lsp.md, 11.2): a
+  # package for each platform with that platform's binary inside, as
+  # GoReleaser just built it, and one without for the rest, all with the
+  # tag's version. They are attached to the release. They are published
+  # only once the owner has given the tokens, as the repository secrets
+  # VSCE_PAT (Visual Studio Marketplace) and OVSX_PAT (Open VSX): until
+  # then the last steps are skipped. With a token, a manifest that is
+  # not ready to be published fails the job before anything is. A tag
+  # like v1.0.0-rc.1 is packed and attached, and not published: it is
+  # not a version a marketplace takes.
+  vscode:
+    needs: goreleaser
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: editors/vscode
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: editors/vscode/package-lock.json
+      - run: npm ci
+      - run: node scripts/vsix.mts --dist ../../dist --version "$GITHUB_REF_NAME" --out ../../vsix
+      - run: gh release upload "$GITHUB_REF_NAME" ../../vsix/*.vsix
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # Which tokens there are. Only the step that publishes with a
+      # token is given it.
+      - id: tokens
+        if: ${{ !contains(github.ref_name, '-') }}
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+          OVSX_PAT: ${{ secrets.OVSX_PAT }}
+        run: |
+          echo "vsce=${VSCE_PAT:+yes}" >> "$GITHUB_OUTPUT"
+          echo "ovsx=${OVSX_PAT:+yes}" >> "$GITHUB_OUTPUT"
+      - name: Is the extension ready to be published?
+        if: steps.tokens.outputs.vsce == 'yes' || steps.tokens.outputs.ovsx == 'yes'
+        run: node scripts/vsix.mts --publishable
+      - name: Publish to the Visual Studio Marketplace
+        if: steps.tokens.outputs.vsce == 'yes'
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        run: node_modules/.bin/vsce publish --skip-duplicate --packagePath ../../vsix/*.vsix
+      - name: Publish to Open VSX
+        if: steps.tokens.outputs.ovsx == 'yes'
+        env:
+          OVSX_PAT: ${{ secrets.OVSX_PAT }}
+        run: node_modules/.bin/ovsx publish --skip-duplicate --packagePath ../../vsix/*.vsix

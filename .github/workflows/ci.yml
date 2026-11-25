@@ -60,3 +60,36 @@ jobs:
       - run: npm run check
       - run: npm test
       - run: npm run build
+
+  # The packages of the extension, made as a release makes them
+  # (release.yml), from the binaries of a GoReleaser snapshot: one for
+  # each platform with its binary inside, and one without. Nothing is
+  # published, here or by the script.
+  vsix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          version: "~> v2"
+          args: build --snapshot --clean
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: editors/vscode/package-lock.json
+      - run: npm ci
+        working-directory: editors/vscode
+      - run: node scripts/vsix.mts --dist ../../dist --out ../../vsix
+        working-directory: editors/vscode
+      - name: Seven packages; the one for this machine has a dgdtools that runs, the one for the rest has none
+        run: |
+          ls -l vsix
+          test "$(ls vsix/*.vsix | wc -l)" -eq 7
+          unzip -q vsix/dgdtools-linux-x64-*.vsix -d linux-x64
+          linux-x64/extension/bin/dgdtools version
+          unzip -Z1 vsix/dgdtools-win32-x64-*.vsix | grep -qx 'extension/bin/dgdtools.exe'
+          if unzip -Z1 vsix/dgdtools-[0-9]*.vsix | grep '^extension/bin/'; then exit 1; fi

@@ -118,6 +118,8 @@ says so in a paragraph that begins **As built**. In short:
   scripts (section 13).
 - A profile's stub is read by `workspace/textDocumentContent`, a request
   of LSP 3.18, which came with the VS Code client (section 11).
+- The VS Code extension downloads no binary: a release has it as a
+  package for each platform, with the binary inside (section 11.2).
 
 ## 1. Shape
 
@@ -883,8 +885,8 @@ servers under one id is worse than a new word.
   (GoReleaser already builds them) with a checksum, after asking.
   Built, but for the last sentence and what waits for the server
   (`semanticTokenScopes`, `dgdtools.showBaselined`): 11.1 says what is
-  there, and 11.2 how a release is to carry the binary instead of
-  downloading it.
+  there, and 11.2 how a release carries the binary, so that nothing
+  is downloaded.
 - **Vim and Neovim:** the `editors/vim` runtime files from 10.1 (install
   as a plugin directory) set the filetype. For Neovim 0.11 and later,
   `editors/nvim/lsp/dgdtools.lua` is the `vim.lsp.config` entry (`cmd =
@@ -908,10 +910,10 @@ servers under one id is worse than a new word.
 ### 11.1 The VS Code client, as built
 
 `editors/vscode` is the whole extension: the manifest, the grammar and
-the language configuration of 10.1, and `src/`, some 230 lines of
-TypeScript over `vscode-languageclient` and 200 that know nothing of VS
+the language configuration of 10.1, and `src/`, some 240 lines of
+TypeScript over `vscode-languageclient` and 260 that know nothing of VS
 Code. `dist/extension.js` is built from it and is not in the
-repository.
+repository. (`scripts/` is how a release packs it: 11.2.)
 
 - **TypeScript, bundled into one file** (by esbuild). That is what
   rust-analyzer, vscode-go, Biome and Ruff do, and for the same two
@@ -923,7 +925,8 @@ repository.
   build`, which plain JavaScript would not have spared: the client
   library has to be fetched either way. One dependency when installed
   (`vscode-languageclient`), four to build (`typescript`, `esbuild`, the
-  types of VS Code and of Node), all pinned by `package-lock.json`;
+  types of VS Code and of Node) and two to pack and publish
+  (`@vscode/vsce`, `ovsx`: 11.2), all pinned by `package-lock.json`;
   nothing is installed outside the folder. No linter, no formatter, no
   test framework: `tsc` with `strict`, and Node's own test runner on the
   TypeScript as it is.
@@ -939,9 +942,10 @@ repository.
   file names) and what VS Code adds by itself: a document of the
   language, one of the commands. The server is started then, not at the
   first document: an idle server is a process that has read nothing.
-- **Settings.** `dgdtools.path` (empty: `dgdtools` on `PATH`; a bare
-  name: that command on `PATH`; else a file, absolute once `~` is the
-  home directory), `dgdtools.profile` and `dgdtools.libPath` (resource
+- **Settings.** `dgdtools.path` (empty: the program of the extension's
+  package, else `dgdtools` on `PATH`, as 11.2 has it; a bare name: that
+  command on `PATH`; else a file, absolute once `~` is the home
+  directory), `dgdtools.profile` and `dgdtools.libPath` (resource
   scope: the server asks for the section `dgdtools` of each folder, and
   the client tells it when the section changed, with
   `synchronize.configurationSection`), `dgdtools.logFile`,
@@ -962,8 +966,8 @@ repository.
 - **No executable: one message**, saying what was looked for (the
   command on `PATH`, or the file the setting names) and what to do, with
   two buttons: the setting, and the installation section of the README.
-  Nothing is looked for in other places (`~/go/bin`): what a shell
-  would run is what the editor runs.
+  Nothing is looked for in other places (`~/go/bin`): without a program
+  in the package, what a shell would run is what the editor runs.
 - **Commands:** `dgdtools.restartServer`; `dgdtools.associateFolder`
   ("Treat This Folder as an LPC Lib") and its inverse,
   `dgdtools.dissociateFolder`. The two are in the command palette, for
@@ -1016,8 +1020,9 @@ repository.
   of the client library against their types), `npm test` (Node's test
   runner over `server.ts` and `associations.ts`: the lookup on `PATH`
   on both kinds of system, what each value of `dgdtools.path` comes to,
-  the messages, the arguments, the patterns for each kind of folder,
-  adding and removing them), `npm run build`; all three in CI. `go test
+  the order of the setting, the package's program and `PATH`, the
+  messages, the arguments, the patterns for each kind of folder, adding
+  and removing them), `npm run build`; all three in CI. `go test
   ./editors` (`TestVSCodeClient`) holds the manifest to the code:
   commands contributed and registered, settings contributed and read,
   the scope and the trust of each, the scheme of a stub as
@@ -1026,11 +1031,11 @@ repository.
   above replaces opening a lib in it once; the integration test of
   section 13 is how that would be kept.
 
-### 11.2 How a release carries the binary (design; not built)
+### 11.2 How a release carries the binary
 
-Today the extension has no binary and downloads none: `dgdtools.path`,
-else `PATH`, else the message. That is right for whoever has a checkout,
-and wrong for whoever installs from a marketplace and has never heard of
+The extension had no binary and downloaded none: `dgdtools.path`, else
+`PATH`, else the message. That is right for whoever has a checkout, and
+wrong for whoever installs from a marketplace and has never heard of
 `go install`.
 
 How the extensions this one is modelled on do it:
@@ -1043,15 +1048,15 @@ How the extensions this one is modelled on do it:
 | vscode-go | `go install` of gopls, which needs the Go toolchain: every one of its users has it |
 
 A wizard has no toolchain and no project that pins tools, so the first
-two are the model. **Proposal: platform-specific packages with the
-binary inside.**
+two are the model. **Decided, and built: platform-specific packages
+with the binary inside.** The plan was this:
 
 - **The packages.** One `.vsix` for each of the six binaries GoReleaser
   already builds (`darwin-arm64`, `darwin-x64`, `linux-arm64`,
   `linux-x64`, `win32-arm64`, `win32-x64` are VS Code's names for
   them), with the binary at `bin/dgdtools` (`bin/dgdtools.exe`), some
   5 MB each; and one package without a target and without a binary,
-  which is what every other platform gets and behaves as today. The
+  which is what every other platform gets and behaves as before. The
   Marketplace and Open VSX both serve the package of the user's
   platform. `bin/` is not in the repository, and `.vscodeignore` lets
   it into the package.
@@ -1082,17 +1087,90 @@ binary inside.**
   and the folder does not have: a `README.md` and a `LICENSE` in
   `editors/vscode`, an icon, the real publisher, and `private` gone.
 
-**Not proposed: downloading.** The plan above had the extension fetch
-the release asset when it finds no binary, with a checksum, after
-asking. It is what a single package for all platforms would force, and
-it costs what the packages avoid: network code in an editor extension
-(proxies, firewalls, GitHub's rate limits, a first run that can fail);
-a checksum that proves little when it comes from where the binary came
-from, so signing to do it properly; a place to keep the binary, to
-update it and to clean it up; and an extension that fetches and runs
-programs, which is what a careful user and a marketplace look at
-hardest. A package for each platform is delivered, verified and updated
-by the marketplace like any other extension, and works with no network.
+**As built.** The packages and the order are as planned; the release
+job is simpler than planned, and nothing is published yet.
+
+- **The client** (`server.ts`, `resolveServer`): the setting, then
+  `<extension>/bin/dgdtools` (`dgdtools.exe` on Windows) when it is a
+  file, then `PATH`, then the message, which is the one there was. A
+  setting that names nothing is still the mistake reported: no other
+  program runs in its place. The packaged file is given the bit when
+  it lacks it (`makeRunnable`; vsce and VS Code both keep it, so this
+  is for a package that went through other hands). The output channel
+  has the path, which of the three named it, and the server's version;
+  the version is the one the server gives in its answer to
+  `initialize` (`serverInfo`), so `dgdtools version` is not run for
+  it.
+- **The script**, `editors/vscode/scripts/vsix.mts`, run by Node as it
+  is, like the tests. `--dist DIR` reads GoReleaser's
+  `DIR/artifacts.json`, and for each binary whose `goos`/`goarch` is one
+  of the six puts the file in `bin/`, executable, and runs `vsce
+  package VERSION --target T --no-dependencies`; then once more without
+  a target and with no `bin/`. `--binary FILE [--target T]` makes one
+  package from one program (`make vsix`: the one just built, for this
+  machine). The six are a table in the script, which `go test
+  ./editors` (`TestVSCodePackages`) compares with the `goos` and
+  `goarch` of `.goreleaser.yaml`: a platform added there and not here
+  fails a test, not a release. The files are
+  `dgdtools-T-VERSION.vsix` and `dgdtools-VERSION.vsix`, 2.1 to 2.4 MB
+  with a program (it is 5 MB before the zip) and 110 kB without.
+- **The version** is given to vsce (`--version v0.4.0` to the script,
+  `--no-update-package-json` to vsce): the package says 0.4.0 and
+  `package.json` is not written to, in the release job or anywhere. It
+  keeps `0.0.1`, which is what a package made from a checkout says.
+- **The tools** are `@vscode/vsce` and `ovsx` as `devDependencies`, at
+  one version each in `package-lock.json` like the compiler and the
+  bundler, and run from `node_modules`: `npm ci` is all the job
+  installs, and it fetches nothing by name. That is how rust-analyzer
+  has them. They are not in a package (`node_modules` is not).
+- **The release job** (`vscode` in `release.yml`, after `goreleaser`).
+  The binaries are GoReleaser's own `dist/`, handed from the one job to
+  the other as a workflow artifact, not downloaded from the release and
+  compared with `checksums.txt`: they are the same files of the same
+  run and never leave it. (An artifact loses the executable bit, which
+  is why the script sets it.) The job runs the script with the tag as
+  the version, and attaches the seven packages to the GitHub release,
+  beside the archives.
+- **Publishing** is the job's last steps, `vsce publish --packagePath`
+  and `ovsx publish --packagePath` over the seven files, each run only
+  when its token is a repository secret (`VSCE_PAT`, `OVSX_PAT`) and
+  the tag is no pre-release (`v1.0.0-rc.1` is packed and attached, and
+  no marketplace takes its version). Neither secret exists, so neither
+  step has run. With a token, `vsix.mts --publishable` runs first and
+  fails the job, saying why, while `package.json` is `private`, has no
+  publisher, or the folder has no `LICENSE`: a manifest nobody made
+  ready is not published by the arrival of a token.
+- **In CI** (`vsix` in `ci.yml`): `goreleaser build --snapshot`, the
+  script over its `dist/`, and a look at the result: seven packages,
+  the one for the runner has a `dgdtools` that runs, the one for the
+  rest has none. So the release job's packing is run on every push,
+  not first on the day of a release.
+- **What a listing needs.** `editors/vscode` has a `README.md` (the
+  Marketplace's page), a `CHANGELOG.md` that points at the releases,
+  and `.vscodeignore` keeps `src/`, `scripts/` and the tools out.
+  **Still the owner's:** a `LICENSE`. The repository has none to copy,
+  and one is not made up here; until there is one the packages are
+  made with `--skip-license` (vsce asks otherwise), with a warning. An
+  icon: there is none in the repository. The publisher, which is the
+  placeholder `dgdtools`, and `private`, which stays until it is set
+  (section 14). And the two accounts and their tokens.
+- **Not checked:** a package installed in a VS Code, which is not on
+  the machine this was written on, so neither is the program started
+  from `bin/` by the client; the release job, which runs on a tag (its
+  packing is what CI runs, its attaching and publishing are not).
+
+**Not built, by decision: downloading.** The first plan had the
+extension fetch the release asset when it finds no binary, with a
+checksum, after asking. It is what a single package for all platforms
+would force, and it costs what the packages avoid: network code in an
+editor extension (proxies, firewalls, GitHub's rate limits, a first run
+that can fail); a checksum that proves little when it comes from where
+the binary came from, so signing to do it properly; a place to keep the
+binary, to update it and to clean it up; and an extension that fetches
+and runs programs, which is what a careful user and a marketplace look
+at hardest. A package for each platform is delivered, verified and
+updated by the marketplace like any other extension, and works with no
+network.
 
 ## 12. Order of work
 
@@ -1106,7 +1184,8 @@ by the marketplace like any other extension, and works with no network.
    **Done** ("What is built", above).
 3. VS Code extension (client, settings, grammar packaging) against steps
    1 to 3 (4 days). **Written** (11.1), and not yet run in a VS Code;
-   packaging waits for the first release (11.2).
+   a release packs it for each platform with the binary inside (11.2),
+   and publishes it nowhere until the owner says where.
 4. `syntax.PathAt`; steps 4 to 6 (9 days); then semantic tokens 9a (2
    days), which needs only what hover needs.
 5. Scopes and kfun table in the library (also unlock linter rules:
@@ -1291,6 +1370,7 @@ Each with the alternative it was chosen over.
   about**, `files.associations` with patterns for that folder; the
   extension never sets a document's language behind the user's back
   (but for a profile's stub), and never writes user settings (11.1).
-- **Proposed: a release carries the binary in a package for each
-  platform**, and the extension downloads nothing (11.2). The owner's
-  to decide before the first release.
+- **A release carries the binary in a package of the extension for
+  each platform**, as rust-analyzer and Ruff do, and the extension
+  downloads nothing (11.2). The package's program runs before the one
+  on `PATH`, and `dgdtools.path` before both.
