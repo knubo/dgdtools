@@ -32,8 +32,8 @@ import (
 // semantic tokens, hovers and completions at names of the file, an edit
 // and its undo, close; then the references of two of the lib's busiest
 // functions (add_item, set_short), from std/shop.c. It logs the heap after a collection at the end of the scan
-// and of the session, the peak resident size, the scan's time and the
-// latencies. With $DGDTOOLS_PPROF set to a directory, it writes heap
+// and of the session, the peak resident size after the scan, after the
+// session's files and at the end, the scan's time and the latencies. With $DGDTOOLS_PPROF set to a directory, it writes heap
 // profiles there (scan.heap, session.heap). $DGDTOOLS_CONFIG names the
 // lib's configuration, with an absolute root.
 func TestCorpusMemory(t *testing.T) {
@@ -109,6 +109,7 @@ func TestCorpusMemory(t *testing.T) {
 		}
 	}
 	require.True(t, scanned())
+	scanRSS := maxRSS()
 	scanAlloc, scanInuse := heap("scan")
 
 	name := regexp.MustCompile(`\b[a-z_][a-z_0-9]*\(`)
@@ -145,6 +146,7 @@ func TestCorpusMemory(t *testing.T) {
 	}
 	c.Idle()
 	sessionTook := time.Since(began)
+	sessionRSS := maxRSS()
 
 	// References of two functions the lib calls most, from std/shop.c,
 	// each asked five times (the first search of a generation builds
@@ -180,8 +182,9 @@ func TestCorpusMemory(t *testing.T) {
 		slices.Sort(d)
 		return d[min(len(d)*p/100, len(d)-1)].Round(10 * time.Microsecond)
 	}
-	t.Logf("scan: %v; heap after it %d MB (in use %d MB)", scanTook.Round(10*time.Millisecond), scanAlloc, scanInuse)
-	t.Logf("session: %d files in %v; heap after it %d MB (in use %d MB); peak RSS %d MB", len(opened), sessionTook.Round(10*time.Millisecond), sessionAlloc, sessionInuse, maxRSS()>>20)
+	t.Logf("scan: %v; heap after it %d MB (in use %d MB); peak RSS %d MB", scanTook.Round(10*time.Millisecond), scanAlloc, scanInuse, scanRSS>>20)
+	t.Logf("session: %d files in %v (peak RSS %d MB); with the references, heap after it %d MB (in use %d MB); peak RSS %d MB",
+		len(opened), sessionTook.Round(10*time.Millisecond), sessionRSS>>20, sessionAlloc, sessionInuse, maxRSS()>>20)
 	t.Logf("open to idle p50 %v p95 %v; edit to idle p50 %v p95 %v", pct(opened, 50), pct(opened, 95), pct(edited, 50), pct(edited, 95))
 	t.Logf("tokens p50 %v p95 %v; hover p50 %v p95 %v (%d); completion p50 %v p95 %v (%d)",
 		pct(tokensTook, 50), pct(tokensTook, 95), pct(hoverTook, 50), pct(hoverTook, 95), len(hoverTook), pct(completeTook, 50), pct(completeTook, 95), len(completeTook))

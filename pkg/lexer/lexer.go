@@ -33,6 +33,9 @@ func Lex(path string, src []byte, d token.Dialect) *token.File {
 		atLineStart: true,
 	}
 	lx.f.Lines = append(lx.f.Lines, 0)
+	// LPC has a token in four or five bytes: room for that many saves
+	// growing the slice token by token, most of what lexing allocates.
+	lx.f.Tokens = make([]token.Token, 0, len(src)/4)
 	lx.run()
 	return lx.f
 }

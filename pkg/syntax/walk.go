@@ -188,50 +188,71 @@ func PathAt(f *File, tok int) []Node {
 // token: what a question about every name of a file asks. The path is
 // visit's to read during the call only.
 func PathsAt(f *File, toks []int, visit func(tok int, path []Node)) {
-	var stack, buf []Node
-	var walk func(n Node, toks []int)
-	walk = func(n Node, toks []int) {
-		stack = append(stack, n)
-		defer func() { stack = stack[:len(stack)-1] }()
-		var kids []Node
-		Inspect(n, func(c Node) bool {
-			if c != n {
-				kids = append(kids, c)
-			}
-			return c == n
-		})
-		// The later of two children that have a token is the one, as in
-		// PathAt.
-		owner := make([]int, len(toks))
-		for i := range owner {
-			owner[i] = -1
+	w := &pathsWalker{visit: visit}
+	w.collect = func(c Node) bool {
+		if c != w.parent {
+			w.kids = append(w.kids, c)
 		}
-		for k, c := range kids {
-			first, last := c.Span()
-			i, _ := slices.BinarySearch(toks, first)
-			for ; i < len(toks) && toks[i] <= last; i++ {
-				owner[i] = k
-			}
-		}
-		for i, tok := range toks {
-			if owner[i] >= 0 {
-				continue
-			}
-			buf = append(buf[:0], stack...)
-			slices.Reverse(buf)
-			visit(tok, buf)
-		}
-		for k, c := range kids {
-			var mine []int
-			for i, tok := range toks {
-				if owner[i] == k {
-					mine = append(mine, tok)
-				}
-			}
-			if len(mine) > 0 {
-				walk(c, mine)
-			}
+		return c == w.parent
+	}
+	w.walk(f, toks)
+}
+
+// pathsWalker is PathsAt's walk. What a node needs while its children
+// are walked, its children and which of its tokens each has, is a frame
+// of kids and ints above the frames of the nodes around it: a file's
+// walk allocates them a few times, not at every node.
+type pathsWalker struct {
+	visit   func(tok int, path []Node)
+	collect func(Node) bool // appends parent's children to kids
+	parent  Node
+	stack   []Node
+	buf     []Node
+	kids    []Node
+	ints    []int
+}
+
+func (w *pathsWalker) walk(n Node, toks []int) {
+	w.stack = append(w.stack, n)
+	kidsBase, intsBase := len(w.kids), len(w.ints)
+	w.parent = n
+	Inspect(n, w.collect)
+	// A frame stays as it is while the walk below appends above it; if
+	// that moves the array, the frame is read from the old one.
+	kids := w.kids[kidsBase:len(w.kids):len(w.kids)]
+	// The later of two children that have a token is the one, as in
+	// PathAt.
+	for range toks {
+		w.ints = append(w.ints, -1)
+	}
+	owner := w.ints[intsBase:len(w.ints):len(w.ints)]
+	for k, c := range kids {
+		first, last := c.Span()
+		i, _ := slices.BinarySearch(toks, first)
+		for ; i < len(toks) && toks[i] <= last; i++ {
+			owner[i] = k
 		}
 	}
-	walk(f, toks)
+	for i, tok := range toks {
+		if owner[i] >= 0 {
+			continue
+		}
+		w.buf = append(w.buf[:0], w.stack...)
+		slices.Reverse(w.buf)
+		w.visit(tok, w.buf)
+	}
+	for k, c := range kids {
+		mineBase := len(w.ints)
+		for i, tok := range toks {
+			if owner[i] == k {
+				w.ints = append(w.ints, tok)
+			}
+		}
+		if mine := w.ints[mineBase:len(w.ints):len(w.ints)]; len(mine) > 0 {
+			w.walk(c, mine)
+		}
+		w.ints = w.ints[:mineBase]
+	}
+	w.kids, w.ints = w.kids[:kidsBase], w.ints[:intsBase]
+	w.stack = w.stack[:len(w.stack)-1]
 }

@@ -38,7 +38,16 @@ func (r *Resolver) uses() []index.Use {
 	if f.Tok == nil || f.Tree == nil || f.Tree.Sel == nil || f.Unit == nil || f.Snapshot == nil {
 		return nil
 	}
-	var out []index.Use
+	toks := f.Tok.Tokens
+	var names []int
+	for _, ti := range f.Tree.Sel.Sig {
+		if k := toks[ti].Kind; k == token.Ident || k == token.StringLit {
+			names = append(names, ti)
+		}
+	}
+	// Most names are a Use, and the slice would otherwise be made again
+	// and again as it grows.
+	out := make([]index.Use, 0, len(names))
 	add := func(ref *Ref, u *index.Use) {
 		if ref == nil || u == nil {
 			return
@@ -53,13 +62,6 @@ func (r *Resolver) uses() []index.Use {
 		}
 		r.place(u)
 		out = append(out, *u)
-	}
-	toks := f.Tok.Tokens
-	var names []int
-	for _, ti := range f.Tree.Sel.Sig {
-		if k := toks[ti].Kind; k == token.Ident || k == token.StringLit {
-			names = append(names, ti)
-		}
 	}
 	syntax.PathsAt(f.Tree, names, func(ti int, path []syntax.Node) {
 		tok := toks[ti]
