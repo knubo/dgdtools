@@ -1327,8 +1327,11 @@ Details that keep stubs honest:
 - Object-local macros are dropped unless the object's declarations use
   them (a type macro, a path macro in an inherit statement); a `.c` file
   that other files `#include` is treated as a header and keeps its macros.
-- Function bodies, comments, private functions, private variables and
-  anything matching `omit:` never enter a profile. Because private
+- A kept function or global variable keeps the comment hover shows for
+  it (`resolve.Comment`), so hover and completion read it from the stub;
+  a profile built before that has none, and still loads.
+- Function bodies, other comments, private functions, private variables
+  and anything matching `omit:` never enter a profile. Because private
   functions are absent, a call to one in a profiled object is reported as
   "not defined … or is private there" (`callable-not-found`) where the
   whole lib would say "is private" (`static-crossobj`): the same bug under
@@ -1496,10 +1499,10 @@ and the rest stay unknown.
 **Publishing a profile gives anyone who fetches it:** the paths of the
 files in it; the full declarations (names, types, specifiers, parameter
 names) of their non-private functions and global variables, including,
-here, `/secure` daemons and the login objects; and the full text of
-every `#define` in the shared headers (path constants, level constants,
-prompt macros). It publishes no function bodies, comments, private
-functions, private variables or data. Whether that surface may be public
+here, `/secure` daemons and the login objects, with the comment above
+each; and the full text of every `#define` in the shared headers (path
+constants, level constants, prompt macros). It publishes no function
+bodies, other comments, private functions, private variables or data. Whether that surface may be public
 is the lib owner's decision, to be made by reading it: `dgdtools profile
 show NAME` summarizes a profile, `dgdtools profile show NAME
 /std/room.c` prints one stub, and the file is gzipped text (`gzip -dc

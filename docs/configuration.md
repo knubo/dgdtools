@@ -157,9 +157,9 @@ A **mudlib profile** (`<name>.profile`) is a compact interface file published by
 A profile contains:
 - The mudlib's driver settings (what `profile build` took from `driver:` and `driver_config`), dialect flags, and conventions
 - Shared header files (so `#include` directives and macros resolve)
-- Public stubs of shared objects: `#define`s and `#include`s of shared headers, `inherit` statements, and all non-private function and global variable declarations with bodies replaced by `{}`
+- Public stubs of shared objects: `#define`s and `#include`s of shared headers, `inherit` statements, and all non-private function and global variable declarations with bodies replaced by `{}`, each with the comment above it that hover shows
 
-It never includes function bodies, comments, private symbols, or anything matched by `profile_build.omit`. For reference, VikingMUD's 720 shared files produce a 113 KB profile.
+It never includes function bodies, other comments, private symbols, or anything matched by `profile_build.omit`. For reference, VikingMUD's 720 shared files produce a 149 KB profile.
 
 ### For wizards (using a profile)
 
