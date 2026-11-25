@@ -560,6 +560,9 @@ func applyProfile(cfg *Config, p *profile.Profile) {
 	if cfg.Create == "" {
 		cfg.Create = p.Create
 	}
+	if cfg.DriverObject == "" {
+		cfg.DriverObject = p.DriverObject
+	}
 	if cfg.RelativeObjectPaths == "" {
 		cfg.RelativeObjectPaths = p.RelativeObjectPaths
 	}
@@ -609,6 +612,7 @@ type DriverConfig struct {
 	IncludeFile  string
 	IncludeDirs  []string
 	AutoObject   string
+	DriverObject string
 	Create       string
 	Typechecking *int
 }
@@ -656,6 +660,8 @@ func ReadDriverConfig(fs vfs.FS, path string) (*DriverConfig, error) {
 			dc.AutoObject = str(vals[0])
 		case "create":
 			dc.Create = str(vals[0])
+		case "driver_object":
+			dc.DriverObject = str(vals[0])
 		case "typechecking":
 			if n, err := strconv.Atoi(string(f.Text(vals[0]))); err == nil {
 				dc.Typechecking = &n
@@ -685,6 +691,9 @@ func (dc *DriverConfig) Apply(cfg *Config) {
 	}
 	if cfg.Create == "" {
 		cfg.Create = dc.Create
+	}
+	if cfg.DriverObject == "" {
+		cfg.DriverObject = dc.DriverObject
 	}
 	if cfg.Dialect.Typechecking == nil {
 		cfg.Dialect.Typechecking = dc.Typechecking

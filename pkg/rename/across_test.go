@@ -305,3 +305,39 @@ func TestRenameProgramOfFiles(t *testing.T) {
 	assert.Contains(t, got, "== /lib/sys/parts.h\nvoid assist();\n")
 	assert.Contains(t, got, "== /lib/sys/use.c\n#include \"parts.h\"\nvoid g() { assist(); }\n")
 }
+
+// The driver object's functions that the driver calls by name are
+// refused, and an inheritor's redefinition with them; a function the
+// driver calls in a connection's object is renamed with a warning.
+func TestRenameDriverCalls(t *testing.T) {
+	w := newWorld(t, vfs.Mem{
+		"/lib/dgdtools.yml": "driver_object: /sys/driver\n",
+		"/lib/sys/base.c":   "string path_read(string p) { return p; }\n",
+		"/lib/sys/driver.c": "inherit \"/sys/base\";\nstring path_write(string p) { return p; }\n",
+		"/lib/obj/user.c":   "void receive_message(string s) {}\nstring path_write(string p) { return p; }\n",
+		"/lib/obj/other.c":  "string path_read(string p) { return p; }\n",
+	}, "/lib")
+	require.True(t, w.l.Scan(context.Background()))
+	assert.Equal(t, "refused: 'path_write' is a function of the driver object (/sys/driver), which the driver calls by name",
+		w.prepare("/lib/sys/driver.c", "string path_w|rite"))
+	assert.Equal(t, "refused: 'path_read' is a function of the driver object (/sys/driver), which the driver calls by name",
+		w.prepare("/lib/sys/base.c", "path_r|ead"))
+	// Another object's function of a name the driver object has.
+	assert.Equal(t, "function path_read \"path_read\"", w.prepare("/lib/obj/other.c", "path_r|ead"))
+	got := w.renamed("/lib/obj/user.c", "receive_m|essage", "receive_text", false, false)
+	assert.Contains(t, got, "! the driver calls 'receive_message' by name in an object that is a connection")
+}
+
+// A macro used in a file an edit lands in, whose body names the new
+// name, would name the renamed symbol there.
+func TestClashThroughMacroAcross(t *testing.T) {
+	w := newWorld(t, vfs.Mem{
+		"/lib/dgdtools.yml": "",
+		"/lib/std/room.c":   "int light;\n",
+		"/lib/obj/r.c":      "#define DIM dimness\ninherit \"/std/room\";\nvoid f() { light = DIM; }\n",
+	}, "/lib")
+	require.True(t, w.l.Scan(context.Background()))
+	assert.Equal(t, "refused: the macro DIM, used at /obj/r.c:3, names 'dimness' in its body: it would name the renamed global variable there",
+		w.renamed("/lib/std/room.c", "int li|ght", "dimness", false, false))
+	assert.NotContains(t, w.renamed("/lib/std/room.c", "int li|ght", "glow", false, false), "refused")
+}

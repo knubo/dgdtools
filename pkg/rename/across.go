@@ -251,6 +251,11 @@ func (rn *renamer) family(a *across, units []*index.Unit, t *Target) error {
 		a.objects[t.Def.Object] = true
 	}
 	// What cannot be renamed in the family.
+	if driverCalls[name] && rn.driver != "" {
+		if fn, ok := rn.snap.ChainFunc(rn.driver, name); ok && a.want[locKey(fn.Loc)] {
+			return refuse("'%s' is a function of the driver object (%s), which the driver calls by name", name, rn.driver)
+		}
+	}
 	for _, k := range slices.SortedFunc(maps.Keys(a.want), cmpKey) {
 		if _, file, ok := splitStub(k.path); ok {
 			if k == defKey(t.Def) {
@@ -260,6 +265,23 @@ func (rn *renamer) family(a *across, units []*index.Unit, t *Target) error {
 		}
 	}
 	return nil
+}
+
+// driverCalls are the functions DGD calls by name in the driver object
+// (DGD::callDriver, Frame::callCritical).
+var driverCalls = map[string]bool{
+	"initialize": true, "restored": true, "interrupt": true, "path_read": true, "path_write": true,
+	"include_file": true, "inherit_program": true, "object_type": true, "compile_rlimits": true,
+	"runtime_rlimits": true, "compile_error": true, "runtime_error": true, "atomic_error": true,
+	"remove_program": true, "recompile": true, "telnet_connect": true, "binary_connect": true,
+	"datagram_connect": true, "touch": true, "call_object": true,
+}
+
+// connectionCalls are the functions DGD calls by name in an object that
+// is a connection (comm.cpp): which objects those are, the lib decides.
+var connectionCalls = map[string]bool{
+	"open": true, "close": true, "receive_message": true, "message_done": true,
+	"unconnected": true, "receive_datagram": true, "datagram_attach": true,
 }
 
 func cmpKey(a, b declKey) int { return cmp.Or(cmp.Compare(a.path, b.path), cmp.Compare(a.off, b.off)) }
@@ -745,6 +767,11 @@ func (rn *renamer) readFile(plan *Plan, a *across, path string, known []Occurren
 		return nil, err
 	}
 	if sees {
+		if sym.Kind == resolve.Function || sym.Kind == resolve.Variable {
+			if err := frn.expandsTo(sym, n, where); err != nil {
+				return nil, err
+			}
+		}
 		switch sym.Kind {
 		case resolve.Function:
 			if err := frn.calledHere(n, where); err != nil {
@@ -757,6 +784,32 @@ func (rn *renamer) readFile(plan *Plan, a *across, path string, known []Occurren
 		}
 	}
 	return out, nil
+}
+
+// expandsTo refuses a new name that the body of a macro used in the
+// file's code names: the macro would name the renamed symbol there.
+func (rn *renamer) expandsTo(sym Symbol, n string, where func(uint32) string) error {
+	if rn.env == nil {
+		return nil
+	}
+	done := map[string]bool{}
+	for _, ti := range rn.tree.Sel.Sig {
+		tok := rn.tok.Tokens[ti]
+		if tok.Kind != token.Ident {
+			continue
+		}
+		name := rn.text(ti)
+		if done[name] || rn.env.Lookup(name) == nil {
+			continue
+		}
+		done[name] = true
+		exp := map[string]bool{}
+		rn.expansion(name, map[string]bool{}, exp)
+		if exp[n] {
+			return refuse("the macro %s, used at %s, names '%s' in its body: it would name the renamed %s there", name, where(tok.Off), n, what(sym.Kind))
+		}
+	}
+	return nil
 }
 
 // macroHere refuses a new name that is a macro in the file.
@@ -1026,6 +1079,9 @@ func (rn *renamer) warnAcross(ctx context.Context, plan *Plan, a *across) {
 					rn.libName(o.Path), o.Line, plan.Symbol.Name, plan.Symbol.Name))
 			}
 		}
+	}
+	if connectionCalls[plan.Symbol.Name] && !a.private {
+		plan.Warnings = append(plan.Warnings, fmt.Sprintf("the driver calls '%s' by name in an object that is a connection: if one of the objects that have it is, the renamed function is no longer called", plan.Symbol.Name))
 	}
 	if plan.Partial && !a.private {
 		plan.Warnings = append(plan.Warnings, fmt.Sprintf("this checkout is part of the mudlib: the places outside it that name '%s' are not renamed, and cannot be seen from here", plan.Symbol.Name))

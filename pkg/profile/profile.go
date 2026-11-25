@@ -163,7 +163,8 @@ type Manifest struct {
 	IncludeDirs         []string `json:"include_dirs,omitempty"`
 	IncludeFile         string   `json:"include_file,omitempty"`
 	AutoObjects         []string `json:"auto_objects,omitempty"`
-	Create              string   `json:"create,omitempty"` // the function a new object is initialized by
+	Create              string   `json:"create,omitempty"`        // the function a new object is initialized by
+	DriverObject        string   `json:"driver_object,omitempty"` // whose functions the driver calls by name
 	RelativeObjectPaths string   `json:"relative_object_paths,omitempty"`
 
 	// Covered are lib directory prefixes ("/std/") the profile captures

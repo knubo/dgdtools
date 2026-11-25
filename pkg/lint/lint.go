@@ -363,6 +363,7 @@ type Document struct {
 	// the driver initializes an object by, for rename.
 	markers []string
 	create  string
+	driver  string
 
 	tokensOnce sync.Once
 	tokens     []resolve.SemanticToken
@@ -465,7 +466,7 @@ func (d *Document) Rename(ctx context.Context, off uint32, newName string, force
 // RenameFile is the document as pkg/rename takes it (rename.File), with
 // force for File.Force.
 func (d *Document) RenameFile(force bool) rename.File {
-	return rename.File{Resolver: d.resolver, AutosaveMarkers: d.markers, Create: d.create, Force: force}
+	return rename.File{Resolver: d.resolver, AutosaveMarkers: d.markers, Create: d.create, DriverObject: d.driver, Force: force}
 }
 
 // Symbols lists the declarations of the document, for an outline of it
@@ -817,6 +818,7 @@ func (l *Linter) lintFile(ctx context.Context, s *index.Snapshot, file string, s
 	})
 	doc.markers = l.project.Config.Conventions.AutosaveMarkers
 	doc.create = cmp.Or(l.project.Config.Create, defaultCreate)
+	doc.driver = strings.TrimSuffix(l.project.Config.DriverObject, ".c")
 	rel, _ := l.project.Tree().Rel(file) // the file's lib-relative name
 	rules, err := sel.rules(file, rel, set)
 	if err != nil {

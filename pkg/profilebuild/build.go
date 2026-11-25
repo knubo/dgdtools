@@ -82,6 +82,7 @@ func Build(ctx context.Context, prj *config.Project, fsys vfs.FS) (*profile.Prof
 		Kfuns: cfg.Dialect.Kfuns,
 	}
 	p.IncludeDirs, p.IncludeFile, p.AutoObjects, p.Create = cfg.IncludeDirs, cfg.IncludeFile, cfg.AutoObjects, cfg.Create
+	p.DriverObject = cfg.DriverObject
 	p.RelativeObjectPaths = cfg.RelativeObjectPaths
 	p.Checkouts = pb.Checkouts
 	p.Conventions = cfg.Conventions

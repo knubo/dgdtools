@@ -71,6 +71,10 @@ type File struct {
 	// Create is the function the driver calls by name to initialize an
 	// object (the configuration's create; "" is "create").
 	Create string
+	// DriverObject is the lib path of the driver object, whose functions
+	// the driver calls by name (the configuration's driver_object; "":
+	// not known).
+	DriverObject string
 	// Force overrules a refusal that a person may overrule
 	// (Refusal.Forcible: a variable save_object writes), which becomes a
 	// warning of the plan.
@@ -311,6 +315,7 @@ type renamer struct {
 	kfuns   *kfun.Table
 	markers []string
 	create  string
+	driver  string
 	force   bool
 	scopes  []*syntax.Scope
 	// bad are the spans of the code that does not parse: what it names
@@ -324,7 +329,7 @@ func newRenamer(f File) *renamer {
 		return nil
 	}
 	rn := &renamer{r: r, tok: r.Tok, tree: r.Tree, env: r.Env, unit: r.Unit, snap: r.Snapshot,
-		kfuns: r.Kfuns, markers: f.AutosaveMarkers, create: f.Create, force: f.Force}
+		kfuns: r.Kfuns, markers: f.AutosaveMarkers, create: f.Create, driver: f.DriverObject, force: f.Force}
 	if rn.create == "" {
 		rn.create = "create"
 	}

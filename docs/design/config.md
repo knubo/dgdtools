@@ -55,6 +55,7 @@ include_dirs: ["/include"] # what the driver's config says
 include_file: /include/std.h
 auto_objects: [/kernel/lib/auto]
 create: _F_create
+driver_object: /kernel/sys/driver   # whose functions the driver calls by name
 relative_object_paths: file
 conventions:               # the lib's habits: macros, registries; no defaults
   specifier_macros: [public]

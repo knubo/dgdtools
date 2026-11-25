@@ -79,6 +79,9 @@ type Config struct {
 	// object receives that call and passes it on under another name, the
 	// one the lib's objects define.
 	Create string `yaml:"create"`
+	// DriverObject is the lib path of the driver object (the driver
+	// config's driver_object), whose functions the driver calls by name.
+	DriverObject string `yaml:"driver_object"`
 	// RelativeObjectPaths says what an object path without a leading
 	// slash is relative to. The driver leaves that to the lib (its driver
 	// object resolves every inherit and every call_other by path):
@@ -478,6 +481,7 @@ func (c *Config) validateScope() error {
 		{"include_file", c.IncludeFile != ""},
 		{"auto_objects", len(c.AutoObjects) > 0},
 		{"create", c.Create != ""},
+		{"driver_object", c.DriverObject != ""},
 		{"relative_object_paths", c.RelativeObjectPaths != ""},
 		{"conventions", !reflect.DeepEqual(c.Conventions, profile.Conventions{})},
 		{"profile_build", !reflect.DeepEqual(c.ProfileBuild, ProfileBuild{})},
