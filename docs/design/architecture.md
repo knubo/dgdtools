@@ -7,8 +7,8 @@ Section 9 has the measurements against the VikingMUD lib and a DGD 1.7.9
 compile oracle; section 11 lists what is not built. Companion documents:
 [config.md](config.md) (the configuration file, per-file settings, the
 `dgdtools` command), [formatter.md](formatter.md) (the formatter as a
-tool) and [lsp.md](lsp.md) (the language server, and the plan for the
-rest of it and for rename).
+tool) and [lsp.md](lsp.md) (the language server and the rename command,
+and the plan for the rest).
 
 ## 1. Purpose and non-negotiables
 
@@ -72,8 +72,10 @@ pkg/resolve  what a place in a file refers to (the file of an #include,
              takes whose arguments a place is in (signature help), and
              what can be written at a place (completion)
 pkg/rename   the rename of a name: every occurrence of the symbol at a
-             place, classified, the edits, or the reason it must not be
-             made (as built, for what one file decides)
+             place, in its file or across the lib (a function with its
+             redefinitions, a global, a header's macro), classified
+             certain, possible or excluded, the edits, or the reason it
+             must not be made
 pkg/format   the formatter: a layout plan from the syntax tree, a
              token-stream printer, the token-equality gate (section 8)
 pkg/lint     the embeddable linter: rules with typed options, the layers
@@ -814,8 +816,8 @@ Described in [lsp.md](lsp.md): a thin layer, `pkg/lsp` behind the
 `dgdtools lsp` subcommand, holding one `session.Session`. Diagnostics,
 code actions, formatting, go to definition, hover, signature help,
 symbols, completion, references and highlights, semantic tokens and
-the rename of what one file decides are built; rename across files is
-planned. What it maps onto:
+rename, in a file and across the lib, are built; the refactorings of
+step 12 are planned. What it maps onto:
 
 | LSP feature | Maps onto |
 |---|---|
@@ -830,7 +832,7 @@ planned. What it maps onto:
 | `workspace/symbol` | `Snapshot.FindSymbols(query, limit)`: the functions and variables in the units' symbol tables and the macros of the headers read, matched by `internal/fuzzy`, the best first; the whole lib after `Snapshot.Scan`, and a profile's stubs in a partial checkout (`Layout.StubFiles`). |
 | `textDocument/completion` | `Document.Complete(off)`: where the cursor is, read from the compiled tokens left of it, and what fits there: the parameters and locals in scope (`syntax.Scope`), the object's globals and callable functions (`Chain`, `AutoFuncs`), the macros in view (`pp.Env.Names`), the kfuns where a call by name is known to reach one, keywords; after `::`/`label::` the inherited functions; after `->` and in a registrar's string the functions of a receiver that is `this_object()` or a constant path, nothing for another; `#include` and `inherit` paths (`Snapshot.IncludeEntries`, `ObjectEntries`, on disk and in a profile's stubs). `Document.Comment(path, off)` is an item's comment, read when it is asked for. |
 | `textDocument/formatting`, `rangeFormatting` | `format.Source(prj, path, text, lines)`, a function of the buffer and the file's settings; `format.Edits` for the reply. |
-| `textDocument/prepareRename`, `rename` | `Document.PrepareRename(ctx, off)` and `Document.Rename(ctx, off, name)`, which are `pkg/rename` on the document: the symbol at the offset (a local, a parameter, a private function or variable, an inherit label, a macro the file defines) or the reason it is not renamed (`rename.Refusal`); every occurrence of the old name classified certain, possible or excluded (`resolve.Resolver.At` for each identifier of the name, the scopes of `syntax.Scope`, the code that does not parse, the branches not compiled); the checks of the new name (`Scope.Lookup`, the chain, the auto object, the kfun table, `pp.Env`); who includes the file and who inherits it (`Snapshot.Includers`, `Users`) for the symbols other files could name and the variables `save_object` writes. One engine for the editor now and for `dgdtools rename` later ([lsp.md](lsp.md) section 9, "As built, step 10"). |
+| `textDocument/prepareRename`, `rename` | `Document.PrepareRename(ctx, off)` and `Document.Rename(ctx, off, name, force)`, which are `pkg/rename` on the document: the symbol at the offset or the reason it is not renamed (`rename.Refusal`, `Forcible` for a variable `save_object` writes). What one file decides (a local, a parameter, a private function or variable, an inherit label, a macro the file defines) is planned in the file (`resolve.Resolver.At` for each identifier of the name, `syntax.Scope`, the code that does not parse, the branches not compiled); anything else across the lib, from the reverse index: the Uses of the old name in every unit (`Snapshot.UseUnits`, `Unit.Uses`), each looked up where it is (`Resolver.Lookup`) against the declarations renamed (a function's family of redefinitions, joined through `Unit.Func`, the chains of what each object inherits and the auto object), calls on unknown receivers as possible, the files edited read again (`Snapshot.Parse`) for the checks of the new name, the chains of the objects that see the symbol (`ChainFunc`, `ChainVar`), who includes a header and who inherits a file (`Snapshot.Includers`, `Users`). The server turns the plan into one `WorkspaceEdit` for every file, the possible edits under change annotations; `dgdtools rename` into diffs or writes ([lsp.md](lsp.md) section 8, "As built, step 11"). |
 
 What the server adds itself: JSON-RPC transport, position conversion,
 debouncing, and per-document versioning. No analysis logic lives there.
@@ -1449,9 +1451,8 @@ Not built, in rough priority order:
    statement keeps its line breaks. Giving the formatter the project's
    headers would lay it out too, at the price of a result that depends
    on other files.
-7. **The rest of `dgdtools lsp`** (navigation, completion, semantic
-   tokens) and **`dgdtools rename`** (the name is reserved by the
-   command; the plan for both is [lsp.md](lsp.md)), plus
+7. **The rest of `dgdtools lsp`** (the refactorings of step 12; the
+   plan is [lsp.md](lsp.md)), plus
    `dgdtools init` to write a starter config. Line wrapping in the
    formatter is not planned ([formatter.md](formatter.md) 2.2).
 8. **Type rules** on the declarations the index keeps. Candidates,

@@ -283,20 +283,31 @@ and what it formats is what `dgdtools format` writes. What it does:
 - **Highlights** of the name under the cursor in the file, a variable,
   a local or a parameter marked where it is read and where it is
   written (declared, assigned, incremented).
-- **Rename** of what one file decides: a local, a parameter (a `catch`
-  variable among them), a private function or global variable, an
-  inherit label, a macro the file defines for itself. Every place it is
-  meant is renamed and no other; the editor first asks the server
-  whether the name under the cursor can be renamed, and is told why
-  not: a function or variable other files may name (rename across
-  files is the next version's), what is inherited, a kfun, a header's
-  or the profile's declaration, a variable `save_object` writes, a
-  file another one includes, a name in code that is not compiled or
-  does not parse. A new name that would hide another, be hidden, or
-  take the place of a function or a macro is refused, naming it. DGD
-  calls no private function by name, so the string of
-  `call_out("fn")` for a private `fn` is no call of it: it is left,
-  and the server says so.
+- **Rename**, the same as `dgdtools rename`: a local, a parameter (a
+  `catch` variable among them), a private function or variable, an
+  inherit label, a macro in its file; a function with its
+  redefinitions in the objects that inherit it and those it inherits,
+  and every call that reaches one of them, a global variable in its
+  object and its inheritors, a header's macro in every file that
+  includes it, across the mudlib. The edits come as one change to every
+  file, each open file's for the version it was made from. The places
+  that may be the name and nobody can tell (a call on an object held in
+  a variable, the name in a macro's body, code not compiled or not
+  parsed) come under an annotation that needs confirming, so that VS
+  Code's preview shows them unticked; an editor that cannot confirm
+  edits (Neovim) gets the certain ones, and a message lists the others.
+  The editor first asks whether the name under the cursor can be
+  renamed, and is told why not: a kfun, the profile's declaration, the
+  create function, a variable `save_object` writes (`dgdtools rename
+  --force` renames it), a name in code that is not compiled or does not
+  parse. A new name that would hide another, be hidden, or take the
+  place of a function or a macro is refused, naming it. A message says
+  what to know beside: the edited files other objects inherit (the
+  rename takes effect everywhere at the scheduled reboot), a checkout
+  whose rest of the mudlib is not renamed, the calls that make a
+  function's name when they run. DGD calls no private function by name,
+  so the string of `call_out("fn")` for a private `fn` is no call of
+  it: it is left, and the server says so.
 - **Semantic tokens**: the colours of what only analysis knows, over
   the grammar's. A macro as a macro, one that stands for a type
   (`status`) as a type and one that stands for specifiers or for
@@ -400,8 +411,9 @@ to definitions the same way, `TestNeovimHover` reads what `K` and
 the mudlib, `TestNeovimCompletion` completes with `CTRL-X CTRL-O`, and
 `TestNeovimReferences` lists references and highlights a local,
 `TestNeovimTokens` reads the semantic tokens Neovim shows, before and
-after an edit, and `TestNeovimRename` renames a local and a private
-function and is told why a public one is not.
+after an edit, and `TestNeovimRename` renames a local, a private
+function and a public one another file calls (the edit of that file in
+its own buffer), and is told why the create function is not.
 
 ### Vim
 

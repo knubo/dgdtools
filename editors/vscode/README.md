@@ -40,12 +40,19 @@ the linter and formatter for it:
   profile that the search covered your folder only.
 - **Highlights** of the name under the cursor, a variable marked where
   it is read and where it is written.
-- **Rename** (*Rename Symbol*, F2) of what one file decides: a local
-  or a parameter, a private function or variable, an inherit label, a
-  macro the file defines for itself. Where it cannot be renamed, or not
-  to the name typed (the name would hide another or be hidden, a saved
-  variable, a public function, which other files call), the editor
-  says why before anything changes.
+- **Rename** (*Rename Symbol*, F2) as `dgdtools rename` makes it: in
+  the file (a local, a parameter, a private function or variable, an
+  inherit label, a macro of the file) or across the mudlib (a function
+  with its redefinitions up and down the inherit hierarchy and every call
+  that reaches one of them, a global variable, a header's macro). The
+  preview (*Shift+Enter*, or when something needs confirming) shows each
+  file's edits; the places that may be the name and nobody can tell (a
+  call on an object held in a variable, the name in a macro's body) are
+  there unticked, grouped by why. Where it cannot be renamed, or not to
+  the name typed (the name would hide another or be hidden, a variable
+  `save_object` writes, the create function), the editor says why before
+  anything changes; a message says what else to know (edited files other
+  objects inherit, which take effect at the scheduled reboot).
 - **Semantic highlighting** over the grammar's: macros (one that stands
   for a type as a type), functions where declared and defined, and in a
   call the object's own, inherited, the auto object's or the driver's,

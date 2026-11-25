@@ -2,17 +2,17 @@
 
 Status: a plan, of which the first three steps of section 12 are built:
 the editor-side grammars of section 10.1, under `editors/`; the server
-itself for steps 1 to 10 of section 8 (live diagnostics, code actions,
+itself for steps 1 to 11 of section 8 (live diagnostics, code actions,
 formatting, go to definition, hover and signature help, the outline of a
 document and the search for a name in the lib, completion, references
-and highlights, semantic tokens, the rename of what one file decides), as
-`dgdtools lsp` and `pkg/lsp`; and the
+and highlights, semantic tokens, rename in a file and across the lib),
+as `dgdtools lsp` and `pkg/lsp`, with the rename command `dgdtools
+rename`; and the
 VS Code client of
 section 11, in `editors/vscode`, which has been built and checked but
 not yet run in a VS Code. "What is built" below says exactly what, and
-where it differs from the plan. The rest of section 8 (rename across
-files, the refactorings) is still a plan, and the command reserves the
-name `rename`.
+where it differs from the plan. The rest of section 8 (the
+refactorings of step 12) is still a plan.
 The server builds on the library described in
 [architecture.md](architecture.md) (sections 6 and 10),
 [config.md](config.md) and [formatter.md](formatter.md), and on one type
@@ -93,7 +93,7 @@ is absolute.
 | `hover.go` | `textDocument/hover` and `textDocument/signatureHelp`: `lint.Document.Hover`'s and `Signature`'s answers laid out as Markdown or plain text |
 | `completion.go` | `textDocument/completion` and `completionItem/resolve`: `lint.Document.Complete`'s items as the protocol's, and the comment above a declaration when an item is asked for |
 | `symbols.go` | `textDocument/documentSymbol` and `workspace/symbol`: `lint.Document.Symbols`' outline and `index.Snapshot.FindSymbols`' matches as the protocol's symbols |
-| `rename.go` | `textDocument/prepareRename` and `textDocument/rename`: `lint.Document.PrepareRename`'s target as a range and a placeholder, `Rename`'s plan as a `WorkspaceEdit`, a refusal as an error with its reason, and the plan's warnings shown |
+| `rename.go` | `textDocument/prepareRename` and `textDocument/rename`: `lint.Document.PrepareRename`'s target as a range and a placeholder, `Rename`'s plan as a `WorkspaceEdit` for every file it edits, the possible edits under change annotations to confirm, a refusal as an error with its reason, and what the plan says beside its edits shown |
 | `references.go` | `textDocument/references` and `textDocument/documentHighlight`: `lint.Document.References`' places as locations, with a note in the log where the answer is not all there is; `Document.Highlights`' as highlights, read and written |
 | `tokens.go` | `textDocument/semanticTokens/full`, `full/delta` and `range`: `lint.Document.Tokens` encoded in the legend (`TokenLegend`), the last answer kept for a delta, and `workspace/semanticTokens/refresh` when a change elsewhere changed a document's tokens |
 | `content.go` | `workspace/textDocumentContent`: the text of a profile's stub |
@@ -147,7 +147,12 @@ step 9 the semantic tokens of a file (`resolve.Resolver.Tokens`,
 `Rename`), who includes a file and who inherits an object
 (`index.Snapshot.Includers`, `Users`), whether a profile has a stub of a
 checkout's file (`Snapshot.Shared`), and whether anything but a file
-itself knows a macro (`pp.Env.Outside`) ("As built, step 10").
+itself knows a macro (`pp.Env.Outside`) ("As built, step 10"); for step
+11 the rename across files (`rename.Plan.PossibleEdits`, `Dynamic`,
+`rename.File.Force`, `Refusal.Forcible`), the calls whose function's
+name is made at run time (`calls.Facts.Dynamic`, `index.UseDynamic`)
+and a chain's variable without flattening it (`index.Snapshot.ChainVar`)
+("As built, step 11").
 
 Where what is built is not what the sections below planned, the section
 says so in a paragraph that begins **As built**. In short:
@@ -464,7 +469,7 @@ knows the code base.
 | 8 **built** | `references` (and `documentHighlight`) | new: a reverse index of call sites and macro uses per name, built with the whole-lib scan and invalidated per file | reverse index in `pkg/index`; in a partial checkout results are labelled as "in this checkout" | 4 |
 | 9 **built** | `semanticTokens` (section 10.2): what a grammar cannot know. Ships in two parts: 9a macros by class, declarations, inherit labels, calls resolved through the chain (no scopes needed); 9b parameters/locals and unresolved names | tree + view + chain | 9b needs scopes (from 7) | 9a: 2, 9b: 2 |
 | 10 **built** | `prepareRename` and `rename` for the symbols one file decides (section 9): locals and parameters, private functions and variables, macros a `.c` file defines for itself | `pkg/rename` (new) over the tree, the scopes and the file's `pp.Env` | scopes (from 7); `syntax.PathAt` (from 4) | 3 |
-| 11 | Rename across files, in the editor and as `dgdtools rename SYMBOL NEW` (section 9): functions, object globals, header macros; every occurrence classified certain, possible or excluded; edits previewed with change annotations, or written as a patch | `pkg/rename` over the reverse index, who inherits a file (a `Query` on the snapshot), `Chain`, `LookupCallable`, `calls.Extract` | the reverse index (from 8); the whole-lib scan; step 10 | 9 |
+| 11 **built** | Rename across files, in the editor and as `dgdtools rename SYMBOL NEW` (section 9): functions, object globals, header macros; every occurrence classified certain, possible or excluded; edits previewed with change annotations, or written as a patch | `pkg/rename` over the reverse index, who inherits a file (a `Query` on the snapshot), `Chain`, `LookupCallable`, `calls.Extract` | the reverse index (from 8); the whole-lib scan; step 10 | 9 |
 | 12 | Refactorings as code actions (section 9.6): add the missing prototype, fix an `#include` path; renaming a file updates the `inherit` and `#include` lines that name it (`workspace/willRenameFiles`) | `ResolveInclude`, `ObjectPath`, the include and inherit edges `Invalidate` already follows | the reverse index (from 8) for the file rename | 3 |
 | later | inlay hints for parameter names, pull diagnostics (`textDocument/diagnostic`, `workspace/diagnostic`), call hierarchy over inherit chains | | | |
 
@@ -1316,6 +1321,239 @@ and `--force` for a saved variable; a header's macro, whose files are
 the includers (`Snapshot.Includers`). The checks of the new name stay
 those of this step, made in each file an edit lands in.
 
+**As built, step 11.** The engine is still `pkg/rename` (`across.go`
+beside step 10's files), the command line `cmd/dgdtools/rename.go`, the
+server `pkg/lsp/rename.go`.
+
+```go
+f := doc.RenameFile(force)             // rename.File{Resolver, AutosaveMarkers, Create, Force}
+t, err := rename.Prepare(ctx, f, off)  // t.Across: other files name it
+plan, err := rename.Rename(ctx, f, off, "new_name")
+plan.Occurrences   // in every file now: Path, Start, End, Line, Col, Class, Decl, Reason
+plan.Edits         // the Certain ones
+plan.PossibleEdits // the Possible ones, made only when asked for
+plan.Warnings      // forced saved variable, base files and the reboot, partial checkout, private callbacks
+plan.Dynamic       // calls whose function's name is made at run time: Path, Line, Col, Pattern ("do_*"), Matches
+plan.Files, plan.Partial
+plan.Count(rename.Possible)
+doc.Rename(ctx, off, name, force)      // lint.Document's
+```
+
+Where it is not section 9's plan: a symbol is still named by a place in
+a file, and the command line comes to one (below); a plan with possible
+occurrences is a plan, not a refusal, for a symbol across files (one
+file of 110,000 that does not parse would otherwise stop every rename
+of the lib), and stays a refusal for what one file decides, as step 10
+made it; the command's flags are `--write` (not `--apply`) and
+`--include-possible` (not `--possible`), and its diff goes to standard
+output with the summary on standard error, as 9.6 says.
+
+**What is renamed across files.** Prepare decides it: a function that
+is not private, a private function of a file other files include, a
+global variable that is not private or is declared in such a file, a
+header's macro or a macro of a file another includes. Everything of
+step 10 stays as it was, and its refusals of the symbol that said "a
+later version" are gone but for files and labels.
+
+| Symbol | Declarations renamed | Occurrences |
+|---|---|---|
+| function | its family: the declarations joined where an object declares the name and what it inherits (the chain of each inherit statement) has a function of it, or nothing does and the auto object has; and the declarations of the name in the files a program is made of (a prototype in a header, the definition in a file included as code, each file read on its own) | every Use of the name in every unit of the lib (`Snapshot.UseUnits`) whose `Lookup` is one of them |
+| private function of an included file | its declaration | the Uses that look up to it; `call_out("fn")`, `->fn` on `this_object()` excluded, as in step 10 |
+| global variable | its declaration | the Uses that look up to it, in its object and its inheritors |
+| header's macro | its `#define` | the Uses that look up to it in every file; the files that include the header, and what they include, read again for the rest |
+
+**The family.** A call in an inherited program reaches the
+redefinition (DGD calls a function by name in the object's table, which
+has the latest definition), so a function and the functions that
+redefine it are one function by the driver's rules, and renaming one
+of them alone changes what the lib does. The rename takes all of them,
+up the hierarchy to where the name is first declared and down to every
+redefinition, siblings' included, as IntelliJ renames a method with
+its overrides after asking; there is no question here, the family is
+the symbol. A private function redefines nothing (it is in no table),
+and joins nothing. A family with a declaration in a profile's stub is
+refused: "redefines, or is redefined by, the function of
+/std/room.c, which is defined in the mudlib profile". The auto object's
+function is a family like another: every object that defines one of
+the name joins it.
+
+**Certain, possible, excluded.** Each Use of the old name is looked up
+where it is (`Resolver.Lookup`, the unit's own resolver):
+
+- **certain**: it looks up to one of the declarations renamed, and to
+  nothing else: definitions and prototypes, `fn()`, `&fn`, `::fn()`,
+  `label::fn()`, `->fn` and `call_other` on `this_object()` or on an
+  object whose path the source says, and the callbacks of `call_out`
+  and of `conventions.call_registry`, with a known object;
+- **possible**: a call on an object nobody can tell (`FormUnknown`); a
+  callback or `->fn` in `this_object()` where the object has no
+  function of the name (an inheritor may have it); a call in an object
+  whose chain has a file that cannot be found, or in a virtual object;
+  a Use in a header read on its own that names nothing there; a name
+  more than one inherited object has; and in the files read again,
+  the name in code that is not compiled or does not parse and in the
+  body of a `#define`, where what it names depends on where the macro
+  is used;
+- **excluded**: it looks up to another declaration ("names the function
+  'query_name' (/obj/other.c)"), or to nothing in an object whose chain
+  is complete, or is a call in an object that does not exist; a local
+  where the index has no Use is said nothing of.
+
+Which files are read again (`Snapshot.Parse`, a resolver and a renamer
+each, in parallel): those with a certain occurrence; the headers, the
+objects that have the symbol and those that inherit them whose text has
+either name; for a macro, the header's includers and their includes
+whose text has either name. There the old name where the index has no
+Use is classified as above, and the new name is checked: not a macro
+there; no call of it that names nothing and would reach the renamed
+function, in an object that sees it; no local that would hide the
+renamed variable where it is used, no name it would capture; not an
+argument of a macro that stringizes; for a macro, the new name nowhere
+in a file it reaches. Over the lib: no object that has a declaration of
+the family, or inherits one, has a function (a variable) of the new
+name already (`ChainFunc`, and `index.Snapshot.ChainVar`, which finds a
+variable as ChainFunc finds a function); not a kfun; not the auto
+object's.
+
+**Refusals and warnings.** Of the symbol, besides step 10's: the create
+function (`create` in the configuration, which the driver, or the auto
+object, calls by name); a function whose name is also a kfun (a call
+the rename cannot see would reach the driver's); a family with a stub.
+A variable `save_object` writes is refused with `Refusal.Forcible`:
+`File.Force` (`--force`) makes it a warning instead ("renamed although
+...: convert the save files"); the editor's error says that `dgdtools
+rename --force` renames it. The programs looked at for `save_object`
+are found by the inherit statements now, not by flattening every
+inheritor's chain. Warnings: the edited files other objects inherit or
+include, the three most used by count ("edits in base files:
+/std/mod/desc.c (86625 objects inherit it), ...; an object keeps the
+program it was compiled with, so the rename needs the scheduled reboot
+to take effect everywhere"); a partial checkout ("the places outside it
+that name 'x' are not renamed, and cannot be seen from here"); the
+strings and `->` that name a private function, as in step 10.
+
+**Names made at run time.** `calls.Facts.Dynamic` are the calls of the
+registry whose function argument is no string constant, with the
+constant parts of a sum of strings (`"do_" + verb`: prefix `do_`).
+The extractor keeps each as a Use of kind `index.UseDynamic`, under the
+name `index.DynamicName` (no identifier, so no search for a name meets
+one), its `Aux` the pattern `do_*`. A function's plan lists them all,
+those whose prefix the old name begins with or whose suffix it ends with
+first; the command and the server show those and count the rest. On the
+VikingMUD lib: 1,218 such calls, 8 of them `add_*`.
+
+**The command line.** `dgdtools rename [flags] SYMBOL NEW`, `SYMBOL`
+one of three forms that cannot be taken for each other:
+`/std/living::query_name` (a function or a global variable of the
+object, its own or inherited, by `ChainFunc` and `ChainVar`; the path a
+mudlib path, `.c` optional; a macro of the object's file when it has
+neither), `/include/std.h::ROOM` (a macro of a header by its mudlib
+path, found in the header's own `#define`s), `FILE:LINE:COL` (a path on
+disk, line and byte column from 1 as `dgdtools lint` writes them). A
+function and a variable of one name in one object are an error that
+asks for the third form. The plan is printed as unified diffs (the
+format command's), each owner's under a line `# players/ann: 3 files`:
+an owner is the tree of a checkout pattern (`profile_build.checkouts`,
+or the profile's, else `players/*` and `d/*`), "other" for the rest,
+last. The summary on standard error: the symbol and where it is
+declared, the counts of each class and the files searched, files and
+edits by owner, the first 20 possible places with their reasons, the
+warnings, the dynamic calls. `--write` writes each file as the format
+command does (beside it, renamed over it); `--include-possible`;
+`--force`; `--output-format json` (the symbol, the counts, `complete`,
+`written`, the files with their owners and edits, every occurrence with
+its class and reason, the warnings, the dynamic calls); `-q`. Exit 0
+complete, 1 possible places left, 2 usage or refusal, 130 interrupted.
+The command reserved the name `rename` until now; the mechanism of
+reserved names went with it.
+
+**The server.** `rename` answers one `TextDocumentEdit` per file, in
+`documentChanges` (`OptionalVersionedTextDocumentIdentifier`: an open
+document's version, null for a file the client has not open, whose text
+is the disk's), or `changes`. The possible edits go to a client that
+says `changeAnnotationSupport` with `documentChanges`: every edit is
+then an `AnnotatedTextEdit`, the certain ones under `certain`, the
+possible ones under one annotation per reason ("Possible: a call on an
+object nobody can tell, which may be one that has it"), with
+`needsConfirmation`, so that VS Code's preview shows them by reason,
+unticked. Another client (Neovim's) gets the certain edits only. One
+`window/showMessage` then says what is to know: the possible places
+(in the preview, not ticked; or not renamed, the first five by file and
+line, and `dgdtools rename --include-possible`), the warnings, the
+dynamic calls that may call the function and how many others there
+are; nothing when there is nothing to say. A document that changed
+while the plan was made is `ContentModified`. `prepareRename` answers
+for a symbol across files as for one in a file, after the whole-lib
+scan (`scanFor`).
+
+**Measured** (the VikingMUD testmud lib, 110,086 files, 12 CPUs).
+`TestCorpusRenameAcross` asks for 35 symbols other files name (the eight
+functions called most, every so many of the lib's public functions,
+global variables that are not private and header macros) and renames 31, each to a
+name of the same length the lib does not use; makes the certain edits
+in an overlay of the lib and lints the whole lib again (34,140 files
+with diagnostics): every file's diagnostics are those of before, but
+for the new name in their messages and the lines of the possible places
+left; the references of the renamed declarations are the certain
+places, before and after (for families of up to 40 declarations). The
+largest plans, after the scan (3 s):
+
+| symbol | certain | possible | excluded | files edited | plan |
+|---|---:|---:|---:|---:|---:|
+| `add_item` (`/std/mod/desc.c`, its family) | 141,153 | 9,840 | 360 | 25,776 | 0.85 s |
+| `write` (the auto object's and every redefinition) | 117,263 | 14,185 | 23 | 20,653 | 1.17 s |
+| `this_player` (`/dgd/lib/runtime.c`) | 94,117 | 15,581 | 47 | 18,079 | 1.02 s |
+| `set_short` (46 declarations) | 58,970 | 10,878 | 194 | 57,058 | 0.89 s |
+| `set_long` (60 declarations) | 58,556 | 11,282 | 193 | 56,251 | 2.6 s |
+| `environment` | 51,248 | 5,388 | 11 | 13,495 | 1.06 s |
+| `extra_look` (559 declarations) | 586 | 56 | 912 | 536 | 0.20 s |
+
+A global variable or a macro of a header plans in 15 to 120 ms.
+Refused: `random` (a kfun too), `create` twice, `_tuned_cost` (saved:
+an object that inherits it calls `restore_object`). The test found one
+thing to mend: in the auto object, made of files included as code,
+`this_player` is declared in `runtime.h`, defined in `runtime.c` and
+called in `override.c`, each file read on its own; the declarations of
+the files a program is made of are now one function
+(`TestRenameProgramOfFiles`). `dgdtools rename /std/room::add_item
+add_detail` on the same lib: 5.1 s from start to the end of 634,000
+lines of diff (the scan most of it), 1.2 GB resident. Step 10's
+`TestCorpusRename` renames what one file decides as before (the same
+2,693 symbols, 67 µs a plan), and leaves the 15,033 symbols across files
+it meets to this test; `Prepare` of one of those takes 7 ms on average
+(the family is found from every object's own functions).
+
+Tests: `across_test.go` (`TestRenameFunctionAcross`: the family up and
+down, every form of call, another function of the name, the possible
+calls, the macro's body, the code not compiled, the dynamic calls, the
+possible edits; `TestRenameVariableAcross`: inheritors, a local that
+hides, a stringizing macro, a saved variable refused and forced;
+`TestClashesAcross`: each check of the new name across files;
+`TestRenameMacroAcross`; `TestRenamePrivateIncluded`;
+`TestRenamePartialAcross`: a checkout's public function with the
+warning, a redefinition of the profile's refused), step 10's tests with
+what is now renamed, `TestDynamic` (`pkg/calls`), `TestDynamicUses`
+(`pkg/resolve`), `ChainVar` in `TestChainFuncIsChain`; in `pkg/lsp`
+`TestRenameIsTheLibrarys` (every offset, both encodings, the edits of
+every file and the annotations what the library says) and the
+transcripts `rename-across` (versions, annotations, the message, a
+refusal that can be forced) and `rename-across-plain`; in
+`cmd/dgdtools` `TestRenameDiff`, `TestRenameWrite`, `TestRenameForce`,
+`TestRenameJSON`, `TestRenameErrors`; in `editors` `TestNeovimRename`
+(a public function, and the other file's buffer edited); on the corpus
+`TestCorpusRenameAcross`.
+
+**For step 12.** What is not built: renaming a file
+(`workspace/willRenameFiles`, and the refusal "renaming files comes in
+a later version" with it); an inherit label of a file others include;
+the occurrences in strings that are no callback and in comments, which
+are not listed (neither renamed nor said); the new name's checks in the
+bodies of macros used where an edit lands; files that have the old name
+only in dead code and neither see the symbol nor are read again for
+another reason; the driver object's functions, which the driver calls
+by name like `create`, are not refused; a function of the auto object
+renamed reaches every object, which is correct and slow to check.
+
 Steps 1 to 3 (9 days) are the "useful every day" milestone: live
 diagnostics, fixes, formatting. Steps 4 to 6 (9 days) make it a
 navigation tool. Steps 7 to 9 (13 days) need two pieces of library work
@@ -1327,8 +1565,8 @@ Library additions, all testable without a server: `syntax.PathAt`
 (built, with `token.File.TokenAt`),
 block scopes (built, `syntax.Scope`), kfun table (name, parameters, return type; built,
 `pkg/kfun`), reverse
-reference index (built, `index.Use`), `pkg/rename` (built for what one
-file decides). A lint already returns the parsed tree,
+reference index (built, `index.Use`), `pkg/rename` (built, in a file and across
+files). A lint already returns the parsed tree,
 tokens, `#define` environment, index unit and snapshot with the
 diagnostics.
 
@@ -2089,7 +2327,8 @@ network.
 6. Reverse index; step 8 (4 days). **Done** (section 8, "As built,
    step 8").
 7. The rename engine across files with `dgdtools rename` (step 11, 9
-   days) and the refactorings of step 12 (3 days). The command line
+   days), **done** (section 8, "As built, step 11"), and the
+   refactorings of step 12 (3 days). The command line
    comes first: it needs no editor, and it is the form an arch uses for
    a mud-wide rename.
 8. Deferred until asked for: the tree-sitter grammar (6 to 8 days) with
@@ -2394,6 +2633,23 @@ grammars alone can ship in the first.
   `rename.txt` and `rename-plain.txt`, and the capability in the
   others. In `editors`: `TestNeovimRename`. On the corpus:
   `TestCorpusRename` (above, "As built, step 10").
+- **As built, rename across files (step 11).** In `pkg/rename`:
+  `across_test.go` (each kind of symbol across files, the family of
+  redefinitions, every form of call, the classes and their reasons, a
+  saved variable refused and forced, the clashes across files, a
+  private function of an included file, a partial checkout with its
+  warning and the profile's function refused), and step 10's tests with
+  what is renamed now. `TestDynamic` (`pkg/calls`), `TestDynamicUses`
+  (`pkg/resolve`), `ChainVar` in `TestChainFuncIsChain` (`pkg/index`).
+  In `pkg/lsp`: `TestRenameIsTheLibrarys` (every offset, both
+  encodings: the edits of every file, their versions and annotations
+  are the library's plan), the transcripts `rename-across.txt` and
+  `rename-across-plain.txt`; the transcript player makes a rename's
+  edits in every file, open or not, and leaves those that need
+  confirmation. In `cmd/dgdtools`: `TestRenameDiff`, `TestRenameWrite`,
+  `TestRenameForce`, `TestRenameJSON`, `TestRenameErrors`. In
+  `editors`: `TestNeovimRename`. On the corpus:
+  `TestCorpusRenameAcross` (section 8, "As built, step 11").
 - **Edit fuzzing** (`go test -fuzz`): start from a corpus file, apply a
   random sequence of range edits through incremental sync while applying
   the same edits to a plain string; after each step the server's buffer

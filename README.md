@@ -10,6 +10,9 @@ LPC, in one command:
 - **`dgdtools format`** is a code formatter in the gofmt tradition: one
   style, no line wrapping, and a proof for every file that only
   whitespace changed.
+- **`dgdtools rename`** renames a function, a variable or a macro across
+  the mudlib, with its redefinitions and every call that reaches it,
+  and says which places may be the name and nobody can tell.
 
 Other LPC tooling targets LDMud or FluffOS and mishandles DGD syntax:
 `({ })` / `([ ])` literals, the `<-` operator, `..` ranges, labeled
@@ -24,13 +27,14 @@ dgdtools rules                  list the lint rules
 dgdtools explain RULE           what a rule means and why it fires
 dgdtools config [path]          check the configuration of a path and show what it comes to
 dgdtools profile build | show   mudlib profiles
+dgdtools rename SYMBOL NEW      rename across the mudlib; --write writes, else diffs
 dgdtools lsp                    the language server, for an editor to start
 dgdtools version
 ```
 
 Every command exits 0 on success, 1 when what it looks for was found
 (lint findings at or above `fail_on`; files `format --check` would
-change), and 2 on a usage, configuration or I/O error. `dgdtools
+change; possible places `rename` left), and 2 on a usage, configuration or I/O error. `dgdtools
 <command> -h` lists a command's flags; flags may stand before or after
 paths.
 
@@ -567,7 +571,83 @@ projects, a linter each), with every change applied in one step. See `docs/desig
 and the project model), [formatter.md](docs/design/formatter.md) (the
 formatter), [config.md](docs/design/config.md) (configuration and the
 command line) and [lsp.md](docs/design/lsp.md) (the language server and
-the rename command planned on top).
+the rename command).
+
+## dgdtools rename
+
+Renames a function, a global variable or a macro across the whole mudlib,
+the way a mud renames: in one sweep, the old name gone that day. What it
+adds to grep and an editor macro is the judgment: every place the old
+name stands is **certain** (the symbol), **possible** (it may be, and
+nobody can tell) or **excluded** (provably something else).
+
+```
+dgdtools rename /std/living::query_name query_short_name       # the diffs, nothing written
+dgdtools rename --write /std/living::query_name query_short_name
+dgdtools rename --write --include-possible /std/living::query_name query_short_name
+dgdtools rename /include/std.h::ROOM ROOM_OB                   # a header's macro
+dgdtools rename obj/sword.c:42:9 weight                        # what is named there
+dgdtools rename --output-format json /std/room::add_item add_detail
+```
+
+`SYMBOL` is one of:
+
+| Form | What it names |
+|---|---|
+| `/std/living::query_name` | a function or a global variable of an object, by the object's mudlib path (`.c` may be written): its own, or one it inherits |
+| `/include/std.h::ROOM` | a macro, by the mudlib path of the file that `#define`s it |
+| `FILE:LINE:COL` | what is named at that place of a file on disk, from the working directory, line and column from 1 as `dgdtools lint` reports them: how a local, a parameter or an inherit label is named |
+
+What is renamed:
+
+- **A function** with its redefinitions in the objects that inherit it
+  and in those it inherits: by the driver's rules they are one function
+  (a call in the inherited program reaches the redefinition), so they are
+  renamed together, as an IDE renames a virtual method with its
+  overrides; and every call that reaches one of them: `fn()`, `::fn()`,
+  `label::fn()`, `ob->fn()` and `call_other` on an object the source
+  names (a path, a path macro, `this_object()`), and the callbacks of
+  `call_out` and of the registrars in `conventions.call_registry`. The
+  same name in an object outside the hierarchy is another function, and
+  is left.
+- **A global variable** in its object and the objects that inherit it.
+- **A macro** in every file that includes its header.
+- A local, a parameter, a private function or variable, an inherit
+  label, a macro a file defines for itself: in its file.
+
+Possible are a call on an object the tools cannot tell (`ob->fn()` with
+`ob` a parameter), a callback in `this_object()` that only an inheritor
+may have, the name in a macro's body, code in an `#if` branch that is not
+compiled or that does not parse. They are left unless
+`--include-possible`. A call whose function's name is made when it runs
+(`call_other(ob, "do_" + verb)`) cannot be searched at all; the summary
+lists those whose constant part the old name begins or ends with.
+
+By default nothing is written: the edits are printed as unified diffs,
+grouped by owner (a wizard's or a domain's tree, by `profile_build`'s
+`checkouts` patterns, `players/*` and `d/*` when none are set; `other`
+for the rest of the lib), and a summary goes to standard error: the
+counts of each class, the files and edits of each owner, the possible
+places, the warnings. `--write` writes the files, each replaced whole.
+`--output-format json` prints the plan.
+
+It refuses, with the reason, a new name that would change what another
+name means (a function, variable or macro already visible where an edit
+lands, a local that would hide the renamed variable, a kfun, a call that
+would reach the renamed function), the function the driver creates
+objects with (`create`), a symbol defined in a mudlib profile, and a
+variable that `save_object` writes: renamed, the values saved under the
+old name are not restored at the next reboot. `--force` renames that one
+all the same. It warns when an edited file is inherited or included by
+other objects (they keep the program they were compiled with: the rename
+takes effect everywhere at the scheduled reboot) and, in a wizard's
+checkout with a profile, that the rest of the mudlib is not renamed.
+
+Exit codes: `0` the rename is complete (no possible place left), `1`
+possible places were left, `2` usage or configuration error or a refusal,
+`130` interrupted. On the VikingMUD lib (110,086 files), renaming
+`add_item`, called 141,153 times in 25,776 files, plans in under a
+second after the index is built; the whole command takes about 5 s.
 
 ## In an editor
 
@@ -590,12 +670,11 @@ finds the references of a name: every call of a function in the mudlib
 (direct, `::`, `->` and callbacks on objects it can tell), every use of
 a variable, a macro or a local, every `inherit` of an object and
 `#include` of a header, and highlights a name's places in the file, a
-variable read or written. It renames what one file decides: a local or
-a parameter, a private function or variable, an inherit label, a macro
-the file defines for itself, everywhere it is meant and nowhere else,
-and says why not where the rename would change what a name means or
-reach other files (a public function, a header's macro: a later
-version). It colours what a grammar cannot tell
+variable read or written. It renames a name everywhere it is meant and
+nowhere else, in the file and across the mudlib, as `dgdtools rename`
+does: the edits to every file in one preview, the places that may be
+the name (a call on an object it cannot tell) shown unticked, and why
+not where the rename would change what a name means. It colours what a grammar cannot tell
 (semantic tokens): which names are macros, and of which kind, which
 functions are the object's own, inherited, the auto object's or the
 driver's, which variables are global, local or parameters. Where
