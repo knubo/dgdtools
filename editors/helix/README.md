@@ -1,14 +1,10 @@
 # LPC (DGD) for Helix
 
-Helix highlights only through tree-sitter, and there is no tree-sitter
-grammar for DGD LPC yet ([lsp.md](../../docs/design/lsp.md), 10.1), so
-LPC files can have C's highlighting at best (below), which gets `({ })`
-and `::` wrong. The language server, `dgdtools lsp`, works now:
-diagnostics, fixes, formatting, navigation, completion, rename.
+Helix uses tree-sitter for syntax highlighting, and there is no tree-sitter grammar for DGD LPC yet. As a workaround, you can reuse Helix's C grammar for basic highlighting (which won't understand DGD-specific syntax like `({ })` or `::`) while getting full diagnostics, quick fixes, formatting, navigation, completion, and rename from `dgdtools lsp`.
 
-With `dgdtools` on `PATH` ([install it](../../README.md#installation)),
-put this in the mudlib's own `.helix/languages.toml`, so that its `.c`
-and `.h` files are LPC and those of every other project stay C:
+## Setup
+
+With `dgdtools` on `PATH` ([installation instructions](../../README.md#installation)), add `.helix/languages.toml` inside your mudlib so only that project's `.c` and `.h` files are treated as `dgdlpc`:
 
 ```toml
 [language-server.dgdtools]
@@ -27,9 +23,7 @@ grammar = "c"
 language-servers = ["dgdtools"]
 ```
 
-Helix looks for a language's queries under its own name, so `dgdlpc`
-has no highlighting until it is told to use C's. Once per machine
-(Helix reads queries from its runtime directories, not from a project):
+Because Helix looks up tree-sitter queries under the language's own name (`dgdlpc`), add user-level query shims that inherit from C (run once per machine):
 
 ```sh
 dir=~/.config/helix/runtime/queries/dgdlpc   # %AppData%\helix\runtime\queries\dgdlpc on Windows
@@ -39,6 +33,4 @@ for q in highlights indents injections locals textobjects; do
 done
 ```
 
-`; inherits: c` is how Helix's own C++ queries take C's. `hx --health
-dgdlpc` says whether the server and the queries are found. These lines
-were not run in Helix.
+Run `hx --health dgdlpc` to verify that Helix finds both `dgdtools` and the query files. Note that this Helix configuration has not been verified interactively yet.
