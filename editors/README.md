@@ -1,17 +1,23 @@
 # Editor support for DGD LPC
 
-What an editor needs to show DGD LPC, for the editors this repository
-supports. The language is called **`dgdlpc`** everywhere: the VS Code
-language id, the Vim filetype. (`lpc` is taken in both by tooling for
-other drivers, which colours as keywords words DGD does not have and
-knows none of `nil`, `atomic` and `rlimits`.)
+What an editor needs to show DGD LPC. The language is called
+**`dgdlpc`** everywhere: the VS Code language id, the Vim filetype, the
+Helix language. (`lpc` is taken by tooling for other drivers, which
+colours as keywords words DGD does not have and knows none of `nil`,
+`atomic` and `rlimits`.)
 
 | | |
 |---|---|
-| `vscode/` | the VS Code extension: a TextMate grammar, the language configuration (comments, brackets, indentation), and the client that starts the language server |
-| `vim/` | runtime files for Vim and Neovim: filetype detection, syntax, filetype plugin, indent |
-| `nvim/` | for Neovim 0.11 and later: the entry that starts the language server (`lsp/dgdtools.lua`) |
-| `common/` | what the two share: the word list (`dgdlpc.json`) and the sample files the tests run over |
+| [VS Code](vscode/README.md) | the extension: a TextMate grammar, the language configuration, and the client that starts the language server |
+| [Vim and Neovim](vim/README.md) | one plugin for both: filetype detection, syntax, filetype plugin, indent; in Neovim 0.11 and later the language server, started by itself |
+| [Helix](helix/README.md) | the language server, with C's highlighting until there is a tree-sitter grammar |
+| Zed | a new language needs a Zed extension, and none is written |
+| `common/` | what the grammars share: the word list (`dgdlpc.json`) and the sample files the tests run over |
+
+Any other editor with an LSP client can run the server: the command is
+`dgdtools lsp`, on standard input and output, for the files of the
+language `dgdlpc`, with `dgdtools.yml` and `.dgdtools.yml` as root
+markers.
 
 There are two layers ([lsp.md](../docs/design/lsp.md), section 10). The
 first is highlighting that works with no server, offline, on a file that
@@ -31,180 +37,8 @@ sources too, they stay C. A file is `dgdlpc` because of where it lies:
   `.dgdtools.yml` (the file's own directory or any above it), or under a
   directory listed in `g:dgdlpc_roots`.
 - **VS Code:** in a workspace whose settings associate the files, which
-  the extension writes when asked to (below).
-
-## VS Code
-
-The extension is the folder `vscode/`: the grammar, and a client that
-starts `dgdtools lsp` ([below](#vs-code-1)). It is not published in a
-marketplace yet. A release of dgdtools has it as files, one package for
-each platform with that platform's `dgdtools` inside
-(`dgdtools-darwin-arm64-0.4.0.vsix`, and so on for `darwin-x64`,
-`linux-x64`, `linux-arm64`, `win32-x64` and `win32-arm64`) and one
-without the program for every other platform (`dgdtools-0.4.0.vsix`);
-`code --install-extension FILE` installs one.
-
-From a checkout it is built before it is used, which needs Node.js
-(22.18 or later) and installs nothing outside the folder. **As a
-package**, for the machine you are on and with the `dgdtools` of the
-checkout inside it, which needs Go too:
-
-```
-cd /path/to/dgdtools
-make vsix        # go build, npm ci, and vsce package --target for this platform
-code --install-extension editors/vscode/dgdtools-darwin-arm64-0.0.1.vsix
-```
-
-The file's name has the platform (`linux-x64`, `win32-arm64`, ...) and
-the version of `package.json`, which a release replaces with its own.
-`make vsix` is `scripts/vsix.mts --binary bin/dgdtools`, and the script
-takes another program and another platform, a version, and a directory
-to write to:
-
-```
-cd /path/to/dgdtools
-GOOS=linux GOARCH=amd64 go build -o /tmp/dgdtools ./cmd/dgdtools
-cd editors/vscode
-npm ci
-node scripts/vsix.mts --binary /tmp/dgdtools --target linux-x64 --version 0.4.0 --out /tmp
-```
-
-`--dist DIR` makes all seven packages of a release from what GoReleaser
-wrote to `DIR` (`goreleaser build --snapshot --clean` writes `dist/`),
-which is what the release workflow runs. The packing is `vsce`'s, the
-one `package-lock.json` pins; nothing here publishes anything.
-
-**From the folder as it is**, without a package and without a program
-in it (the `dgdtools` on `PATH` is run):
-
-```
-cd /path/to/dgdtools/editors/vscode
-npm ci           # the client library and the build tools, as package-lock.json pins them
-npm run build    # writes dist/extension.js, the one file VS Code runs
-```
-
-- **To try it:** `code --extensionDevelopmentPath=/path/to/dgdtools/editors/vscode /path/to/your/lib`
-- **To keep it:** link the folder into the extensions directory under
-  the name VS Code expects, and restart VS Code:
-
-  ```
-  ln -s /path/to/dgdtools/editors/vscode ~/.vscode/extensions/dgdtools.dgdtools-0.0.1
-  ```
-
-(The packages were built here and looked into; none was installed:
-there is no VS Code on the machine this was written on.)
-
-Then say which files are LPC. The command **dgdtools: Use DGD LPC for This
-Folder's .c/.h Files** does (the command palette, or a folder's menu in the
-explorer once the extension is at work), and the extension offers it
-when a folder with a `dgdtools.yml` is opened whose files are not LPC
-yet. What it writes is `files.associations` in the workspace's settings,
-so that it holds for this mudlib and nowhere else; by hand, in the mudlib's
-own `.vscode/settings.json`:
-
-```json
-{
-  "files.associations": { "*.c": "dgdlpc", "*.h": "dgdlpc" }
-}
-```
-
-That is the form for the folder that is open. For a folder below it, or
-for one folder of a workspace with several, the patterns name the
-folder, since the setting is the whole window's: `**/lib/**/*.c` and
-`**/lib/**/*.h` for a folder `lib`. The command also lists
-Microsoft's C extensions in `.vscode/extensions.json` as
-`unwantedRecommendations`. **dgdtools: Use C for This Folder's .c/.h
-Files** takes out what the first command put in, and deletes a file it
-leaves empty. A single
-file can be switched with *Change Language Mode* → *LPC (DGD)*.
-
-A mudlib whose files are Latin-1 should also say so, or saving a file
-opened as UTF-8 damages it:
-
-```json
-{
-  "[dgdlpc]": { "files.encoding": "iso88591" }
-}
-```
-
-What the grammar cannot do, being one fixed file for every mudlib:
-
-- `//` is always shown as a comment, whatever `dialect.slash_slash`
-  says. Where the driver was built without it, `//` outside a string is
-  a syntax error (the linter reports it), so no valid file is coloured
-  wrongly.
-- `function` is always a plain name, as it is unless `dialect.closures`
-  is set. In a mudlib that sets it, the word is not coloured as a type.
-
-## Vim and Neovim
-
-`editors/vim` is a runtime directory: `ftdetect/`, `syntax/`,
-`ftplugin/`, `indent/`, `autoload/`. Put it on the runtime path any way
-you like.
-
-As a package, with no plugin manager (Vim 8 and later; for Neovim the
-directory is `~/.local/share/nvim/site/pack/...`):
-
-```
-git clone https://github.com/mmcdole/dgdtools ~/src/dgdtools
-mkdir -p ~/.vim/pack/dgdtools/start
-ln -s ~/src/dgdtools/editors/vim ~/.vim/pack/dgdtools/start/dgdlpc
-```
-
-With a plugin manager, name the subdirectory:
-
-```vim
-" vim-plug
-Plug 'mmcdole/dgdtools', { 'rtp': 'editors/vim' }
-```
-
-```lua
--- lazy.nvim, from a checkout
-{ dir = '~/src/dgdtools/editors/vim' }
-```
-
-or simply, before `filetype plugin indent on`:
-
-```vim
-set runtimepath^=~/src/dgdtools/editors/vim
-```
-
-It needs `filetype plugin indent on` and `syntax on`, which Neovim has
-by default.
-
-What you get in a `dgdlpc` buffer:
-
-- **Syntax:** the driver's reserved words and no others, `({ })` and
-  `([ ])` as brackets of their own, DGD's escapes, `1..2` as a range,
-  `->`, `<-` and `::`, directives to the end of their logical line.
-- **Filetype plugin:** `commentstring` and `comments` for `/* */` (and
-  `//` where the dialect has it); `gf`, `[i` and `[d` on `#include`,
-  `inherit` and `#define` lines, where a path that begins with `/` is
-  looked up from the directories above the file; `%` between `#if`,
-  `#else` and `#endif` with matchit.
-- **Indent:** C indenting set to what `dgdtools format` writes: case
-  labels at the level of their `switch`, a function's name at the margin
-  under its return type, one level for a continued line and for the
-  inside of `({ })` and `([ ])`. `shiftwidth` and `expandtab` are yours
-  (or your `.editorconfig`'s); the formatter's default is four spaces.
-
-Variables (`b:` is asked before `g:`, so a mudlib can differ from the rest):
-
-| | default | |
-|---|---|---|
-| `g:dgdlpc_slash_slash` | `1` | `//` begins a comment, as with `dialect.slash_slash: true`. `0`: it is two operators |
-| `g:dgdlpc_closures` | `0` | `1`: `function` is a type keyword, as with `dialect.closures: true` |
-| `g:dgdlpc_roots` | `[]` | directories whose `*.c` and `*.h` are LPC without a `dgdtools.yml` above them |
-| `g:dgdlpc_no_functions` | `0` | `1`: do not highlight a name before `(` |
-| `g:dgdlpc_minlines` | unset | synchronize the syntax on comments within this many lines, instead of reading the file from its start |
-
-The two dialect variables are set by hand to what the mudlib's
-`dgdtools.yml` (or its profile) says; the runtime files do not read it.
-
-In Vim a mudlib's `.c` file is given the filetype `c` first and `dgdlpc`
-right after, because Vim's own detection runs first; an autocommand on
-`FileType c` sees it for that moment. In Neovim (0.8 and later) the
-answer is `dgdlpc` from the start.
+  the extension writes when asked to.
+- **Helix:** in a mudlib whose own `.helix/languages.toml` says so.
 
 ## The language server
 
@@ -342,202 +176,63 @@ a name or a file, as `profile:` in a config) and `dgdtools.libPath`
 workspace folder, a config file always wins over them, and nothing else
 about the tools is set from an editor.
 
-### Neovim (0.11 and later)
 
-With `editors/vim` (the filetype) and `editors/nvim` (the server's
-entry) on the runtime path, and `dgdtools` on `PATH`:
+## Building the VS Code extension
 
-```lua
-vim.opt.runtimepath:prepend('~/src/dgdtools/editors/vim')
-vim.opt.runtimepath:prepend('~/src/dgdtools/editors/nvim')
-vim.lsp.enable('dgdtools')
-```
+A release of dgdtools has the extension as files, one package for each
+platform with that platform's `dgdtools` inside
+(`dgdtools-darwin-arm64-0.4.0.vsix`, and so on for `darwin-x64`,
+`linux-x64`, `linux-arm64`, `win32-x64` and `win32-arm64`) and one
+without the program for every other platform (`dgdtools-0.4.0.vsix`);
+`code --install-extension FILE` installs one.
 
-Open a `.c` file under a `dgdtools.yml`; `:checkhealth vim.lsp` shows
-the client attached, `:lua vim.diagnostic.setqflist()` lists the
-findings, `gra` (or `:lua vim.lsp.buf.code_action()`) offers the fixes
-and the comments, `:lua vim.lsp.buf.format()` formats, and `gq` formats
-a selection; `CTRL-]` goes to a definition, `K` shows the hover, and
-`CTRL-S` in insert mode the signature of the call being written, and
-`CTRL-X CTRL-O` completes (the server sets `omnifunc`); `gO`
-lists the outline, and `:lua vim.lsp.buf.workspace_symbol()` asks for a
-name to find in the mudlib; `grr` lists the references,
-`:lua vim.lsp.buf.document_highlight()` highlights the name, and `grn`
-renames it. The
-semantic tokens are shown by themselves (`:Inspect` on a name shows
-them); the standard types are linked to colours already
-(`@lsp.type.macro` to `@constant.macro`, `@lsp.type.parameter` to
-`@variable.parameter` and so on), and the modifiers can be given their
-own:
-
-```lua
-vim.api.nvim_set_hl(0, '@lsp.typemod.function.defaultLibrary.dgdlpc', { link = '@function.builtin' })
-vim.api.nvim_set_hl(0, '@lsp.typemod.method.defaultLibrary.dgdlpc', { link = '@function.builtin' })
-vim.api.nvim_set_hl(0, '@lsp.typemod.function.inherited.dgdlpc', { link = '@function.call' })
-vim.api.nvim_set_hl(0, '@lsp.typemod.type.macro.dgdlpc', { link = 'Type' })
-vim.api.nvim_set_hl(0, '@lsp.typemod.modifier.macro.dgdlpc', { link = 'StorageClass' })
-```
-
-To format on save:
-
-```lua
-vim.api.nvim_create_autocmd('BufWritePre', {
-  pattern = { '*.c', '*.h' },
-  callback = function(ev)
-    if vim.bo[ev.buf].filetype == 'dgdlpc' then vim.lsp.buf.format({ bufnr = ev.buf }) end
-  end,
-})
-```
-
-A folder with no `dgdtools.yml` has no root marker; say where it is and
-what it is (and list it in `g:dgdlpc_roots`, so that its files are
-`dgdlpc`):
-
-```lua
-vim.g.dgdlpc_roots = { vim.fs.normalize('~/mud/players/me') }
-vim.lsp.config('dgdtools', {
-  root_dir = vim.fs.normalize('~/mud/players/me'),
-  settings = { dgdtools = { profile = 'mylib', libPath = '/players/me' } },
-})
-```
-
-To try it without touching your configuration, from a checkout of this
-repository (`go build -o /tmp/dgdtools ./cmd/dgdtools` first):
+From a checkout it is built before it is used, which needs Node.js
+(22.18 or later) and installs nothing outside the folder. **As a
+package**, for the machine you are on and with the `dgdtools` of the
+checkout inside it, which needs Go too:
 
 ```
-nvim -u NONE \
-  --cmd 'set rtp^=editors/vim,editors/nvim' --cmd 'filetype plugin indent on' --cmd 'syntax on' \
-  --cmd "lua vim.lsp.config('dgdtools', { cmd = { '/tmp/dgdtools', 'lsp', '--log', '/tmp/dgdtools-lsp.log' } })" \
-  --cmd "lua vim.lsp.enable('dgdtools')" \
-  /path/to/your/lib/std/room.c
+cd /path/to/dgdtools
+make vsix        # go build, npm ci, and vsce package --target for this platform
+code --install-extension editors/vscode/dgdtools-darwin-arm64-0.0.1.vsix
 ```
 
-`go test ./editors -run TestNeovimClient` does the same without a
-screen: it runs the server under the `nvim` on `PATH`, waits for the
-diagnostics of a file, mends one finding by typing and one by the
-server's fix, and has the file formatted. `TestNeovimDefinition` goes
-to definitions the same way, `TestNeovimHover` reads what `K` and
-`CTRL-S` show, `TestNeovimSymbols` lists the outline and searches
-the mudlib, `TestNeovimCompletion` completes with `CTRL-X CTRL-O`, and
-`TestNeovimReferences` lists references and highlights a local,
-`TestNeovimTokens` reads the semantic tokens Neovim shows, before and
-after an edit, and `TestNeovimRename` renames a local, a private
-function and a public one another file calls (the edit of that file in
-its own buffer), and is told why the create function is not.
-`TestNeovimRefactor` adds a prototype with `vim.lsp.buf.code_action`
-and moves a file as a file explorer plugin does.
+The file's name has the platform (`linux-x64`, `win32-arm64`, ...) and
+the version of `package.json`, which a release replaces with its own.
+`make vsix` is `scripts/vsix.mts --binary bin/dgdtools`, and the script
+takes another program and another platform, a version, and a directory
+to write to:
 
-### Vim
-
-Vim has no client of its own. With
-[vim-lsp](https://github.com/prabirshrestha/vim-lsp):
-
-```vim
-if executable('dgdtools')
-  autocmd User lsp_setup call lsp#register_server({
-      \ 'name': 'dgdtools',
-      \ 'cmd': ['dgdtools', 'lsp'],
-      \ 'allowlist': ['dgdlpc'],
-      \ })
-endif
+```
+cd /path/to/dgdtools
+GOOS=linux GOARCH=amd64 go build -o /tmp/dgdtools ./cmd/dgdtools
+cd editors/vscode
+npm ci
+node scripts/vsix.mts --binary /tmp/dgdtools --target linux-x64 --version 0.4.0 --out /tmp
 ```
 
-and with [coc.nvim](https://github.com/neoclide/coc.nvim), in
-`coc-settings.json`:
+`--dist DIR` makes all seven packages of a release from what GoReleaser
+wrote to `DIR` (`goreleaser build --snapshot --clean` writes `dist/`),
+which is what the release workflow runs. The packing is `vsce`'s, the
+one `package-lock.json` pins; nothing here publishes anything.
 
-```json
-{
-  "languageserver": {
-    "dgdtools": {
-      "command": "dgdtools",
-      "args": ["lsp"],
-      "filetypes": ["dgdlpc"],
-      "rootPatterns": ["dgdtools.yml", ".dgdtools.yml"]
-    }
-  }
-}
+**From the folder as it is**, without a package and without a program
+in it (the `dgdtools` on `PATH` is run):
+
 ```
-
-Neither was run here; they are each client's usual lines for a server on
-standard input and output.
-
-### VS Code
-
-The extension (built and installed as [above](#vs-code)) starts the
-server when a workspace has a `dgdtools.yml` or a file is `dgdlpc`.
-Which `dgdtools` it runs: the program `dgdtools.path` names, when it is
-set; else the one in the extension's own folder (`bin/dgdtools`, which a
-package made for a platform has, and which is the `dgdtools` of the same
-release); else the `dgdtools` on `PATH`. It says what to do when there
-is none. To have the editor run what your shell runs although the
-package has a program, set `dgdtools.path` to `dgdtools`. The *dgdtools*
-channel of the Output panel says which program was started, and its
-version.
-
-| setting | |
-|---|---|
-| `dgdtools.path` | the executable: an absolute path (`~` is the home directory) or a command name on `PATH`. Empty: the one the extension came with, else `dgdtools` on `PATH` |
-| `dgdtools.profile`, `dgdtools.libPath` | the two settings [above](#the-language-server), for a folder with no `dgdtools.yml`; each workspace folder can have its own |
-| `dgdtools.logFile` | a file for the server's debug log (`--log`) |
-| `dgdtools.trace.server` | `messages` or `verbose`: how much is traced while the log level of the *dgdtools* channel of the Output panel is *Trace* |
-
-A change of the first or the third starts the server again, and so does
-**dgdtools: Restart Server**. In a workspace that is not trusted, what
-the workspace itself says of those two is not listened to. What the
-server writes for a person to read (the project a file was found to
-belong to, a text the formatter refuses) is in the *dgdtools* channel of
-the Output panel.
-
-Fixes are in the lightbulb, formatting is *Format Document* and *Format
-Selection*, and both can be had on saving, in the mudlib's settings:
-
-```json
-{
-  "[dgdlpc]": {
-    "editor.formatOnSave": true,
-    "editor.codeActionsOnSave": { "source.fixAll.dgdtools": "explicit" }
-  }
-}
+cd /path/to/dgdtools/editors/vscode
+npm ci           # the client library and the build tools, as package-lock.json pins them
+npm run build    # writes dist/extension.js, the one file VS Code runs
+code --extensionDevelopmentPath=$PWD /path/to/your/lib
 ```
-
-A finding that points at a declaration which comes from a profile opens
-the stub, read-only: a document `dgdtools-profile://NAME/std/room.c`,
-whose text the server gives (`workspace/textDocumentContent`).
 
 To work on the extension: `npm run check` checks the types, `npm test`
 runs the tests of what needs no VS Code (finding the executable, the
 association patterns, what the packaging script makes of a release),
 and `go test ./editors` holds the manifest to the code and the
-script's platforms to GoReleaser's. None of them starts VS Code: the client has not been run in
-one here, which is the first thing to do with it.
-
-## Helix, Zed
-
-Both highlight through tree-sitter, and there is no tree-sitter grammar
-for DGD LPC yet (deferred: [lsp.md](../docs/design/lsp.md), 10.1). Until
-there is, LPC files keep their C highlighting there, which is tolerable
-and gets `({ })` and `::` wrong. The language server they can use now.
-For Helix, in the mudlib's own `.helix/languages.toml`, so that it holds
-for this mudlib and nowhere else (not run here):
-
-```toml
-[language-server.dgdtools]
-command = "dgdtools"
-args = ["lsp"]
-
-[[language]]
-name = "dgdlpc"
-scope = "source.dgdlpc"
-file-types = ["c", "h"]
-roots = ["dgdtools.yml", ".dgdtools.yml"]
-comment-tokens = "//"
-block-comment-tokens = { start = "/*", end = "*/" }
-indent = { tab-width = 4, unit = "    " }
-grammar = "c"
-language-servers = ["dgdtools"]
-```
-
-Zed needs an extension to name a language; none is written.
+script's platforms to GoReleaser's. None of them starts VS Code: the
+client has not been run in one here, which is the first thing to do
+with it.
 
 ## Changing a grammar
 

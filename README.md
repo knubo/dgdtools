@@ -706,11 +706,20 @@ the tools cannot know (a call on an
 object held in a variable) they say so, or nothing, and never guess. It
 reads the same `dgdtools.yml` as the commands, so the editor and the
 command line cannot disagree.
-[`editors/`](editors/README.md) has what each editor needs: syntax
-highlighting for VS Code and for Vim and Neovim, under the language name
-`dgdlpc`, a VS Code extension that starts the server, and how to start
-it from Neovim and others. A `.c` file is LPC there only inside a mudlib:
-nothing claims the extension on a machine that has C sources too.
+Each editor has its own page, under the language name `dgdlpc`:
+
+- [VS Code](editors/vscode/README.md): the extension, with syntax
+  highlighting and the server (the package for each platform has
+  `dgdtools` inside).
+- [Vim and Neovim](editors/vim/README.md): a plugin with syntax
+  highlighting, indent and filetype settings; Neovim 0.11 and later
+  start the server by themselves, Vim through vim-lsp, ALE or coc.nvim.
+- [Helix](editors/helix/README.md): the server, with C's highlighting.
+
+A `.c` file is LPC there only inside a mudlib: nothing claims the
+extension on a machine that has C sources too.
+[`editors/`](editors/README.md) has what they share: what the server
+does, and how the grammars are tested.
 
 ## License note
 

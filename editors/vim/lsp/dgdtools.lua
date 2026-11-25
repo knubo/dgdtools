@@ -1,8 +1,6 @@
 -- Neovim 0.11 and later: the language server of dgdtools, for the files
--- editors/vim gives the filetype dgdlpc. With this directory on the
--- runtime path:
---
---   vim.lsp.enable('dgdtools')
+-- of the filetype dgdlpc. plugin/dgdtools.lua enables it when dgdtools
+-- can be run; vim.lsp.config('dgdtools', {...}) changes any of it.
 --
 -- The server finds a file's project from the file, as the command does;
 -- the root markers only say which files share one server. A wizard whose

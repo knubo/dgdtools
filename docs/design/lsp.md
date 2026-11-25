@@ -1157,7 +1157,7 @@ for a macro, `entity.name.function.call.dgdlpc`,
 `variable.other.dgdlpc`, `variable.other.local.dgdlpc`,
 `variable.parameter.dgdlpc`), and declares the three custom modifiers
 (`semanticTokenModifiers`). Neovim's client asks for the tokens by
-itself and links the standard types to its groups; editors/README.md
+itself and links the standard types to its groups; editors/vim/README.md
 has links for the modifiers. The tokens claim nothing the grammars
 claim otherwise: a macro is the grammars' macro, a type macro and
 `function` their type, a label their label, and where a grammar colours
@@ -1969,10 +1969,11 @@ file is stale or a grammar's lists differ from it.
 
 ```
 editors/
-  README.md              installing the VS Code extension from the folder
-                         and the Vim files; what Helix and Zed get (the
-                         language server only, until there is a
-                         tree-sitter grammar)
+  README.md              what the editors share (the language server,
+                         which files are LPC, the grammars' tests); each
+                         editor's folder has a README of its own
+  helix/README.md        the languages.toml lines (the language server
+                         only, until there is a tree-sitter grammar)
   common/
     dgdlpc.json          the shared word list
     samples/             sample files and their snapshots (*.tm.snap,
@@ -1990,12 +1991,14 @@ editors/
     syntax/dgdlpc.vim
     ftplugin/dgdlpc.vim
     indent/dgdlpc.vim
+    lsp/dgdtools.lua       Neovim 0.11+: the vim.lsp.config entry (section 11)
+    plugin/dgdtools.lua    Neovim 0.11+: enables it when dgdtools runs
   *_test.go              the tests of all of it (package editors)
 ```
 
-Beside them now: `editors/nvim/lsp/dgdtools.lua`, the Neovim 0.11+
-`vim.lsp.config` entry (section 11), with a test that runs the server
-under the `nvim` on `PATH`.
+The Neovim files are in the same runtime directory as the rest, so that
+one directory is the plugin for both editors (Vim reads neither `lsp/`
+nor `plugin/*.lua`); tests run the server under the `nvim` on `PATH`.
 
 **TextMate grammar** (VS Code; also usable by other editors such as
 Sublime and by GitHub's Linguist if submitted), scope name
@@ -2219,21 +2222,25 @@ servers under one id is worse than a new word.
   is downloaded.
 - **Vim and Neovim:** the `editors/vim` runtime files from 10.1 (install
   as a plugin directory) set the filetype. For Neovim 0.11 and later,
-  `editors/nvim/lsp/dgdtools.lua` is the `vim.lsp.config` entry (`cmd =
+  `editors/vim/lsp/dgdtools.lua` is the `vim.lsp.config` entry (`cmd =
   {"dgdtools", "lsp"}`, `root_markers = {"dgdtools.yml",
-  ".dgdtools.yml"}`, `filetypes = {"dgdlpc"}`); submit it to
-  `nvim-lspconfig` once stable. For Vim, `editors/README.md` has the
-  lines for vim-lsp and coc.nvim. The Neovim entry is there and tested
-  (`TestNeovimClient`); the lines for the others are written down and
-  were not run.
-- **Helix:** a `languages.toml` entry in `editors/README.md` (language
+  ".dgdtools.yml"}`, `filetypes = {"dgdlpc"}`), and
+  `editors/vim/plugin/dgdtools.lua` enables it when the configured
+  command is executable, unless `g:dgdtools_lsp` is false; with the
+  plugin installed nothing else is configured, so nothing needs to be in
+  `nvim-lspconfig`. For Vim, `editors/vim/README.md` has the lines for
+  vim-lsp, ALE and coc.nvim. The Neovim entry and the plugin are tested
+  (`TestNeovimClient`, `TestNeovimPlugin`); the vim-lsp and ALE lines
+  were run by hand against the server, the coc.nvim lines were not.
+- **Helix:** a `languages.toml` entry in `editors/helix/README.md` (language
   `dgdlpc`, roots `dgdtools.yml`, `language-servers = ["dgdtools"]`).
   Helix highlights only through tree-sitter and does not use semantic
   tokens, so until the deferred grammar of 10.1 exists Helix users get
   diagnostics and navigation with C highlighting.
-- **Zed:** the settings in `editors/README.md` declare the language
-  server and reuse the C grammar until the tree-sitter grammar exists;
-  Zed does apply semantic tokens on top.
+- **Zed:** a language, and a language server for it, are added to Zed
+  only by an extension; none is written, and settings alone cannot do
+  it. An extension could reuse the C grammar until the tree-sitter
+  grammar exists.
 - Emacs (`eglot`), Sublime (`LSP`), Kate: a line of configuration each,
   documented, not maintained.
 

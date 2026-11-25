@@ -73,7 +73,7 @@ the linter and formatter for it:
 Where the tools cannot know (a call on an object held in a variable)
 they say nothing rather than guess.
 
-The language is called `dgdlpc`, *DGD LPC* in the language picker. The
+The language is called `dgdlpc`, *LPC (DGD)* in the language picker. The
 editor shows what the command line prints: both read the mudlib's
 `dgdtools.yml`.
 
@@ -111,6 +111,11 @@ workspace's settings and never to your own:
 }
 ```
 
+For a folder below the one that is open, or one folder of a workspace
+with several, the patterns name the folder (`**/lib/**/*.c` for a
+folder `lib`). A single file can be switched with *Change Language
+Mode* → *LPC (DGD)*.
+
 It also adds Microsoft's C extensions to the folder's
 `.vscode/extensions.json` as `unwantedRecommendations`, so that VS Code
 does not recommend them for its `.c` files. The inverse command takes
@@ -140,6 +145,12 @@ To fix and format on saving:
   }
 }
 ```
+
+What the grammar cannot know, being one file for every mudlib: `//`
+is always a comment, whatever `dialect.slash_slash` says (where the
+driver has no `//` comments the linter reports them), and `function`
+is coloured as a type only through the server, where the mudlib sets
+`dialect.closures`.
 
 ## Commands
 
@@ -172,7 +183,11 @@ Else `dgdtools` on `PATH`. To have the editor run what your shell runs,
 set `dgdtools.path` to `dgdtools`. The *dgdtools* channel of the Output
 panel says which program was started, and its version. In a workspace
 that is not trusted, what the workspace itself says of `dgdtools.path`
-and `dgdtools.logFile` is not listened to.
+and `dgdtools.logFile` is not listened to. A change of either restarts
+the server, as **dgdtools: Restart Server** does.
+
+A declaration that comes from a mudlib profile opens read-only, as a
+`dgdtools-profile:` document whose text the server gives.
 
 ## More
 

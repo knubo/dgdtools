@@ -1,9 +1,9 @@
 // Package editors holds what an editor needs to show DGD LPC: the VS
 // Code extension (vscode/: the TextMate grammar, the language
 // configuration, and the client of the language server, in TypeScript),
-// the Vim and Neovim runtime files (vim/), Neovim's entry for the
-// language server (nvim/), and what the grammars share (common/): the
-// word list and the sample files.
+// the Vim and Neovim plugin (vim/: the runtime files, and Neovim's
+// entry for the language server), the lines for Helix (helix/), and what
+// the grammars share (common/): the word list and the sample files.
 //
 // There is no Go code here to import. The package exists for its tests,
 // which keep the grammars from drifting away from the tool:
@@ -20,7 +20,8 @@
 //     comparison, same kind of snapshot), and indentation;
 //   - the language server is run under the nvim on PATH, when it is one
 //     with vim.lsp.config (0.11 and later): the command is built, and
-//     an editor session has it lint, fix and format a file;
+//     editor sessions have it lint, fix, format, navigate and rename,
+//     and the plugin start it, or not when told not to;
 //   - the manifest of the VS Code extension is compared with the code
 //     of its client: the commands, the settings, the names both share
 //     with the server; and the platforms it is packaged for, with the

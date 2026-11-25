@@ -19,7 +19,6 @@ import (
 const nvimSession = `
 local dir, out = vim.env.DGDLPC_DIR, {}
 local ok, err = pcall(function()
-  vim.opt.runtimepath:prepend(vim.env.DGDLPC_NVIM)
   vim.opt.runtimepath:prepend(vim.env.DGDLPC_VIM)
   vim.cmd('filetype plugin indent on')
   vim.lsp.config('dgdtools', { cmd = { vim.env.DGDLPC_BIN, 'lsp', '--log', dir .. '/lsp.log' } })
@@ -70,11 +69,31 @@ vim.cmd('qall!')
 // with the language server built from this tree and the files given
 // below a new directory. The script finds in its environment the
 // directory (DGDLPC_DIR), the server (DGDLPC_BIN) and the runtime
-// directories editors/vim and editors/nvim (DGDLPC_VIM, DGDLPC_NVIM),
-// and leaves what it saw in result.json there, which is returned with
-// the directory and the server's log. The test is skipped when there is
-// no Neovim, or one too old to have vim.lsp.config (0.11).
+// directory editors/vim (DGDLPC_VIM), and leaves what it saw in
+// result.json there, which is returned with the directory and the
+// server's log. The test is skipped when there is no Neovim, or one too
+// old to have vim.lsp.config (0.11).
 func nvimRun(t *testing.T, files map[string]string, session string) (dir string, result []byte, log string) {
+	t.Helper()
+	return nvimRunAs(t, files, session, nvimStart{})
+}
+
+// nvimStart is how nvimRunAs starts Neovim. The zero value is bare (-u
+// NONE: no plugins), and the session puts editors/vim on the runtime
+// path itself.
+type nvimStart struct {
+	// As a user's Neovim starts with the plugin installed: --clean (the
+	// built-in plugins, no user configuration), with editors/vim on the
+	// runtime path before the plugins are loaded.
+	plugins bool
+	// Whether the server is found as dgdtools on PATH, which has nothing
+	// else of the user's.
+	onPath bool
+	// Commands run before the plugins are loaded (--cmd).
+	cmds []string
+}
+
+func nvimRunAs(t *testing.T, files map[string]string, session string, start nvimStart) (dir string, result []byte, log string) {
 	t.Helper()
 	if testing.Short() {
 		t.Skip("builds the command and starts an editor")
@@ -89,7 +108,7 @@ func nvimRun(t *testing.T, files map[string]string, session string) (dir string,
 	}
 	dir, err = filepath.EvalSymlinks(t.TempDir())
 	require.NoError(t, err)
-	bin := filepath.Join(dir, "dgdtools")
+	bin := filepath.Join(dir, "bin", "dgdtools")
 	if out, err := exec.Command("go", "build", "-o", bin, "../cmd/dgdtools").CombinedOutput(); err != nil {
 		t.Fatalf("building the command: %v\n%s", err, out)
 	}
@@ -99,11 +118,22 @@ func nvimRun(t *testing.T, files map[string]string, session string) (dir string,
 	writeFile(t, filepath.Join(dir, "session.lua"), session)
 	vimDir, err := filepath.Abs(vimDir)
 	require.NoError(t, err)
-	nvimDir, err := filepath.Abs("nvim")
-	require.NoError(t, err)
 
-	cmd := exec.Command(nvim, "--headless", "-u", "NONE", "-i", "NONE", "-n", "-S", filepath.Join(dir, "session.lua"))
-	cmd.Env = append(os.Environ(), "DGDLPC_DIR="+dir, "DGDLPC_BIN="+bin, "DGDLPC_VIM="+vimDir, "DGDLPC_NVIM="+nvimDir)
+	args := []string{"--headless", "-u", "NONE", "-i", "NONE", "-n"}
+	env := append(os.Environ(), "DGDLPC_DIR="+dir, "DGDLPC_BIN="+bin, "DGDLPC_VIM="+vimDir)
+	if start.plugins {
+		args = []string{"--headless", "--clean", "-n", "--cmd", "set rtp^=" + vimDir}
+		path := "/usr/bin:/bin"
+		if start.onPath {
+			path = filepath.Dir(bin) + ":" + path
+		}
+		env = append(env, "PATH="+path)
+	}
+	for _, c := range start.cmds {
+		args = append(args, "--cmd", c)
+	}
+	cmd := exec.Command(nvim, append(args, "-S", filepath.Join(dir, "session.lua"))...)
+	cmd.Env = env
 	out, err := cmd.CombinedOutput()
 	require.NoError(t, err, "%s", out)
 	result, err = os.ReadFile(filepath.Join(dir, "result.json"))
@@ -113,8 +143,7 @@ func nvimRun(t *testing.T, files map[string]string, session string) (dir string,
 }
 
 // TestNeovimClient runs the language server under the Neovim on PATH,
-// with the configuration in editors/nvim and the runtime files in
-// editors/vim: the built-in client of Neovim 0.11 and later is the
+// with the configuration and the runtime files in editors/vim: the built-in client of Neovim 0.11 and later is the
 // first editor the server is used from.
 func TestNeovimClient(t *testing.T) {
 	const text = "void f()\n{\n    string s;\n\n    /* blåbær \U0001F600 */ s == \"x\";\n    s = \"one\" \"two\";\n}\n"
@@ -146,7 +175,6 @@ func TestNeovimClient(t *testing.T) {
 const nvimDefinitions = `
 local dir, out = vim.env.DGDLPC_DIR, { went = {} }
 local ok, err = pcall(function()
-  vim.opt.runtimepath:prepend(vim.env.DGDLPC_NVIM)
   vim.opt.runtimepath:prepend(vim.env.DGDLPC_VIM)
   vim.cmd('filetype plugin indent on')
   vim.lsp.config('dgdtools', { cmd = { vim.env.DGDLPC_BIN, 'lsp', '--log', dir .. '/lsp.log' } })
@@ -234,7 +262,6 @@ func TestNeovimDefinition(t *testing.T) {
 const nvimHovers = `
 local dir, out = vim.env.DGDLPC_DIR, { shown = {} }
 local ok, err = pcall(function()
-  vim.opt.runtimepath:prepend(vim.env.DGDLPC_NVIM)
   vim.opt.runtimepath:prepend(vim.env.DGDLPC_VIM)
   vim.cmd('filetype plugin indent on')
   vim.lsp.config('dgdtools', { cmd = { vim.env.DGDLPC_BIN, 'lsp', '--log', dir .. '/lsp.log' } })
@@ -376,7 +403,6 @@ func TestNeovimHover(t *testing.T) {
 const nvimSymbols = `
 local dir, out = vim.env.DGDLPC_DIR, { outline = {}, found = {} }
 local ok, err = pcall(function()
-  vim.opt.runtimepath:prepend(vim.env.DGDLPC_NVIM)
   vim.opt.runtimepath:prepend(vim.env.DGDLPC_VIM)
   vim.cmd('filetype plugin indent on')
   vim.lsp.config('dgdtools', { cmd = { vim.env.DGDLPC_BIN, 'lsp', '--log', dir .. '/lsp.log' } })
@@ -462,7 +488,6 @@ func TestNeovimSymbols(t *testing.T) {
 const nvimCompletions = `
 local dir, out = vim.env.DGDLPC_DIR, { cases = {} }
 local ok, err = pcall(function()
-  vim.opt.runtimepath:prepend(vim.env.DGDLPC_NVIM)
   vim.opt.runtimepath:prepend(vim.env.DGDLPC_VIM)
   vim.cmd('filetype plugin indent on')
   vim.lsp.config('dgdtools', { cmd = { vim.env.DGDLPC_BIN, 'lsp', '--log', dir .. '/lsp.log' } })
@@ -572,7 +597,6 @@ func TestNeovimCompletion(t *testing.T) {
 const nvimReferences = `
 local dir, out = vim.env.DGDLPC_DIR, { found = {} }
 local ok, err = pcall(function()
-  vim.opt.runtimepath:prepend(vim.env.DGDLPC_NVIM)
   vim.opt.runtimepath:prepend(vim.env.DGDLPC_VIM)
   vim.cmd('filetype plugin indent on')
   vim.lsp.config('dgdtools', { cmd = { vim.env.DGDLPC_BIN, 'lsp', '--log', dir .. '/lsp.log' } })
@@ -678,7 +702,6 @@ func TestNeovimReferences(t *testing.T) {
 const nvimTokens = `
 local dir, out = vim.env.DGDLPC_DIR, { before = {}, after = {} }
 local ok, err = pcall(function()
-  vim.opt.runtimepath:prepend(vim.env.DGDLPC_NVIM)
   vim.opt.runtimepath:prepend(vim.env.DGDLPC_VIM)
   vim.cmd('filetype plugin indent on')
   vim.lsp.config('dgdtools', { cmd = { vim.env.DGDLPC_BIN, 'lsp', '--log', dir .. '/lsp.log' } })
@@ -761,7 +784,6 @@ func TestNeovimTokens(t *testing.T) {
 const nvimRename = `
 local dir, out = vim.env.DGDLPC_DIR, { said = {} }
 local ok, err = pcall(function()
-  vim.opt.runtimepath:prepend(vim.env.DGDLPC_NVIM)
   vim.opt.runtimepath:prepend(vim.env.DGDLPC_VIM)
   vim.cmd('filetype plugin indent on')
   vim.lsp.config('dgdtools', { cmd = { vim.env.DGDLPC_BIN, 'lsp', '--log', dir .. '/lsp.log' } })
@@ -861,7 +883,6 @@ func TestNeovimRename(t *testing.T) {
 const nvimRefactor = `
 local dir, out = vim.env.DGDLPC_DIR, {}
 local ok, err = pcall(function()
-  vim.opt.runtimepath:prepend(vim.env.DGDLPC_NVIM)
   vim.opt.runtimepath:prepend(vim.env.DGDLPC_VIM)
   vim.cmd('filetype plugin indent on')
   vim.lsp.config('dgdtools', { cmd = { vim.env.DGDLPC_BIN, 'lsp', '--log', dir .. '/lsp.log' } })
@@ -918,4 +939,64 @@ func TestNeovimRefactor(t *testing.T) {
 	assert.True(t, got.Exists)
 	assert.NoFileExists(t, filepath.Join(dir, "lib/std/room.c"))
 	assert.NotContains(t, log, "level=ERROR")
+}
+
+// nvimPlugin is Neovim started as a user starts it with the plugin
+// installed and nothing configured: it opens a file of a lib and says
+// whether the language server was started for it, by what command.
+const nvimPlugin = `
+local dir, out = vim.env.DGDLPC_DIR, {}
+local ok, err = pcall(function()
+  vim.cmd('edit ' .. vim.fn.fnameescape(dir .. '/lib/obj/a.c'))
+  out.filetype = vim.bo.filetype
+  vim.wait(vim.env.DGDLPC_WAIT == '1' and 20000 or 1000, function()
+    local c = vim.lsp.get_clients({ bufnr = 0 })[1]
+    return c ~= nil and c.initialized
+  end, 20)
+  local c = vim.lsp.get_clients({ bufnr = 0 })[1]
+  out.started = c ~= nil and c.name == 'dgdtools' and c.initialized
+  out.errmsg = vim.v.errmsg
+end)
+if not ok then out.error = tostring(err) end
+vim.fn.writefile({ vim.json.encode(out) }, dir .. '/result.json')
+vim.cmd('qall!')
+`
+
+// TestNeovimPlugin starts Neovim with editors/vim as a plugin manager
+// installs it: plugin/dgdtools.lua enables the server when its command
+// can be run, the one on PATH or the one configured, and not when
+// g:dgdtools_lsp is false (or 0, as a vimrc says it).
+func TestNeovimPlugin(t *testing.T) {
+	files := map[string]string{"lib/dgdtools.yml": "", "lib/obj/a.c": "void create() {}\n"}
+	configured := "lua vim.lsp.config('dgdtools', { cmd = { vim.env.DGDLPC_BIN, 'lsp' } })"
+	for _, c := range []struct {
+		name    string
+		start   nvimStart
+		started bool
+	}{
+		{"on PATH", nvimStart{onPath: true}, true},
+		{"configured", nvimStart{cmds: []string{configured}}, true},
+		{"not found", nvimStart{}, false},
+		{"opted out", nvimStart{onPath: true, cmds: []string{"lua vim.g.dgdtools_lsp = false"}}, false},
+		{"opted out in a vimrc", nvimStart{onPath: true, cmds: []string{"let g:dgdtools_lsp = 0"}}, false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			c.start.plugins = true
+			wait := "0"
+			if c.started {
+				wait = "1"
+			}
+			t.Setenv("DGDLPC_WAIT", wait)
+			_, data, _ := nvimRunAs(t, files, nvimPlugin, c.start)
+			var got struct {
+				Error, Filetype, Errmsg string
+				Started                 bool
+			}
+			require.NoError(t, json.Unmarshal(data, &got), "%s", data)
+			require.Empty(t, got.Error)
+			assert.Equal(t, "dgdlpc", got.Filetype)
+			assert.Equal(t, c.started, got.Started)
+			assert.Empty(t, got.Errmsg)
+		})
+	}
 }
