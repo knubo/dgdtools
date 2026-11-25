@@ -2,6 +2,8 @@ package syntax
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -413,5 +415,30 @@ void f(int p) {
 			}
 		}
 		assert.Equal(t, len(f.Tok.Tokens)-1, f.Tok.TokenAt(uint32(len(src))+7))
+	}
+}
+
+// PathsAt: the paths of PathAt, from one walk.
+func TestPathsAt(t *testing.T) {
+	srcs := []string{"", "void f() { if (x) }", "int ;;; void g( {", "#if 1\nvoid f() {\n#else\n}\n#endif\n",
+		"inherit \"/std/room\";\ninherit side SIDE;\nint x = 1, *y;\nvoid f(int a, string b) {\n  int c;\n  if (a) { c = a + 1; } else c = b->q(a, ({ 1, ([ \"k\": a ]) }));\n  side::f(::g(&h(), (*p)(1)));\n  switch (a) { case 1..2: c++; break; default: --c; }\n  try { x = catch(f(1)); } catch (e) { y = 0; }\n}\n"}
+	files, _ := filepath.Glob("../lint/testdata/minilib/*/*.c")
+	for _, p := range files {
+		src, err := os.ReadFile(p)
+		require.NoError(t, err)
+		srcs = append(srcs, string(src))
+	}
+	for _, src := range srcs {
+		f := parse(src, true)
+		var all []int
+		for i := range f.Tok.Tokens {
+			all = append(all, i)
+		}
+		seen := 0
+		PathsAt(f, all, func(tok int, path []Node) {
+			seen++
+			assert.Equal(t, PathAt(f, tok), path, "%q: token %d", src, tok)
+		})
+		assert.Equal(t, len(all), seen)
 	}
 }

@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -79,6 +80,14 @@ func TestCorpusParse(t *testing.T) {
 							}
 							return true
 						})
+						if complete && n <= 5000 {
+							// One walk finds the paths a walk for each token does.
+							PathsAt(tree, tree.Sel.Sig, func(tok int, nodes []Node) {
+								if !slices.Equal(nodes, PathAt(tree, tok)) {
+									fail("%s: PathsAt and PathAt differ at token %d", path, tok)
+								}
+							})
+						}
 						last := -1
 						for _, e := range tree.Errors {
 							if e.Tok < last || e.Tok < 0 || e.Tok >= n {

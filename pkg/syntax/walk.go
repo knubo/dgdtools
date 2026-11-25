@@ -182,3 +182,56 @@ func PathAt(f *File, tok int) []Node {
 	slices.Reverse(path)
 	return path
 }
+
+// PathsAt calls visit with PathAt(f, tok) for each of toks, which are in
+// increasing order, walking the tree once instead of once for each
+// token: what a question about every name of a file asks. The path is
+// visit's to read during the call only.
+func PathsAt(f *File, toks []int, visit func(tok int, path []Node)) {
+	var stack, buf []Node
+	var walk func(n Node, toks []int)
+	walk = func(n Node, toks []int) {
+		stack = append(stack, n)
+		defer func() { stack = stack[:len(stack)-1] }()
+		var kids []Node
+		Inspect(n, func(c Node) bool {
+			if c != n {
+				kids = append(kids, c)
+			}
+			return c == n
+		})
+		// The later of two children that have a token is the one, as in
+		// PathAt.
+		owner := make([]int, len(toks))
+		for i := range owner {
+			owner[i] = -1
+		}
+		for k, c := range kids {
+			first, last := c.Span()
+			i, _ := slices.BinarySearch(toks, first)
+			for ; i < len(toks) && toks[i] <= last; i++ {
+				owner[i] = k
+			}
+		}
+		for i, tok := range toks {
+			if owner[i] >= 0 {
+				continue
+			}
+			buf = append(buf[:0], stack...)
+			slices.Reverse(buf)
+			visit(tok, buf)
+		}
+		for k, c := range kids {
+			var mine []int
+			for i, tok := range toks {
+				if owner[i] == k {
+					mine = append(mine, tok)
+				}
+			}
+			if len(mine) > 0 {
+				walk(c, mine)
+			}
+		}
+	}
+	walk(f, toks)
+}
