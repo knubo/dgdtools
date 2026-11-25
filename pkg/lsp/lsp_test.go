@@ -569,8 +569,23 @@ func TestSettings(t *testing.T) {
 	)
 
 	c := start(t)
+	// The client answers the server's requests on a goroutine of its own.
+	var mu sync.Mutex
 	settings := map[string]any{lsptest.URI(path("ann")): map[string]any{"libPath": "/players/ann"}}
-	c.Settings = func(uri string) any { return settings[uri] }
+	set := func(uri string, v any) {
+		mu.Lock()
+		defer mu.Unlock()
+		if v == nil {
+			delete(settings, uri)
+		} else {
+			settings[uri] = v
+		}
+	}
+	c.Settings = func(uri string) any {
+		mu.Lock()
+		defer mu.Unlock()
+		return settings[uri]
+	}
 	c.Initialize(lsptest.Capabilities{}, path("ann"), path("bob"), path("lib"))
 	open(c, all...)
 	// ann is /players/ann: its files are checked against each other. Of
@@ -587,11 +602,11 @@ func TestSettings(t *testing.T) {
 	assert.Contains(t, logged.String(), path("ann")+" is /players/ann")
 
 	// The settings change: the editor says so and is asked again.
-	settings[lsptest.URI(path("bob"))] = map[string]any{"libPath": "/players/bob"}
+	set(lsptest.URI(path("bob")), map[string]any{"libPath": "/players/bob"})
 	c.Notify("workspace/didChangeConfiguration", map[string]any{"settings": nil})
 	assert.Equal(t, both, got(c))
-	delete(settings, lsptest.URI(path("ann")))
-	delete(settings, lsptest.URI(path("bob")))
+	set(lsptest.URI(path("ann")), nil)
+	set(lsptest.URI(path("bob")), nil)
 	c.Notify("workspace/didChangeConfiguration", map[string]any{"settings": nil})
 	assert.Equal(t, none, got(c))
 	// Nothing changed: nothing is linted again.
@@ -603,7 +618,7 @@ func TestSettings(t *testing.T) {
 	// A folder leaves the workspace and comes back with settings.
 	folder := []lsp.WorkspaceFolder{{URI: lsptest.URI(path("ann")), Name: "ann"}}
 	c.Notify("workspace/didChangeWorkspaceFolders", map[string]any{"event": map[string]any{"removed": folder}})
-	settings[lsptest.URI(path("ann"))] = map[string]any{"libPath": "/players/ann"}
+	set(lsptest.URI(path("ann")), map[string]any{"libPath": "/players/ann"})
 	c.Idle()
 	assert.Equal(t, none, got(c))
 	c.Notify("workspace/didChangeWorkspaceFolders", map[string]any{"event": map[string]any{"added": folder}})
