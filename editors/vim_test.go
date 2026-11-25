@@ -266,11 +266,11 @@ func readDump(t *testing.T, path string, lines int) [][]span {
 // filetype detection by where a file lies, the options of the filetype
 // plugin, the syntax groups of the samples (held to pkg/lexer's tokens
 // and to the snapshots beside them), and the indent script against the
-// formatter. It is skipped where there is neither editor.
+// formatter. It is skipped where there is neither editor, except in CI.
 func TestVimRuntime(t *testing.T) {
 	editors := vims()
 	if len(editors) == 0 {
-		t.Skip("no vim or nvim on PATH that can run the runtime files")
+		noEditor(t, "no vim or nvim on PATH that can run the runtime files")
 	}
 	rtp, err := filepath.Abs(vimDir)
 	require.NoError(t, err)

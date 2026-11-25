@@ -93,6 +93,17 @@ type nvimStart struct {
 	cmds []string
 }
 
+// noEditor skips a test that needs an editor this machine does not have,
+// and fails it where CI is set: CI installs the editors (ci.yml), so that
+// a test that skips there does not pass unseen.
+func noEditor(t *testing.T, format string, args ...any) {
+	t.Helper()
+	if os.Getenv("CI") != "" {
+		t.Fatalf(format+" (CI is set: install the editor)", args...)
+	}
+	t.Skipf(format, args...)
+}
+
 func nvimRunAs(t *testing.T, files map[string]string, session string, start nvimStart) (dir string, result []byte, log string) {
 	t.Helper()
 	if testing.Short() {
@@ -100,11 +111,11 @@ func nvimRunAs(t *testing.T, files map[string]string, session string, start nvim
 	}
 	nvim, err := exec.LookPath("nvim")
 	if err != nil {
-		t.Skip("no nvim on PATH")
+		noEditor(t, "no nvim on PATH")
 	}
 	if out, err := exec.Command(nvim, "--headless", "-u", "NONE", "-i", "NONE", "-n",
 		"+lua io.stdout:write(tostring(vim.lsp.config ~= nil and vim.lsp.enable ~= nil))", "+qall!").Output(); err != nil || string(out) != "true" {
-		t.Skipf("the nvim on PATH has no vim.lsp.config (0.11 and later): %s %v", out, err)
+		noEditor(t, "the nvim on PATH has no vim.lsp.config (0.11 and later): %s %v", out, err)
 	}
 	dir, err = filepath.EvalSymlinks(t.TempDir())
 	require.NoError(t, err)
