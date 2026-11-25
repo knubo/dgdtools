@@ -62,6 +62,8 @@ exit
 <     "codeActionProvider": {"codeActionKinds": ["quickfix", "source.fixAll.dgdtools"]},
 <     "completionProvider": {"triggerCharacters": [">", ":", "\"", "/", "<"], "resolveProvider": true},
 <     "definitionProvider": true,
+<     "referencesProvider": true,
+<     "documentHighlightProvider": true,
 <     "hoverProvider": true,
 <     "signatureHelpProvider": {"triggerCharacters": ["(", ","], "retriggerCharacters": [")"]},
 <     "documentSymbolProvider": true,

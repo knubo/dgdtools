@@ -585,7 +585,12 @@ macros, kfuns and keywords; after `::` and `->` the functions that can
 be called there; the paths of an `#include` and an `inherit`; the name
 in a `call_out("...")`. It lists the outline of a file (inherits,
 functions, variables, macros) and finds a function, a variable or a
-header's macro anywhere in the mudlib by a few letters of its name. Where
+header's macro anywhere in the mudlib by a few letters of its name. It
+finds the references of a name: every call of a function in the mudlib
+(direct, `::`, `->` and callbacks on objects it can tell), every use of
+a variable, a macro or a local, every `inherit` of an object and
+`#include` of a header, and highlights a name's places in the file, a
+variable read or written. Where
 the tools cannot know (a call on an
 object held in a variable) they say so, or nothing, and never guess. It
 reads the same `dgdtools.yml` as the commands, so the editor and the

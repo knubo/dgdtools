@@ -376,6 +376,18 @@ func (s *server) request(ctx context.Context, method string, params json.RawMess
 			return nil, err
 		}
 		result, err = s.definition(ctx, &p)
+	case "textDocument/references":
+		var p ReferenceParams
+		if err := unmarshal(params, &p); err != nil {
+			return nil, err
+		}
+		result, err = s.references(ctx, &p)
+	case "textDocument/documentHighlight":
+		var p DocumentHighlightParams
+		if err := unmarshal(params, &p); err != nil {
+			return nil, err
+		}
+		result, err = s.documentHighlight(ctx, &p)
 	case "textDocument/hover":
 		var p HoverParams
 		if err := unmarshal(params, &p); err != nil {
@@ -581,6 +593,8 @@ func (s *server) initialize(params json.RawMessage) (any, error) {
 	res.Capabilities.TextDocumentSync = TextDocumentSyncOptions{OpenClose: true, Change: SyncIncremental}
 	res.Capabilities.CompletionProvider = &CompletionOptions{TriggerCharacters: TriggerCharacters, ResolveProvider: true}
 	res.Capabilities.DefinitionProvider = true
+	res.Capabilities.ReferencesProvider = true
+	res.Capabilities.DocumentHighlightProvider = true
 	res.Capabilities.HoverProvider = true
 	// Asked for when a call is opened and at each argument; asked again
 	// when one is closed, which may leave the cursor in another's.

@@ -265,6 +265,23 @@ and what it formats is what `dgdtools format` writes. What it does:
   and in a profile; the function's name in the string of `call_out`,
   `call_other` and your mudlib's registrars. It is asked for by itself
   after `->`, `::`, and in a path at `"`, `<` and `/`.
+- **References** of a name, in the whole mudlib: the calls of a
+  function in every form that reaches it (`fn()`, `::fn()`,
+  `label::fn()`, `->fn` and string callbacks on `this_object()` or a
+  path), the uses of a global variable in its object and those that
+  inherit it, the uses of a macro (in code, in directives, in other
+  macros, in an `inherit` statement), the `inherit` statements and
+  object paths of an object, the `#include`s of a header; a local's or
+  a parameter's in its function. The declaration is among them when
+  the editor asks for it. A call on an object nobody can tell is not
+  listed, and the server's log says how many there were. In a folder
+  with a profile the search covers your folder, and the log says so:
+  the profile has the rest of the mudlib's declarations, not its code.
+  The first search waits for the mudlib to be indexed, a few seconds on
+  a big one.
+- **Highlights** of the name under the cursor in the file, a variable,
+  a local or a parameter marked where it is read and where it is
+  written (declared, assigned, incremented).
 
 It keeps a log when asked to: `dgdtools lsp --log /tmp/dgdtools-lsp.log`,
 and with `--trace` every message in both directions. It never writes to
@@ -296,7 +313,8 @@ a selection; `CTRL-]` goes to a definition, `K` shows the hover, and
 `CTRL-S` in insert mode the signature of the call being written, and
 `CTRL-X CTRL-O` completes (the server sets `omnifunc`); `gO`
 lists the outline, and `:lua vim.lsp.buf.workspace_symbol()` asks for a
-name to find in the mudlib. To
+name to find in the mudlib; `grr` lists the references, and
+`:lua vim.lsp.buf.document_highlight()` highlights the name. To
 format on save:
 
 ```lua
@@ -337,7 +355,8 @@ diagnostics of a file, mends one finding by typing and one by the
 server's fix, and has the file formatted. `TestNeovimDefinition` goes
 to definitions the same way, `TestNeovimHover` reads what `K` and
 `CTRL-S` show, `TestNeovimSymbols` lists the outline and searches
-the mudlib, and `TestNeovimCompletion` completes with `CTRL-X CTRL-O`.
+the mudlib, `TestNeovimCompletion` completes with `CTRL-X CTRL-O`, and
+`TestNeovimReferences` lists references and highlights a local.
 
 ### Vim
 

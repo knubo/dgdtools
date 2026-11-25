@@ -32,6 +32,14 @@ the linter and formatter for it:
   functions, macros, kfuns and keywords; after `::` and `->` the
   functions that can be called there; `#include` and `inherit` paths;
   the function's name in `call_out("...")`.
+- **References** (*Find All References*, *Peek References*): the calls
+  of a function across the mudlib, the uses of a variable, a macro or a
+  local, the `inherit`s of an object, the `#include`s of a header.
+  Calls on an object held in a variable are not listed; the output
+  channel *dgdtools* says how many there were, and in a folder with a
+  profile that the search covered your folder only.
+- **Highlights** of the name under the cursor, a variable marked where
+  it is read and where it is written.
 
 Where the tools cannot know (a call on an object held in a variable)
 they say nothing rather than guess.

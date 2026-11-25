@@ -564,3 +564,110 @@ func TestNeovimCompletion(t *testing.T) {
 	}, seen)
 	assert.NotContains(t, log, "level=ERROR")
 }
+
+// nvimReferences is Neovim finding references as a user does: with the
+// cursor on a name it asks for them (vim.lsp.buf.references, what grr
+// does) and for the highlights of the name (vim.lsp.buf.document_highlight),
+// each as Neovim lays out the answer.
+const nvimReferences = `
+local dir, out = vim.env.DGDLPC_DIR, { found = {} }
+local ok, err = pcall(function()
+  vim.opt.runtimepath:prepend(vim.env.DGDLPC_NVIM)
+  vim.opt.runtimepath:prepend(vim.env.DGDLPC_VIM)
+  vim.cmd('filetype plugin indent on')
+  vim.lsp.config('dgdtools', { cmd = { vim.env.DGDLPC_BIN, 'lsp', '--log', dir .. '/lsp.log' } })
+  vim.lsp.enable('dgdtools')
+  vim.cmd('edit ' .. vim.fn.fnameescape(dir .. '/lib/obj/a.c'))
+  local function wait(what, cond)
+    assert(vim.wait(20000, cond, 20), 'waited in vain for ' .. what)
+  end
+  wait('the server', function()
+    local c = vim.lsp.get_clients({ bufnr = 0 })[1]
+    return c ~= nil and c.initialized
+  end)
+  local caps = vim.lsp.get_clients({ bufnr = 0 })[1].server_capabilities
+  out.references, out.highlight = caps.referencesProvider, caps.documentHighlightProvider
+
+  local function cursor(text, into)
+    for i, line in ipairs(vim.api.nvim_buf_get_lines(0, 0, -1, false)) do
+      local found = line:find(text, 1, true)
+      if found then
+        vim.api.nvim_win_set_cursor(0, { i, found - 1 + into })
+        return
+      end
+    end
+    error('no ' .. text)
+  end
+  for _, at in ipairs({ { 'set_weight(1', 3 }, { 'count =', 2 } }) do
+    cursor(at[1], at[2])
+    local done = false
+    vim.lsp.buf.references({ includeDeclaration = true }, { on_list = function(o)
+      for _, item in ipairs(o.items) do
+        table.insert(out.found, string.format('%s %s:%d:%d %s', at[1], item.filename:sub(#dir + 2), item.lnum, item.col, vim.trim(item.text)))
+      end
+      done = true
+    end })
+    wait('the references of ' .. at[1], function() return done end)
+  end
+
+  -- The highlights of the local where the cursor is, as extmarks.
+  cursor('count =', 2)
+  vim.lsp.buf.document_highlight()
+  local ns = vim.api.nvim_get_namespaces()['nvim.lsp.references'] or vim.api.nvim_get_namespaces()['vim_lsp_references']
+  wait('the highlights', function()
+    ns = ns or vim.api.nvim_get_namespaces()['nvim.lsp.references'] or vim.api.nvim_get_namespaces()['vim_lsp_references']
+    return ns ~= nil and #vim.api.nvim_buf_get_extmarks(0, ns, 0, -1, {}) > 0
+  end)
+  out.marks = {}
+  for _, m in ipairs(vim.api.nvim_buf_get_extmarks(0, ns, 0, -1, { details = true })) do
+    table.insert(out.marks, string.format('%d:%d-%d %s', m[2], m[3], m[4].end_col, m[4].hl_group))
+  end
+end)
+if not ok then out.error = tostring(err) end
+vim.fn.writefile({ vim.json.encode(out) }, dir .. '/result.json')
+vim.cmd('qall!')
+`
+
+// TestNeovimReferences has the Neovim on PATH find the references of a
+// function across the lib and of a local in its function, and highlight
+// the local read and written, with characters of several bytes before
+// the names.
+func TestNeovimReferences(t *testing.T) {
+	files := map[string]string{
+		"lib/dgdtools.yml":  "include_dirs: [/include]\n",
+		"lib/include/std.h": "#define BASE \"/std/base\"\n",
+		"lib/std/base.c":    "/* grøt */ void set_weight(int grams) {}\n",
+		"lib/obj/b.c":       "#include <std.h>\ninherit BASE;\nvoid reset() { set_weight(2); }\n",
+		"lib/obj/a.c": "#include <std.h>\ninherit BASE;\n" +
+			"void create() {\n    int count;\n    /* først \U0001F600 */ set_weight(1); count = 1; count++;\n    set_weight(count);\n}\n",
+	}
+	_, data, log := nvimRun(t, files, nvimReferences)
+	var got struct {
+		Error                 string
+		References, Highlight bool
+		Found, Marks          []string
+	}
+	require.NoError(t, json.Unmarshal(data, &got), "%s", data)
+	require.Empty(t, got.Error, "the server's log:\n%s", log)
+	assert.True(t, got.References)
+	assert.True(t, got.Highlight)
+	// Neovim's columns are 1-based bytes.
+	assert.Equal(t, []string{
+		"set_weight(1 lib/obj/a.c:5:23 /* først \U0001F600 */ set_weight(1); count = 1; count++;",
+		"set_weight(1 lib/obj/a.c:6:5 set_weight(count);",
+		"set_weight(1 lib/obj/b.c:3:16 void reset() { set_weight(2); }",
+		"set_weight(1 lib/std/base.c:1:18 /* grøt */ void set_weight(int grams) {}",
+		"count = lib/obj/a.c:4:9 int count;",
+		"count = lib/obj/a.c:5:38 /* først \U0001F600 */ set_weight(1); count = 1; count++;",
+		"count = lib/obj/a.c:5:49 /* først \U0001F600 */ set_weight(1); count = 1; count++;",
+		"count = lib/obj/a.c:6:16 set_weight(count);",
+	}, got.Found)
+	// Written, written, written, read: 0-based rows and byte columns.
+	assert.Equal(t, []string{
+		"3:8-13 LspReferenceWrite",
+		"4:37-42 LspReferenceWrite",
+		"4:48-53 LspReferenceWrite",
+		"5:15-20 LspReferenceRead",
+	}, got.Marks)
+	assert.NotContains(t, log, "level=ERROR")
+}

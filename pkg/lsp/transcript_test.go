@@ -322,6 +322,23 @@ func (p *player) play(script string) string {
 				break
 			}
 			p.show(result)
+		case "references", "highlight":
+			var pos lsp.Position
+			_, err := fmt.Sscanf(arg[1], "%d:%d", &pos.Line, &pos.Character)
+			require.NoError(t, err, line)
+			doc := lsp.TextDocumentIdentifier{URI: lsptest.URI(p.path(arg[0]))}
+			method, params := "textDocument/documentHighlight", any(lsp.DocumentHighlightParams{TextDocument: doc, Position: pos})
+			if cmd == "references" {
+				rp := lsp.ReferenceParams{TextDocument: doc, Position: pos}
+				rp.Context.IncludeDeclaration = len(arg) > 2 && arg[2] == "decl"
+				method, params = "textDocument/references", rp
+			}
+			var result json.RawMessage
+			if err := c.Call(method, params, &result); err != nil {
+				p.show(err.Error())
+				break
+			}
+			p.show(result)
 		case "complete":
 			var pos lsp.Position
 			_, err := fmt.Sscanf(arg[1], "%d:%d", &pos.Line, &pos.Character)

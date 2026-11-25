@@ -131,6 +131,8 @@ type ServerCapabilities struct {
 	CodeActionProvider              *CodeActionOptions      `json:"codeActionProvider,omitempty"`
 	CompletionProvider              *CompletionOptions      `json:"completionProvider,omitempty"`
 	DefinitionProvider              bool                    `json:"definitionProvider"`
+	ReferencesProvider              bool                    `json:"referencesProvider"`
+	DocumentHighlightProvider       bool                    `json:"documentHighlightProvider"`
 	HoverProvider                   bool                    `json:"hoverProvider"`
 	SignatureHelpProvider           *SignatureHelpOptions   `json:"signatureHelpProvider,omitempty"`
 	DocumentSymbolProvider          bool                    `json:"documentSymbolProvider"`
@@ -328,6 +330,31 @@ type TextDocumentEdit struct {
 type DefinitionParams struct {
 	TextDocument TextDocumentIdentifier `json:"textDocument"`
 	Position     Position               `json:"position"`
+}
+
+type ReferenceParams struct {
+	TextDocument TextDocumentIdentifier `json:"textDocument"`
+	Position     Position               `json:"position"`
+	Context      struct {
+		IncludeDeclaration bool `json:"includeDeclaration"`
+	} `json:"context"`
+}
+
+type DocumentHighlightParams struct {
+	TextDocument TextDocumentIdentifier `json:"textDocument"`
+	Position     Position               `json:"position"`
+}
+
+// The kinds of a DocumentHighlight.
+const (
+	HighlightText  = 1
+	HighlightRead  = 2
+	HighlightWrite = 3
+)
+
+type DocumentHighlight struct {
+	Range Range `json:"range"`
+	Kind  int   `json:"kind,omitempty"`
 }
 
 // LocationLink is a Location that also says what at the place asked

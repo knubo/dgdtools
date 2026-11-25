@@ -21,6 +21,7 @@ import (
 	"github.com/mmcdole/dgdtools/pkg/config"
 	"github.com/mmcdole/dgdtools/pkg/diag"
 	"github.com/mmcdole/dgdtools/pkg/fileset"
+	"github.com/mmcdole/dgdtools/pkg/index"
 	"github.com/mmcdole/dgdtools/pkg/lint"
 	"github.com/mmcdole/dgdtools/pkg/lsp"
 	"github.com/mmcdole/dgdtools/pkg/lsp/lsptest"
@@ -39,7 +40,9 @@ import (
 // what is published for a file is what a linter of the whole lib finds
 // in it, for the text the editor has (a file that is not UTF-8 is opened
 // as Latin-1, as an editor set up for the lib opens it); after the edit
-// and its undo it is that again. Latencies and memory are logged.
+// and its undo it is that again. Then it asks for the references of
+// functions, which are as many as the library finds. Latencies and
+// memory are logged.
 func TestCorpusSession(t *testing.T) {
 	cfgPath := os.Getenv("DGDTOOLS_CONFIG")
 	if cfgPath == "" {
@@ -146,13 +149,76 @@ func TestCorpusSession(t *testing.T) {
 		c.Close(path)
 	}
 	c.Idle()
-	var mem runtime.MemStats
-	runtime.GC()
-	runtime.ReadMemStats(&mem)
+
 	pct := func(d []time.Duration, p int) time.Duration {
 		slices.Sort(d)
 		return d[len(d)*p/100].Round(10 * time.Microsecond)
 	}
+	// References through the server, against the library's: of the
+	// first function called in some of the files, and of the function
+	// called most often in the lib.
+	require.True(t, ref.Scan(context.Background()))
+	units, _ := ref.Index().Snapshot().UseUnits(context.Background())
+	calls := map[string]int{}
+	for _, u := range units {
+		for _, use := range u.AllUses() {
+			if use.Kind == index.UseFunction && use.Form == index.FormOwn && !use.Decl {
+				calls[use.Name]++
+			}
+		}
+	}
+	most := ""
+	for name, n := range calls {
+		if n > calls[most] || n == calls[most] && name < most {
+			most = name
+		}
+	}
+	var took []time.Duration
+	asked := 0
+	ask := func(path string, pick func(index.Use) bool) {
+		doc, err := ref.Lint(context.Background(), path, lint.Options{})
+		if err != nil || !utf8.Valid(doc.File.Src) {
+			return
+		}
+		for _, use := range doc.Unit.AllUses() {
+			if !pick(use) {
+				continue
+			}
+			want := doc.References(context.Background(), use.Start, true)
+			if want == nil {
+				continue
+			}
+			text := string(doc.File.Src)
+			c.Open(path, text)
+			start := time.Now()
+			got := references(t, c, path, int(use.Start), true)
+			took = append(took, time.Since(start))
+			c.Close(path)
+			require.Len(t, got, len(want.Sites), "%s: references of %s", path, use.Name)
+			if use.Name == most {
+				t.Logf("references of %s through the server: %d places in %v", most, len(got), took[len(took)-1].Round(time.Millisecond))
+			}
+			asked++
+			return
+		}
+	}
+	for _, u := range units {
+		if found := slices.ContainsFunc(u.Uses(most), func(use index.Use) bool { return use.Form == index.FormOwn }); found {
+			ask(u.Path, func(use index.Use) bool { return use.Name == most && use.Form == index.FormOwn })
+			break
+		}
+	}
+	for _, path := range sample[:min(len(sample), 50)] {
+		ask(path, func(use index.Use) bool { return use.Kind == index.UseFunction && use.Form == index.FormOwn })
+	}
+	t.Logf("references of %d functions through the server: p50 %v, max %v", asked, pct(took, 50), took[len(took)-1].Round(time.Millisecond))
+
+	// What the server holds, the reference linter gone.
+	ref, units = nil, nil
+	var mem runtime.MemStats
+	runtime.GC()
+	runtime.ReadMemStats(&mem)
+
 	t.Logf("%d of %d files (%d not UTF-8), %d findings, %v", len(first), len(files), latin1, findings, time.Since(began).Round(time.Millisecond))
 	t.Logf("open to diagnostics: p50 %v p95 %v max %v; edit to diagnostics: p50 %v p95 %v max %v (each includes 1 ms of waiting for more changes)",
 		pct(first, 50), pct(first, 95), first[len(first)-1].Round(time.Millisecond), pct(edited, 50), pct(edited, 95), edited[len(edited)-1].Round(time.Millisecond))

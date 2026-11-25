@@ -2,9 +2,10 @@
 
 Status: a plan, of which the first three steps of section 12 are built:
 the editor-side grammars of section 10.1, under `editors/`; the server
-itself for steps 1 to 6 of section 8 (live diagnostics, code actions,
+itself for steps 1 to 8 of section 8 (live diagnostics, code actions,
 formatting, go to definition, hover and signature help, the outline of a
-document and the search for a name in the lib), as
+document and the search for a name in the lib, completion, references
+and highlights), as
 `dgdtools lsp` and `pkg/lsp`; and the
 VS Code client of
 section 11, in `editors/vscode`, which has been built and checked but
@@ -91,6 +92,7 @@ is absolute.
 | `hover.go` | `textDocument/hover` and `textDocument/signatureHelp`: `lint.Document.Hover`'s and `Signature`'s answers laid out as Markdown or plain text |
 | `completion.go` | `textDocument/completion` and `completionItem/resolve`: `lint.Document.Complete`'s items as the protocol's, and the comment above a declaration when an item is asked for |
 | `symbols.go` | `textDocument/documentSymbol` and `workspace/symbol`: `lint.Document.Symbols`' outline and `index.Snapshot.FindSymbols`' matches as the protocol's symbols |
+| `references.go` | `textDocument/references` and `textDocument/documentHighlight`: `lint.Document.References`' places as locations, with a note in the log where the answer is not all there is; `Document.Highlights`' as highlights, read and written |
 | `content.go` | `workspace/textDocumentContent`: the text of a profile's stub |
 | `position.go` | `PositionMapper`, URIs and paths |
 | `protocol.go` | the protocol's types, as far as used (some 60) |
@@ -101,7 +103,8 @@ offers it, else `utf-16`), `textDocumentSync` (open and close,
 incremental changes), `codeActionProvider` (`quickfix`,
 `source.fixAll.dgdtools`; only to a client with code action literals),
 `completionProvider` (asked for at `>`, `:`, `"`, `/` and `<`, with
-`completionItem/resolve`), `definitionProvider`, `hoverProvider`,
+`completionItem/resolve`), `definitionProvider`, `referencesProvider`,
+`documentHighlightProvider`, `hoverProvider`,
 `signatureHelpProvider` (asked for at `(` and `,`, and again at `)`),
 `documentSymbolProvider`,
 `workspaceSymbolProvider`,
@@ -125,7 +128,13 @@ matcher under it (`internal/fuzzy`) ("As built, step 6"); for step 7
 the scopes of a function (`syntax.File.Scopes`), what can be written at
 a place (`resolve.Resolver.Complete`) and the entries of a directory of
 the lib, on disk and in a profile's stubs (`index.Snapshot.IncludeEntries`,
-`ObjectEntries`) ("As built, step 7").
+`ObjectEntries`) ("As built, step 7"); for step 8 the places a file
+names other files' declarations at, kept with its unit (`index.Use`,
+`Unit.Uses`, `index.WithUses`, `Snapshot.UseUnits`), the search over
+them (`resolve.Resolver.References`, `Highlights`, `Lookup`,
+`resolve.Extractor`), the lookups in a chain without flattening it
+(`index.Snapshot.ChainFunc`, `ChainUnseen`) and one walk for the paths
+of all the names of a file (`syntax.PathsAt`) ("As built, step 8").
 
 Where what is built is not what the sections below planned, the section
 says so in a paragraph that begins **As built**. In short:
@@ -439,7 +448,7 @@ knows the code base.
 | 5 **built** | `hover` and `signatureHelp` | `ChainFunc.Decl/Type/DefinedIn`, `index.Params`, macro body and class, variable types | active-parameter computation from the argument list around the cursor; kfun table for built-ins (new data file) | 3 |
 | 6 **built** | `documentSymbol`, `workspace/symbol` | `syntax.File.Decls`; units' symbol tables (whole-lib scan, cached) | fuzzy matcher | 2 |
 | 7 **built** | `completion`: functions callable here (own chain, auto object, kfuns), `->` members for a known receiver, macros in view, `#include` and inherit paths, locals | chain + view + profile | local scopes (block-level symbol tables in `pkg/syntax`); tolerant parse at the cursor (the parser already recovers; completion context comes from tokens left of the cursor) | 5 |
-| 8 | `references` (and `documentHighlight`) | new: a reverse index of call sites and macro uses per name, built with the whole-lib scan and invalidated per file | reverse index in `pkg/index`; in a partial checkout results are labelled as "in this checkout" | 4 |
+| 8 **built** | `references` (and `documentHighlight`) | new: a reverse index of call sites and macro uses per name, built with the whole-lib scan and invalidated per file | reverse index in `pkg/index`; in a partial checkout results are labelled as "in this checkout" | 4 |
 | 9 | `semanticTokens` (section 10.2): what a grammar cannot know. Ships in two parts: 9a macros by class, declarations, inherit labels, calls resolved through the chain (no scopes needed); 9b parameters/locals and unresolved names | tree + view + chain | 9b needs scopes (from 7) | 9a: 2, 9b: 2 |
 | 10 | `prepareRename` and `rename` for the symbols one file decides (section 9): locals and parameters, private functions and variables, macros a `.c` file defines for itself | `pkg/rename` (new) over the tree, the scopes and the file's `pp.Env` | scopes (from 7); `syntax.PathAt` (from 4) | 3 |
 | 11 | Rename across files, in the editor and as `dgdtools rename SYMBOL NEW` (section 9): functions, object globals, header macros; every occurrence classified certain, possible or excluded; edits previewed with change annotations, or written as a patch | `pkg/rename` over the reverse index, who inherits a file (a `Query` on the snapshot), `Chain`, `LookupCallable`, `calls.Extract` | the reverse index (from 8); the whole-lib scan; step 10 | 9 |
@@ -875,6 +884,155 @@ earlier (receiver flow, as for definition); a macro after `->` (`ob->QP(x)`
 with `QP` expanding to a function's name); the arguments of a call
 (gopls' and rust-analyzer's postfix and signature-driven completion);
 labels for `goto`.
+
+**As built, step 8.** A reverse index kept with the units of the index,
+the search in `pkg/resolve`, and `pkg/lsp/references.go` its protocol.
+
+```go
+ix := index.Open(prj, fsys, index.WithUses(resolve.Extractor(registry)))  // what lint.New does
+u.Uses("set_short")              // []index.Use: the places the file names it at, the form of each
+units, complete := snap.UseUnits(ctx)  // the files a search looks at; complete once the scan is
+
+refs := doc.References(ctx, off, decl)  // *resolve.References, nil where nothing declared is named
+refs.Ref                         // what was asked about: At's Ref
+refs.Sites                       // []resolve.Site: Path, Start, End, Line, Col, Decl
+refs.Files, refs.Complete        // files searched; all the lib's (the scan was complete)
+refs.Partial                     // a checkout: complete for the checkout only
+refs.Possible, refs.PossibleFiles  // calls of the name on objects nobody can tell: not listed
+doc.Highlights(off)              // []resolve.Site of the document, each with Access: Text, Read, Write
+r.Lookup(use)                    // the declarations a Use names, in the resolver's generation
+```
+
+**The reverse index is the units' own.** `Resolver.At` was split in
+two: what the file alone says of a place (`classify`: the name, the form
+of a call and its receiver, the macro's `#define`, the local in scope)
+and the lookup in the lib (`Lookup`: the file's function, the inherited
+one, the auto object's, the chain of an object named by a path, the
+global variable an inherited object declares). What the file alone says
+of every place that names something another file can name too (a
+function, a global variable, a macro, an object, an included file) is a
+`Use`, and the index reads a unit's Uses with the unit
+(`index.WithUses(resolve.Extractor(registry))`, the extractor being
+`classify` over every name, string and directive word of the file), so
+they are made by the whole-lib scan and go with the unit: shared by
+every generation the unit is valid in, dropped with it when its file or
+a header it includes changes (`Invalidate`'s `builtFrom`), and nothing
+else to invalidate. What a Use names is not kept, because it depends on
+other files (a function an inherited object gains or loses): a search
+looks every candidate Use up in the generation that asks, which is what
+At does, and is the same answer by construction. Locals, parameters and
+labels are no Uses: a search for one asks At of the identifiers of its
+name in the file.
+
+A search for a name looks in every unit for the Uses of the name (a
+binary search in its sorted names), looks those up, and keeps those
+that name one of the declarations asked about; the files are those of
+the scan (the lib's `.c` files, or the checkout's) and the headers they
+include that lie in the same tree and are not excluded, each read as a
+file on its own, as an editor that opens it reads it
+(`Snapshot.UseUnits`, built once per generation after the scan, 130 ms
+on the VikingMUD lib). An `#include` is searched by the file it
+resolves to, however each writes its name. The name of a macro in an
+`inherit` statement is a Use of the macro as well as of the object:
+At gives `inherit ROOM;` to the room, and the references of `ROOM` would
+otherwise miss most of its uses. A Use is a record of 28 bytes, its
+name a `unique` handle and its line and column kept, so that the server
+answers 60,000 places without reading their files (a line that is not
+ASCII up to the place is read for its columns). On the VikingMUD lib
+(110,086 files and headers) that is 4.47 million Uses; the scan takes
+3.0 s instead of 2.2 s and the heap at its end is 607 MB instead of 405.
+
+**What is found.** For a function: its definition and prototypes (with
+`includeDeclaration`), and every call that reaches it: `fn()`, `&fn`,
+`::fn()`, `label::fn()`, and `->fn`, `call_other` and the callbacks of
+`call_out` and the registry on `this_object()` or on an object whose
+path the source says, in the object, those that inherit it and anywhere
+else. A redefinition in an inheritor is another declaration, and the
+calls that reach it are its own. For a global variable: its uses in its
+object and those that inherit it, a local of the name hiding it. For a
+macro: its uses in code, in directives, in the bodies of other macros,
+in headers, and in `inherit` statements. For an object: the `inherit`
+statements of it and the paths handed to `clone_object` and the like.
+For a header: the `#include`s of it. For a local or a parameter: its
+uses in its scope. With `includeDeclaration` the declarations are among
+the places, the one in a profile's stub at the stub's URI.
+
+**What is not.** A call on an object nobody can tell (`ob->fn()`,
+`call_other(ob, "fn")`, a callback whose object is unknown) proves
+nothing: it is not listed, and is counted (`Possible`, by name, in how
+many files) for the server's log and for rename, which reports such
+calls as "possible" (section 9.3). Nothing at all where At has no
+declaration: a kfun, a function nobody declares, a macro only the
+configuration defines, an unknown receiver; the answer is `null`. And
+whatever At says nothing of: code in a branch that is not compiled, a
+statement that does not parse and the one after it.
+
+**Partial checkout.** The scan covers the checkout, so the references
+are those of the checkout's files; a declaration in a stub is found (and
+listed, with `includeDeclaration`), and calls of it in the checkout are
+references. `References.Partial` says that the rest of the lib was not
+searched, and the server says so in its log, each time: `references to
+function set_short: 3; ... complete for this checkout only (2 files
+searched): the rest of the mudlib is known from a profile, which has no
+code to search`. It says too how many calls on objects that cannot be
+told there were, and, before the scan is complete, how many files were
+searched: a first request runs the scan for as long as `scanBudget`
+(2 s) allows and answers from what is indexed.
+
+**Highlights** are the references in the document, the declarations
+among them. A global variable, a local and a parameter are written
+(`DocumentHighlightKind.Write`) where declared, assigned (`x = `, `x +=`,
+in parentheses too), incremented or decremented, and read elsewhere;
+anything else is `Text`. An element written through an index (`x[i] =`)
+is a read of `x`, as gopls has it.
+
+**Lookups that every file asks.** A search looks a name up in every
+file that has it, which the lookups of At did through the flattened
+chain of the file itself (`Chain(own).Unseen` before the auto object's
+function, `Chain(target)` for `->fn` on a path): one chain for each
+object of the lib, 850 MB after 51 searches of the VikingMUD lib. They
+now ask `Snapshot.ChainFunc` and `ChainUnseen`, which say what the
+flattened chain says from the object's own functions and the chains of
+its parents, which a lib shares (`TestChainFuncIsChain`): 60 MB after
+the same searches.
+
+**Measured** (the VikingMUD testmud lib, 12 CPUs). `TestCorpusReferences`:
+every one of 62 declarations of a sample (functions, macros, objects,
+headers, a global) has exactly the places that asking At of the 10.6
+million names of the 110,086 files finds (2.5 s for that); a search
+takes 12 ms to 87 ms. The function called most, `add_item`: 140,161
+places in 25,627 files, 4,466 calls on unknown receivers, 60 ms;
+`add_exit` 62,641 places, 36 ms; `#include <mudlib.h>` 65,325 places,
+36 ms; `/std/room` 25,685 `inherit`s, 22 ms. The first search of a
+generation builds the list of files (130 ms) and the chains of the
+parents it needs. `TestCorpusReferencesPartial` does the same in three
+wizards' checkouts with the lib's profile (113, 573 and 418 files; 68
+declarations, every search partial): no difference either, 2 ms at
+most. Through the server (`TestCorpusSession`), the answer is the
+library's for 51 functions, 171 ms at the median and 712 ms for the
+140,161 places of `add_item`, most of it the JSON of the answer.
+
+Not built: references from inside a profile's stub (a stub is shown, not
+analyzed, as for definition); the places of a name in code the parser
+gave up on, which rename will list as "possible"; `implementation` (the
+redefinitions of a function in the objects that inherit it), which the
+same index answers; a cap on the number of locations.
+
+**For rename (steps 10 and 11).** What rename can take as it is: `At`
+and `classify` for what the cursor is on; `References` for every
+certain occurrence of a function, a variable, a macro, an object or a
+header in the lib, with the declarations, and of a local or a parameter
+in its scope; `Possible` and the Uses of form `FormUnknown` (with their
+places) for the possible occurrences; `Partial` for "within the
+checkout, with a warning" (9.5); `Site.Decl` to tell the declarations,
+which a rename of a function must also find in the inheritors that
+redefine it (the Uses of the name whose `Lookup` is the inheritor's own
+definition, in objects whose chain has the symbol's object); `Lookup`
+to classify any Use of the name as certain or excluded; and the
+invalidation, which needs nothing more. What it needs besides: the
+occurrences in code that does not parse and in strings that are no
+callback (text, not Uses), the names built at run time (calls whose
+function is not a constant), and the collision checks of 9.4.
 
 Steps 1 to 3 (9 days) are the "useful every day" milestone: live
 diagnostics, fixes, formatting. Steps 4 to 6 (9 days) make it a
@@ -1634,7 +1792,8 @@ network.
    undeclared variable, undefined function, argument counts); step 7 and
    semantic tokens 9b (7 days); then step 10, rename within a file (3
    days), which needs the scopes and nothing else.
-6. Reverse index; step 8 (4 days).
+6. Reverse index; step 8 (4 days). **Done** (section 8, "As built,
+   step 8").
 7. The rename engine across files with `dgdtools rename` (step 11, 9
    days) and the refactorings of step 12 (3 days). The command line
    comes first: it needs no editor, and it is the form an arch uses for
@@ -1700,7 +1859,9 @@ grammars alone can ship in the first.
   (1,334), before and after; no panic; open to diagnostics 4 ms median,
   9 ms at the 95th percentile (1 ms of it debounce), 5.4 s for the one
   document that waited for the first scan of the lib; 357 MB of heap at
-  the end. Not built: the VS Code integration test (the client is the
+  the end, 709 MB since the reverse index of step 8 and the searches the
+  test now makes (as many places as the library finds for 51
+  functions). Not built: the VS Code integration test (the client is the
   next step).
 - **As built, definitions (step 4).** In `pkg/resolve`: every kind of
   reference on a whole lib, on a checkout with a profile (declarations
@@ -1871,6 +2032,30 @@ grammars alone can ship in the first.
   now (20,983 uses and 3,932 declarations of locals, 10,094 and 3,612
   of parameters in the sample, every one resolved and held to its
   declarator).
+- **As built, references and highlights (step 8).** In `pkg/syntax`:
+  `TestPathsAt` (one walk for the paths of every token, against
+  `PathAt`), and in `TestCorpusParse` the same for every file of up to
+  5,000 tokens. In `pkg/resolve`: `TestReferences` (each kind; every
+  form of call; a redefinition and its callers apart; unknown receivers
+  counted and not listed; a local hiding a global; locals and
+  parameters in their scope; macros in directives, other macros,
+  headers and `inherit` statements; objects; headers; with and without
+  the declarations; nothing for what has no declaration),
+  `TestHighlights` (read and written), `TestReferencesAreAt` (at every
+  offset of every file of a lib, the references are the places where
+  At, asked at every offset of every file, names one of the same
+  declarations, and the highlights those of the file),
+  `TestReferencesPartialCheckout` (a stub's declaration, the checkout's
+  places, `Partial`), `TestReferencesAfterChange` (a file and a header
+  changed). In `pkg/lsp`: `TestReferencesAreTheLibrarys` holds both
+  answers to the library's at every offset of every file of a lib, in
+  both encodings, with and without the declarations;
+  `TestReferencesInCheckout` (the stub's URI, the log's note); the
+  transcript `references.txt`, and the two capabilities in the others.
+  In `editors`: `TestNeovimReferences`, the `nvim` on `PATH` listing
+  references (`vim.lsp.buf.references`) and highlighting a local read
+  and written (`vim.lsp.buf.document_highlight`). On the corpus,
+  `TestCorpusReferences` (above, "As built, step 8").
 - **Edit fuzzing** (`go test -fuzz`): start from a corpus file, apply a
   random sequence of range edits through incremental sync while applying
   the same edits to a plain string; after each step the server's buffer
