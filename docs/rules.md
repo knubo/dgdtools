@@ -230,7 +230,7 @@ Flags functions declared without private, static, nomask or one of the lib's spe
 
 File is not formatted as `dgdtools format` would format it.
 
-Formats the file exactly as `dgdtools format` does, with the format settings of that file, and reports a difference. What dgdtools-ignore-start format comments protect is left alone here too.
+Formats the file exactly as `dgdtools format` does, with the format settings of that file, and reports a difference. What dgdtools-ignore-start format comments protect is left alone here too. A file `dgdtools format` refuses to change (it does not tokenize, or the result could not be proven) is not reported: that command says why.
 
 ### static-autosave-var
 

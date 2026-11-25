@@ -244,8 +244,9 @@ type Result struct {
 	// Notes are remarks about the run as a whole (no lib, incomplete lib,
 	// ...).
 	Notes []diag.Note
-	// Errors are the files that were not linted, and the files whose
-	// analysis crashed while another was being linted, in path order.
+	// Errors are the files that were not linted, the rules that crashed
+	// on a file, and the files whose analysis crashed while another was
+	// being linted, in path order.
 	Errors []*FileError
 	// Generation is the index generation the run read; see
 	// Linter.Generation.
@@ -316,6 +317,9 @@ type Document struct {
 	// NeedsScan is set when Options.NoScan left questions unanswered:
 	// lint again after Linter.Scan.
 	NeedsScan bool
+	// Errors are the rules that crashed on the file, one internal error
+	// each. Their findings are missing; everything else stands.
+	Errors []*FileError
 
 	stats fileStats
 }
@@ -537,6 +541,7 @@ func (l *Linter) Run(ctx context.Context, req Request) (*Result, error) {
 		if d != nil {
 			res.Diagnostics = append(res.Diagnostics, d.Diagnostics...)
 			res.Stats.add(d.stats)
+			res.Errors = append(res.Errors, d.Errors...)
 		}
 	}
 	// A file that crashed while it was read on another's behalf (a
@@ -571,8 +576,9 @@ func (d *Document) release() *Document {
 
 // Lint lints the file at path (absolute) against the current generation
 // of the index and returns its diagnostics together with its tree. It
-// fails with a *FileError when the file cannot be read or the tools crash
-// on it. Cancelling ctx stops the lint early; what was found until then
+// fails with a *FileError when the file cannot be read or its analysis
+// crashes; a rule that crashes is in Document.Errors, and the document
+// has what the other rules found. Cancelling ctx stops the lint early; what was found until then
 // is returned with ctx.Err().
 func (l *Linter) Lint(ctx context.Context, path string, opt Options) (*Document, error) {
 	if !filepath.IsAbs(path) {
@@ -599,14 +605,9 @@ func (l *Linter) Lint(ctx context.Context, path string, opt Options) (*Document,
 func (l *Linter) lintFile(ctx context.Context, s *index.Snapshot, file string, sel *selection, opt *Options) (doc *Document, err error) {
 	// A bug met on one file must not take down a run over a hundred
 	// thousand.
-	running := ""
 	defer func() {
 		if r := recover(); r != nil {
-			where := ""
-			if running != "" {
-				where = " in rule " + running
-			}
-			doc, err = nil, &FileError{Path: file, Kind: Internal, Message: fmt.Sprintf("internal error%s (please report): %v", where, r)}
+			doc, err = nil, &FileError{Path: file, Kind: Internal, Message: fmt.Sprintf("internal error (please report): %v", r)}
 		}
 	}()
 	parsed, err := s.Parse(file)
@@ -676,9 +677,12 @@ func (l *Linter) lintFile(ctx context.Context, s *index.Snapshot, file string, s
 				Config: l.project.Config, Options: a.options, Format: l.format.With(set.Format),
 				shared: shared, registry: l.registry, rule: r, severity: a.severity, out: &out,
 			}
-			running = r.Name
-			r.Run(pass)
-			running = ""
+			// A rule that crashes costs its own findings and no more.
+			if crash := runRule(r, pass); crash != nil {
+				doc.Errors = append(doc.Errors, &FileError{Path: file, Kind: Internal,
+					Message: fmt.Sprintf("internal error in rule %s (please report): %v", r.Name, crash)})
+				continue
+			}
 			shared.ran[r.Name] = true
 			for _, d := range out {
 				switch {
@@ -717,6 +721,13 @@ func (l *Linter) lintFile(ctx context.Context, s *index.Snapshot, file string, s
 	}
 	doc.Diagnostics, doc.NeedsScan, doc.stats = kept, query.NeedsScan(), *stats
 	return doc, nil
+}
+
+// runRule runs r and returns what it panicked with, nil when it did not.
+func runRule(r *Rule, p *Pass) (crash any) {
+	defer func() { crash = recover() }()
+	r.Run(p)
+	return nil
 }
 
 // Rules returns the linter's rule table.

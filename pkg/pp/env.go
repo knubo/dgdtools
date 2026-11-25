@@ -2,6 +2,7 @@ package pp
 
 import (
 	"strings"
+	"sync"
 
 	"github.com/mmcdole/dgdtools/pkg/token"
 )
@@ -12,9 +13,10 @@ import (
 // effect, and last the table of the file itself.
 //
 // An Env is built by one goroutine: Add the tables of what is read before
-// the file (the driver's force-included header), then Scan the file. It
-// is not safe for concurrent use (it memoizes lookups); the Tables it
-// points at are immutable once their own Scan has returned, and shared.
+// the file (the driver's force-included header), then Scan the file.
+// Once Scan has returned it may be read from any number of goroutines;
+// the Tables it points at are immutable once their own Scan has returned,
+// and shared.
 type Env struct {
 	// Complete is true when every file that contributes definitions was
 	// read, so that "not defined here" means "not a macro". While a Scan
@@ -29,7 +31,9 @@ type Env struct {
 	classes map[string]Class // configured classes; they override bodies
 	layers  []*Table         // the files read before and included, in order of effect
 	own     *Table           // the file itself; nil until Scan
-	cache   map[string]*Macro
+
+	mu    sync.Mutex
+	cache map[string]*Macro // what Lookup has answered
 }
 
 // NewEnv returns the environment before the first line of a unit: defined
@@ -43,7 +47,14 @@ func NewEnv(defined map[string]bool, classes map[string]Class) *Env {
 // header and what it includes, in the order they were read.
 func (e *Env) Add(tables ...*Table) {
 	e.layers = append(e.layers, tables...)
+	e.forget()
+}
+
+// forget drops Lookup's answers: the environment changed.
+func (e *Env) forget() {
+	e.mu.Lock()
 	e.cache = nil
+	e.mu.Unlock()
 }
 
 // Own returns the table of the file the environment was scanned for, nil
@@ -71,6 +82,8 @@ func (e *Env) Lookup(name string) *Macro {
 	if e == nil {
 		return nil
 	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
 	if m, ok := e.cache[name]; ok {
 		return m
 	}
@@ -252,8 +265,9 @@ func (e *Env) ScanArms(f *token.File, take map[int]bool) *Selection {
 func (e *Env) scan(f *token.File, include func(Include), take map[int]bool) *Selection {
 	sel := &Selection{}
 	t := &Table{Path: f.Path, Macros: map[string]*Macro{}, Undefs: map[string]bool{}}
-	e.own, e.cache = t, nil
-	defer func() { e.cache = nil }()
+	e.own = t
+	e.forget()
+	defer e.forget()
 
 	var stack []frame
 	active, here := true, live

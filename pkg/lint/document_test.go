@@ -3,6 +3,7 @@ package lint_test
 import (
 	"context"
 	"fmt"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -187,4 +188,29 @@ func TestOverrideMatchesHeaderByName(t *testing.T) {
 	}}
 	res := run(t, prj, m, lint.Request{Paths: []string{"/lib/include/h.h"}})
 	assert.Empty(t, res.Diagnostics)
+}
+
+// A document is handed to whoever answers requests about it, on as many
+// goroutines as there are requests: reading its macro environment there
+// is safe.
+func TestDocumentEnvIsReadConcurrently(t *testing.T) {
+	prj, m := memProject(map[string]string{
+		"obj/a.c": "#include <std.h>\ninherit STD \"base\";\nstatus f() { return TRUE; }\n",
+	})
+	l, err := lint.New(prj, m)
+	require.NoError(t, err)
+	doc, err := l.Lint(context.Background(), "/lib/obj/a.c", lint.Options{})
+	require.NoError(t, err)
+	var wg sync.WaitGroup
+	for range 8 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for _, name := range []string{"STD", "TRUE", "status", "public", "nope"} {
+				doc.Env.Lookup(name)
+			}
+		}()
+	}
+	wg.Wait()
+	assert.Equal(t, `"/std/"`, doc.Env.Lookup("STD").Body)
 }
