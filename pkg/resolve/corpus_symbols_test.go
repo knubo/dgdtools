@@ -111,7 +111,8 @@ func TestCorpusSymbols(t *testing.T) {
 				}
 			}
 		}
-		for name, fn := range doc.Unit.Funcs {
+		for _, fn := range doc.Unit.Funcs {
+			name := fn.Name
 			if fn.Path == file && at[fn.Off] != name {
 				fail("%s: function %s at %d is not in the outline", file, name, fn.Off)
 			}
@@ -119,7 +120,8 @@ func TestCorpusSymbols(t *testing.T) {
 				names = append(names, name)
 			}
 		}
-		for name, v := range doc.Unit.Vars {
+		for _, v := range doc.Unit.Vars {
+			name := v.Name
 			if v.Path == file && at[v.Off] != name {
 				fail("%s: variable %s at %d is not in the outline", file, name, v.Off)
 			}

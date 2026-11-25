@@ -141,8 +141,10 @@ func TestProfileBuildAndPartialCheckout(t *testing.T) {
 	assert.Equal(t, "/std/base", fn.DefinedIn)
 	assert.Equal(t, []string{"object ob", "varargs mixed rest..."}, index.Params(fn.Decl))
 	assert.Equal(t, "", l.Index().Snapshot().Chain("/std/base").Funcs["legacy"].Type)
-	assert.Equal(t, "string *", l.Index().Snapshot().Unit("/std/base").Vars["names"].Type)
-	assert.Equal(t, "string", l.Index().Snapshot().Unit("/std/base").Vars["title"].Type)
+	v, _ := l.Index().Snapshot().Unit("/std/base").Var("names")
+	assert.Equal(t, "string *", v.Type)
+	v, _ = l.Index().Snapshot().Unit("/std/base").Var("title")
+	assert.Equal(t, "string", v.Type)
 
 	// --- the file format: deterministic, round-trips
 	data, err := p.Marshal()

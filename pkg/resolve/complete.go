@@ -370,8 +370,8 @@ func (c *completer) names(sc *syntax.Scope) {
 		c.add(Item{Kind: kind, Name: l.Name, Detail: join(l.Type, l.Name), Origin: o})
 	}
 	names := map[string]bool{}
-	for name := range r.u.Vars {
-		names[name] = true
+	for _, v := range r.u.Vars {
+		names[v.Name] = true
 	}
 	for _, in := range r.u.Inherits {
 		if in.Resolved {
@@ -476,8 +476,8 @@ func (c *completer) function(d *Def) Item {
 func (c *completer) callables(kfuns bool) {
 	r := c.r
 	names := map[string]bool{}
-	for name := range r.u.Funcs {
-		names[name] = true
+	for _, fn := range r.u.Funcs {
+		names[fn.Name] = true
 	}
 	for _, in := range r.u.Inherits {
 		if in.Resolved {

@@ -722,7 +722,7 @@ func (r *Resolver) auto(name, libPath string) []Def {
 // left for a function of the driver's.
 func (r *Resolver) function(name string) []Def {
 	var groups [][]Def
-	if own, ok := r.u.Funcs[name]; ok {
+	if own, ok := r.u.Func(name); ok {
 		groups = append(groups, []Def{funcDef(name, index.ChainFunc{FuncInfo: own, DefinedIn: r.u.LibPath})})
 	}
 	if in := r.defs(name, r.inherited(name, "")); len(in) > 0 {
@@ -769,7 +769,7 @@ func (r *Resolver) variable(name string) []Def {
 		return Def{Kind: Variable, Name: name, Path: v.Path, Start: v.Off, End: v.Off + uint32(len(name)),
 			Object: object, Var: &v}
 	}
-	if own, ok := r.u.Vars[name]; ok {
+	if own, ok := r.u.Var(name); ok {
 		return []Def{def(own, r.u.LibPath)}
 	}
 	var defs []Def

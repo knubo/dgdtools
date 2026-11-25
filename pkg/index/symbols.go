@@ -139,14 +139,14 @@ func (s *Snapshot) FindSymbols(query string, limit int) (out []Symbol, more bool
 		add(sym)
 	}
 	for _, u := range t.units {
-		for name, fn := range u.Funcs {
-			if score := m.Score(name); score > 0 {
-				symbol(SymbolFunction, name, fn.Loc, u, score)
+		for _, fn := range u.Funcs {
+			if score := m.Score(fn.Name); score > 0 {
+				symbol(SymbolFunction, fn.Name, fn.Loc, u, score)
 			}
 		}
-		for name, v := range u.Vars {
-			if score := m.Score(name); score > 0 {
-				symbol(SymbolVariable, name, v.Loc, u, score)
+		for _, v := range u.Vars {
+			if score := m.Score(v.Name); score > 0 {
+				symbol(SymbolVariable, v.Name, v.Loc, u, score)
 			}
 		}
 	}

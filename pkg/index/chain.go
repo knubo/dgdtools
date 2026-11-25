@@ -97,16 +97,16 @@ func (s *Snapshot) chain(libPath string, visiting map[string]bool) (*Chain, bool
 		ch.Objects = append(ch.Objects, sub.Objects...)
 	}
 	delete(visiting, libPath)
-	for name, fi := range u.Funcs {
+	for _, fi := range u.Funcs {
 		if fi.PrototypeOnly {
-			if old, ok := ch.Funcs[name]; ok && !old.PrototypeOnly {
+			if old, ok := ch.Funcs[fi.Name]; ok && !old.PrototypeOnly {
 				continue
 			}
 		}
-		ch.Funcs[name] = ChainFunc{FuncInfo: fi, DefinedIn: libPath}
+		ch.Funcs[fi.Name] = ChainFunc{FuncInfo: fi, DefinedIn: libPath}
 	}
-	for name, vi := range u.Vars {
-		ch.Vars[name] = ChainVar{VarInfo: vi, DefinedIn: libPath}
+	for _, vi := range u.Vars {
+		ch.Vars[vi.Name] = ChainVar{VarInfo: vi, DefinedIn: libPath}
 	}
 	ch.Objects = append(ch.Objects, libPath)
 	if cyc && len(visiting) > 0 {
@@ -152,7 +152,7 @@ func (s *Snapshot) ChainFunc(libPath, name string) (ChainFunc, bool) {
 			take(fn)
 		}
 	}
-	if fi, ok := u.Funcs[name]; ok {
+	if fi, ok := u.Func(name); ok {
 		take(ChainFunc{FuncInfo: fi, DefinedIn: libPath})
 	}
 	return out, found
@@ -373,7 +373,7 @@ func (s *Snapshot) lookupCallable(ctx context.Context, target, fn string, self b
 	}
 	for _, u := range users {
 		if unit := s.Unit(u); unit != nil {
-			if _, ok := unit.Funcs[fn]; ok {
+			if _, ok := unit.Func(fn); ok {
 				return Lookup{State: LookupFoundInUser}
 			}
 		}
@@ -408,7 +408,7 @@ func (s *Snapshot) providedByUsers(ctx context.Context, libPath, fn string, user
 	}
 	for _, u := range users {
 		if unit := s.Unit(u); unit != nil {
-			if f, ok := unit.Funcs[fn]; ok && !f.PrototypeOnly {
+			if f, ok := unit.Func(fn); ok && !f.PrototypeOnly {
 				return true
 			}
 		}

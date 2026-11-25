@@ -4,9 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io/fs"
-	"maps"
 	"runtime"
-	"slices"
 	"sync"
 	"testing"
 
@@ -142,7 +140,7 @@ func TestUnitFacts(t *testing.T) {
 	assert.False(t, u.Stub)
 	assert.Equal(t, []string{"/lib/std/room.c", "/lib/include/std.h", "/lib/sys/forced.h"}, u.Deps)
 
-	q := u.Funcs["query"]
+	q := funcOf(u, "query")
 	assert.True(t, q.Static)
 	assert.Equal(t, "static varargs status query(string what, mixed extra...)", q.Decl)
 	assert.Equal(t, "status", q.Type)
@@ -150,13 +148,13 @@ func TestUnitFacts(t *testing.T) {
 	assert.Equal(t, -1, q.MaxArgs)
 	assert.Equal(t, Loc{Path: "/lib/std/room.c", Off: q.Off, Line: 7, Col: 23}, q.Loc)
 	assert.Equal(t, []string{"string what", "mixed extra..."}, Params(q.Decl))
-	assert.True(t, u.Funcs["proto"].PrototypeOnly)
+	assert.True(t, funcOf(u, "proto").PrototypeOnly)
 
-	names := u.Vars["names"]
+	names := varOf(u, "names")
 	assert.Equal(t, "string *", names.Type)
 	assert.Equal(t, Loc{Path: "/lib/std/room.c", Off: names.Off, Line: 5, Col: 9}, names.Loc)
-	assert.True(t, u.Vars["count"].Private)
-	assert.True(t, u.Vars["count"].Static)
+	assert.True(t, varOf(u, "count").Private)
+	assert.True(t, varOf(u, "count").Static)
 
 	require.Len(t, u.Inherits, 3)
 	assert.Equal(t, InheritRef{Raw: `"/std/base"`, Path: "/std/base", Resolved: true, Off: u.Inherits[0].Off, End: u.Inherits[0].End}, u.Inherits[0])
@@ -167,6 +165,38 @@ func TestUnitFacts(t *testing.T) {
 	assert.Nil(t, s.Unit("/std/none"))
 	assert.Nil(t, s.UnitAt("/lib/std/none.c"))
 	assert.Same(t, u, s.UnitAt("/lib/std/../std/room.c"), "paths are cleaned")
+}
+
+// Of the declarations of a name, a unit keeps what the driver compiles:
+// the first definition of a function, else its first prototype; the
+// last declaration of a variable; the code of an included file where
+// the file has nothing of the name, and a function of it where the file
+// has a prototype only. Sorted by name, each once.
+func TestUnitDeclsOfAName(t *testing.T) {
+	l := newLib(t, map[string]string{
+		"include/code.h": "int both;\nint hv;\nvoid hdef() { }\nvoid own_def() { }\nvoid hproto();\n",
+		"obj/a.c": "#include <code.h>\n" +
+			"void f();\nvoid f(int a) { }\nvoid f(int b) { }\n" +
+			"void g() { }\nvoid g();\n" +
+			"int v;\nstring v;\n" +
+			"string both;\nvoid hdef();\nvoid own_def() { }\nvoid hproto() { }\n",
+	})
+	u := l.ix.Snapshot().Unit("/obj/a")
+	require.NotNil(t, u)
+	assert.Equal(t, []string{"f", "g", "hdef", "hproto", "own_def"}, funcNames(u))
+	assert.Equal(t, []string{"both", "hv", "v"}, varNames(u))
+	assert.Equal(t, "void f(int a)", funcOf(u, "f").Decl, "the first definition")
+	assert.False(t, funcOf(u, "g").PrototypeOnly)
+	assert.Equal(t, "string", varOf(u, "v").Type, "the last declaration")
+	assert.Equal(t, "string", varOf(u, "both").Type, "the file's own")
+	assert.Equal(t, "/lib/include/code.h", varOf(u, "hv").Path)
+	assert.Equal(t, "/lib/include/code.h", funcOf(u, "hdef").Path, "a definition over the file's prototype")
+	assert.Equal(t, "/lib/obj/a.c", funcOf(u, "own_def").Path, "the file's own definition")
+	assert.Equal(t, "/lib/obj/a.c", funcOf(u, "hproto").Path)
+	_, ok := u.Func("none")
+	assert.False(t, ok)
+	_, ok = u.Var("none")
+	assert.False(t, ok)
 }
 
 func TestIncludes(t *testing.T) {
@@ -187,9 +217,9 @@ func TestIncludes(t *testing.T) {
 	assert.Equal(t, "/std/there", b.Inherits[0].Path, "<name> looks in the include dirs only")
 	assert.Equal(t, "/std/here", c.Inherits[0].Path, "an absolute name is a lib path")
 
-	assert.Contains(t, a.Funcs, "from_header", "code in a header belongs to the includer")
-	assert.Contains(t, a.Vars, "shared")
-	assert.Equal(t, "/lib/include/code.h", a.Funcs["from_header"].Path)
+	assert.Contains(t, funcNames(a), "from_header", "code in a header belongs to the includer")
+	assert.Contains(t, varNames(a), "shared")
+	assert.Equal(t, "/lib/include/code.h", funcOf(a, "from_header").Path)
 	assert.Equal(t, []string{"/include/code.h"}, a.code)
 	assert.False(t, a.Partial)
 
@@ -242,7 +272,7 @@ func TestConditionsSeeIncludes(t *testing.T) {
 
 	a, err := s.Parse("/lib/obj/a.c")
 	require.NoError(t, err)
-	assert.Equal(t, []string{"always", "high", "log"}, slices.Sorted(maps.Keys(a.Unit.Funcs)))
+	assert.Equal(t, []string{"always", "high", "log"}, funcNames(a.Unit))
 	for _, i := range a.Tree.Sel.Sig {
 		assert.False(t, a.Tree.Sel.Guessed(i), "every branch of a.c is decided")
 	}
@@ -250,13 +280,13 @@ func TestConditionsSeeIncludes(t *testing.T) {
 
 	b, err := s.Parse("/lib/obj/b.c")
 	require.NoError(t, err)
-	assert.Contains(t, b.Unit.Funcs, "maybe", "undecided: the first branch, as a guess")
+	assert.Contains(t, funcNames(b.Unit), "maybe", "undecided: the first branch, as a guess")
 	first, _ := b.Tree.Decls[0].Span()
 	assert.True(t, b.Tree.Sel.Guessed(first))
 
 	c, err := s.Parse("/lib/obj/c.c")
 	require.NoError(t, err)
-	assert.Contains(t, c.Unit.Funcs, "uses")
+	assert.Contains(t, funcNames(c.Unit), "uses")
 	first, _ = c.Tree.Decls[0].Span()
 	assert.True(t, c.Tree.Sel.Guessed(first), "LOGGER is defined under a condition its header could not decide")
 }
@@ -283,7 +313,7 @@ func TestHeadersReadAsUnits(t *testing.T) {
 
 	opt, err := s.Parse("/lib/include/opt.h")
 	require.NoError(t, err)
-	assert.Equal(t, []string{"quiet", "sure"}, slices.Sorted(maps.Keys(opt.Unit.Funcs)))
+	assert.Equal(t, []string{"quiet", "sure"}, funcNames(opt.Unit))
 	quiet, _ := opt.Tree.Decls[0].Span()
 	sure, _ := opt.Tree.Decls[1].Span()
 	assert.True(t, opt.Tree.Sel.Guessed(quiet), "NDEBUG may be defined by an includer")
@@ -291,7 +321,7 @@ func TestHeadersReadAsUnits(t *testing.T) {
 	assert.True(t, opt.Env.Complete, "its macros are all in view")
 
 	// The object that includes it reads the header the same way.
-	assert.Equal(t, []string{"quiet", "sure"}, slices.Sorted(maps.Keys(s.Unit("/obj/includes").Funcs)))
+	assert.Equal(t, []string{"quiet", "sure"}, funcNames(s.Unit("/obj/includes")))
 }
 
 // The tree of a file is of the text its facts were built from, or the
@@ -313,7 +343,7 @@ func TestParseRefusesChangedText(t *testing.T) {
 	p, err = l.ix.Snapshot().Parse("/lib/obj/a.c")
 	require.NoError(t, err)
 	assert.Empty(t, p.Unit.Inherits)
-	assert.Contains(t, p.Unit.Funcs, "f")
+	assert.Contains(t, funcNames(p.Unit), "f")
 }
 
 func TestParse(t *testing.T) {
@@ -559,7 +589,7 @@ func TestNoLib(t *testing.T) {
 	u := s.UnitAt("/any/a.c")
 	require.NotNil(t, u)
 	assert.Empty(t, u.LibPath)
-	assert.Contains(t, u.Funcs, "f")
+	assert.Contains(t, funcNames(u), "f")
 	assert.Equal(t, []string{"/any/a.c", "/any/b.h"}, u.Deps, "a relative include still resolves")
 	assert.False(t, u.Inherits[0].Resolved)
 	assert.Nil(t, s.Unit("/std/x"))
@@ -855,12 +885,12 @@ func TestBuildInFlightIsNotCarried(t *testing.T) {
 	u1 := <-built
 	u2 := s2.Unit("/obj/a")
 	assert.NotSame(t, u1, u2)
-	assert.Contains(t, u2.Funcs, "new_fn")
+	assert.Contains(t, funcNames(u2), "new_fn")
 	assert.Equal(t, uint64(1), u1.gen)
 	assert.Equal(t, uint64(2), u2.gen)
 	// The late unit did not enter the current generation's edges or scan.
 	l.set(t, "obj/a.c", "void third() { }\n")
-	assert.Contains(t, l.ix.Snapshot().Unit("/obj/a").Funcs, "third")
+	assert.Contains(t, funcNames(l.ix.Snapshot().Unit("/obj/a")), "third")
 }
 
 // --------------------------------------------------------------- scan
@@ -1370,4 +1400,25 @@ func TestLibFileAndParamSpans(t *testing.T) {
 		assert.Equal(t, want, Params(decl), decl)
 	}
 	assert.Equal(t, [][2]int{{7, 12}, {14, 22}}, ParamSpans("void f(int a, string b)"))
+}
+
+// funcOf and varOf are the unit's function and global variable of the
+// name; funcNames and varNames the names of all.
+func funcOf(u *Unit, name string) FuncInfo { f, _ := u.Func(name); return f }
+func varOf(u *Unit, name string) VarInfo   { v, _ := u.Var(name); return v }
+
+func funcNames(u *Unit) []string {
+	var out []string
+	for _, f := range u.Funcs {
+		out = append(out, f.Name)
+	}
+	return out
+}
+
+func varNames(u *Unit) []string {
+	var out []string
+	for _, v := range u.Vars {
+		out = append(out, v.Name)
+	}
+	return out
 }

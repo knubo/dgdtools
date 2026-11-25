@@ -248,10 +248,11 @@ func (s *Snapshot) header(p string) *header {
 		}
 		tree := syntax.Parse(f, syntax.Options{Env: env, Sel: sel})
 		u := &Unit{
-			Path: p, Funcs: map[string]FuncInfo{}, Vars: map[string]VarInfo{},
+			Path:    p,
 			Partial: tree.Partial || h.table.Partial, Stub: s.isStub(p), Deps: []string{p}, gen: s.gen,
 		}
 		collectDecls(u, tree)
+		sortDecls(u)
 		for _, d := range tree.Decls {
 			switch d.(type) {
 			case *syntax.FuncDecl, *syntax.VarDecl:
@@ -417,7 +418,6 @@ func (s *Snapshot) facts(a *analysis) *Unit {
 	f, tree, p := a.tok, a.tree, a.tok.Path
 	u := &Unit{
 		Path: p, LibPath: s.LibPath(p), Stub: s.isStub(p),
-		Funcs: map[string]FuncInfo{}, Vars: map[string]VarInfo{},
 		Partial: tree.Partial || a.env.Own().Partial,
 		Deps:    append(slices.Clone(a.inc.deps), a.base.deps...),
 		gen:     s.gen,
@@ -453,8 +453,14 @@ func (s *Snapshot) facts(a *analysis) *Unit {
 			u.Inherits = append(u.Inherits, s.resolveInherit(tree, inh, u.LibPath, a.env))
 		}
 	}
+	// The file's own variables, the last declaration of a name winning;
+	// then those of included code where the file has none of the name.
+	sortDecls(u)
+	own := len(u.Vars)
 
-	// Code in included files belongs to the including program.
+	// Code in included files belongs to the including program: a
+	// function of the file's own wins, unless it is a prototype only and
+	// the included one is not.
 	for _, dep := range a.inc.deps[1:] {
 		code := s.header(dep).code
 		if code == nil {
@@ -463,19 +469,22 @@ func (s *Snapshot) facts(a *analysis) *Unit {
 		if lp := s.LibPath(dep); len(code.Funcs) > 0 && lp != "" {
 			u.code = append(u.code, lp)
 		}
-		for name, fi := range code.Funcs {
-			if own, exists := u.Funcs[name]; !exists || (own.PrototypeOnly && !fi.PrototypeOnly) {
-				u.Funcs[name] = fi
-			}
-		}
-		for name, vi := range code.Vars {
-			if _, exists := u.Vars[name]; !exists {
-				u.Vars[name] = vi
-			}
-		}
+		u.Funcs = append(u.Funcs, code.Funcs...)
+		u.Vars = append(u.Vars, code.Vars...)
 		if code.Partial {
 			u.Partial = true
 		}
+	}
+	u.Funcs = sortFuncs(u.Funcs)
+	if len(u.Vars) > own {
+		slices.SortStableFunc(u.Vars, func(a, b VarInfo) int { return strings.Compare(a.Name, b.Name) })
+		vars := u.Vars[:0]
+		for i, v := range u.Vars {
+			if i == 0 || u.Vars[i-1].Name != v.Name {
+				vars = append(vars, v)
+			}
+		}
+		u.Vars = slices.Clip(vars)
 	}
 	if s.uses != nil && !u.Stub {
 		u.setUses(s.uses(&Parsed{Unit: u, Tok: f, Tree: tree, Env: a.env}, s))

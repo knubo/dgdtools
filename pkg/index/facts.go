@@ -1,6 +1,7 @@
 package index
 
 import (
+	"slices"
 	"strings"
 
 	"github.com/mmcdole/dgdtools/pkg/syntax"
@@ -18,6 +19,7 @@ type Loc struct {
 
 // FuncInfo describes one function of an object.
 type FuncInfo struct {
+	Name            string
 	Static, Private bool
 	// Nomask says no object that inherits this one can have a function
 	// of the name: what the name means there is this function.
@@ -40,6 +42,7 @@ type FuncInfo struct {
 
 // VarInfo describes one global variable of an object.
 type VarInfo struct {
+	Name            string
 	Static, Private bool
 	// Type is the declared type as written, including '*'s.
 	Type string
@@ -108,8 +111,12 @@ type Unit struct {
 	Path    string
 	LibPath string // "" when the file is outside the lib
 
-	Funcs    map[string]FuncInfo
-	Vars     map[string]VarInfo
+	// Funcs and Vars are the object's functions and global variables,
+	// sorted by name, each name once (Func and Var find one). A whole
+	// lib has hundreds of thousands, most objects a few: a sorted slice
+	// holds them in a fraction of what a map of each would.
+	Funcs    []FuncInfo
+	Vars     []VarInfo
 	Inherits []InheritRef
 
 	// Partial is true when the symbol table may be missing entries: a
@@ -146,7 +153,26 @@ type Unit struct {
 	uses *uses
 }
 
-// collectDecls records the functions and variables declared in tree.
+// Func returns the unit's function called name.
+func (u *Unit) Func(name string) (FuncInfo, bool) {
+	i, ok := slices.BinarySearchFunc(u.Funcs, name, func(f FuncInfo, name string) int { return strings.Compare(f.Name, name) })
+	if !ok {
+		return FuncInfo{}, false
+	}
+	return u.Funcs[i], true
+}
+
+// Var returns the unit's global variable called name.
+func (u *Unit) Var(name string) (VarInfo, bool) {
+	i, ok := slices.BinarySearchFunc(u.Vars, name, func(v VarInfo, name string) int { return strings.Compare(v.Name, name) })
+	if !ok {
+		return VarInfo{}, false
+	}
+	return u.Vars[i], true
+}
+
+// collectDecls appends the functions and variables declared in tree to
+// u's, in the order of the file: sortDecls makes them the unit's.
 func collectDecls(u *Unit, tree *syntax.File) {
 	loc := func(n syntax.Node) Loc {
 		off := tree.Off(n)
@@ -158,28 +184,62 @@ func collectDecls(u *Unit, tree *syntax.File) {
 			return true // operator functions are not name-callable
 		}
 		minA, maxA := ParamRange(fn)
-		fi := FuncInfo{
+		u.Funcs = append(u.Funcs, FuncInfo{
+			Name:   fn.Name.Name,
 			Static: fn.Has(token.KwStatic), Private: fn.Has(token.KwPrivate), Nomask: fn.Has(token.KwNomask),
 			PrototypeOnly: fn.Body == nil,
 			MinArgs:       minA, MaxArgs: maxA,
 			Loc:  loc(fn.Name),
 			Decl: tree.FuncDeclText(fn), Type: tree.TypeText(fn.Type, fn.Stars),
-		}
-		if old, ok := u.Funcs[fn.Name.Name]; !ok || (old.PrototypeOnly && !fi.PrototypeOnly) {
-			u.Funcs[fn.Name.Name] = fi
-		}
+		})
 		return true
 	})
 	for _, d := range tree.Decls {
 		if vd, ok := d.(*syntax.VarDecl); ok {
 			for _, v := range vd.Vars {
-				u.Vars[v.Name.Name] = VarInfo{
+				u.Vars = append(u.Vars, VarInfo{
+					Name:   v.Name.Name,
 					Static: vd.Has(token.KwStatic), Private: vd.Has(token.KwPrivate),
 					Type: tree.TypeText(vd.Type, v.Stars), Loc: loc(v.Name),
-				}
+				})
 			}
 		}
 	}
+}
+
+// sortDecls sorts the functions and variables collectDecls appended,
+// keeping one of each name: of the functions, the first definition, or
+// the first prototype where there is none; of the variables, the last
+// declaration (a later one replaces an earlier one).
+func sortDecls(u *Unit) {
+	u.Funcs = sortFuncs(u.Funcs)
+	slices.SortStableFunc(u.Vars, func(a, b VarInfo) int { return strings.Compare(a.Name, b.Name) })
+	vars := u.Vars[:0]
+	for i, v := range u.Vars {
+		if i+1 < len(u.Vars) && u.Vars[i+1].Name == v.Name {
+			continue
+		}
+		vars = append(vars, v)
+	}
+	u.Vars = slices.Clip(vars)
+}
+
+// sortFuncs sorts fs by name, keeping of each name the first definition,
+// else the first prototype.
+func sortFuncs(fs []FuncInfo) []FuncInfo {
+	slices.SortStableFunc(fs, func(a, b FuncInfo) int { return strings.Compare(a.Name, b.Name) })
+	out := fs[:0]
+	for i := 0; i < len(fs); {
+		j, pick := i, i
+		for ; j < len(fs) && fs[j].Name == fs[i].Name; j++ {
+			if fs[pick].PrototypeOnly && !fs[j].PrototypeOnly {
+				pick = j
+			}
+		}
+		out = append(out, fs[pick])
+		i = j
+	}
+	return slices.Clip(out)
 }
 
 // ParamRange derives the accepted argument-count range of a function: a

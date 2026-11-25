@@ -46,8 +46,9 @@ func TestLintDocument(t *testing.T) {
 	assert.Equal(t, "/lib/obj/a.c", doc.File.Path)
 	assert.Equal(t, "3", doc.Env.Lookup("LIMIT").Body)
 	assert.Equal(t, "/obj/a", doc.Unit.LibPath)
-	assert.Contains(t, doc.Unit.Vars, "count")
-	assert.Equal(t, "/lib/obj/a.c", doc.Unit.Vars["count"].Path)
+	count, ok := doc.Unit.Var("count")
+	assert.True(t, ok)
+	assert.Equal(t, "/lib/obj/a.c", count.Path)
 	chain := l.Index().Snapshot().Chain("/obj/a")
 	assert.Equal(t, "/obj/a", chain.Vars["count"].DefinedIn, "chains carry variables")
 
