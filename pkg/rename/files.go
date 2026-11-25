@@ -41,7 +41,9 @@ type Move struct {
 // the driver will once the files have moved, and is the moved file there
 // or is not made. A path that is not one string as written (made by a
 // macro, ROOM; or a sum, DIR + "room") is Possible, and listed without
-// an edit: its macro names what other files name too.
+// an edit: its macro names what other files name too. A string that is a
+// moved object's old path where nothing says it is one (strings) is
+// Possible, with an edit.
 //
 // The edits are of the files as they are now, before the move: an edit
 // of a moved file is at its old path. The plan's Symbol is the file moved
