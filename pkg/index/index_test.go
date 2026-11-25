@@ -460,6 +460,12 @@ func TestChain(t *testing.T) {
 	assert.Equal(t, "/obj/leaf", ch.Vars["leaf_var"].DefinedIn)
 
 	assert.Same(t, ch, s.Chain("/obj/leaf"), "chains are memoized")
+	mid := s.Chain("/std/mid")
+	assert.Same(t, mid.Funcs["shared"], ch.Funcs["shared"], "a chain shares its parents' entries")
+	assert.Same(t, mid.Vars["mid_var"], ch.Vars["mid_var"])
+	side := s.Chain("/std/side")
+	assert.False(t, side.Funcs["side"].Private, "a private inherit makes the inheritor's entry private, not the parent's")
+	assert.NotSame(t, side.Funcs["side"], ch.Funcs["side"])
 	assert.True(t, s.Chain("/obj/bad").Partial, "an inherit that cannot be evaluated")
 	assert.Contains(t, s.Chain("/obj/bad").Funcs, "f")
 	assert.True(t, s.Chain("/obj/lost").Partial, "a parent with no file")
@@ -513,7 +519,9 @@ func TestChainFuncIsChain(t *testing.T) {
 			want, wantOK := flat.Chain(obj).Funcs[name]
 			got, ok := s.ChainFunc(obj, name)
 			assert.Equal(t, wantOK, ok, "%s %s", obj, name)
-			assert.Equal(t, want, got, "%s %s", obj, name)
+			if wantOK {
+				assert.Equal(t, *want, got, "%s %s", obj, name)
+			}
 		}
 	}
 }
@@ -1331,6 +1339,8 @@ func TestAutoFuncAndReadFile(t *testing.T) {
 	assert.Equal(t, "hidden_auto", string(text[fn.Off:fn.Off+11]))
 	_, ok = s.AutoFunc("f")
 	assert.False(t, ok)
+	assert.Equal(t, "(auto object)", fn.DefinedIn)
+	assert.Equal(t, "/sys/auto", s.Chain("/sys/auto").Funcs["hidden_auto"].DefinedIn, "the auto object's chain is its own")
 
 	// A buffer is the file, as for everything else the index reads.
 	l.set(t, "obj/a.c", "void g() { }\n")

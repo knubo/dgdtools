@@ -556,7 +556,7 @@ func (c *completer) members(target calls.Target, libPath string) {
 				c.seen[name] |= asFunction
 				continue
 			}
-			d := funcDef(name, fn)
+			d := funcDef(name, *fn)
 			it := c.function(&d)
 			if it.Rank = 2; fn.DefinedIn == libPath {
 				it.Rank = 1

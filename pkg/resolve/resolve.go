@@ -649,7 +649,7 @@ func (r *Resolver) inherited(name, label string) []candidate {
 		}
 		i := slices.IndexFunc(cs, func(c candidate) bool { return c.fn.Loc == fn.Loc })
 		if i < 0 {
-			cs = append(cs, candidate{fn: fn})
+			cs = append(cs, candidate{fn: *fn})
 			i = len(cs) - 1
 		}
 		cs[i].via = append(cs[i].via, in.Path)

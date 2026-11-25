@@ -129,7 +129,7 @@ var ruleUndefinedPrototype = &Rule{
 			if !p.Index.ProvidedByUsers(p.Ctx, name) {
 				d := p.ReportNode(dc.Call.Fun, "'%s' is declared but never defined (prototype in %s) — calling it is a runtime error",
 					name, fn.DefinedIn)
-				d.Related = definedAt(fn, name, "prototype")
+				d.Related = definedAt(*fn, name, "prototype")
 			}
 		}
 	},

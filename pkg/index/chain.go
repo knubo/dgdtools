@@ -6,9 +6,14 @@ import (
 )
 
 // Chain is the flattened inherit view of one object.
+//
+// A chain shares the entries of the chains of what the object inherits:
+// an object's chain is mostly its parents' functions, and a whole lib of
+// chains would otherwise hold a copy of std/room's in each room. The
+// entries are not to be changed.
 type Chain struct {
-	Funcs map[string]ChainFunc
-	Vars  map[string]ChainVar
+	Funcs map[string]*ChainFunc
+	Vars  map[string]*ChainVar
 	// Partial: some inherit could not be resolved or loaded, or some
 	// program in the chain has an incomplete symbol table. A name absent
 	// from a partial chain is Unknown, not Missing.
@@ -45,7 +50,7 @@ func (s *Snapshot) chain(libPath string, visiting map[string]bool) (*Chain, bool
 	if ch, ok := s.chains.get(libPath); ok {
 		return ch, false
 	}
-	ch := &Chain{Funcs: map[string]ChainFunc{}, Vars: map[string]ChainVar{}}
+	ch := &Chain{Funcs: map[string]*ChainFunc{}, Vars: map[string]*ChainVar{}}
 	if visiting[libPath] {
 		ch.Partial, ch.Unseen = true, true // inheritance cycle; the driver rejects it
 		return ch, true
@@ -78,19 +83,23 @@ func (s *Snapshot) chain(libPath string, visiting map[string]bool) (*Chain, bool
 		// inherit` is call_other-invisible to inheritors too. A prototype
 		// from one sibling never clobbers another sibling's definition.
 		for name, fn := range sub.Funcs {
-			if ref.Private {
-				fn.Private = true
-			}
 			if fn.PrototypeOnly {
 				if old, ok := ch.Funcs[name]; ok && !old.PrototypeOnly {
 					continue
 				}
 			}
+			if ref.Private && !fn.Private {
+				private := *fn
+				private.Private = true
+				fn = &private
+			}
 			ch.Funcs[name] = fn
 		}
 		for name, v := range sub.Vars {
-			if ref.Private {
-				v.Private = true
+			if ref.Private && !v.Private {
+				private := *v
+				private.Private = true
+				v = &private
 			}
 			ch.Vars[name] = v
 		}
@@ -103,10 +112,10 @@ func (s *Snapshot) chain(libPath string, visiting map[string]bool) (*Chain, bool
 				continue
 			}
 		}
-		ch.Funcs[fi.Name] = ChainFunc{FuncInfo: fi, DefinedIn: libPath}
+		ch.Funcs[fi.Name] = &ChainFunc{FuncInfo: fi, DefinedIn: libPath}
 	}
 	for _, vi := range u.Vars {
-		ch.Vars[vi.Name] = ChainVar{VarInfo: vi, DefinedIn: libPath}
+		ch.Vars[vi.Name] = &ChainVar{VarInfo: vi, DefinedIn: libPath}
 	}
 	ch.Objects = append(ch.Objects, libPath)
 	if cyc && len(visiting) > 0 {
@@ -124,8 +133,10 @@ func (s *Snapshot) chain(libPath string, visiting map[string]bool) (*Chain, bool
 // chain for each.
 func (s *Snapshot) ChainFunc(libPath, name string) (ChainFunc, bool) {
 	if ch, ok := s.chains.get(libPath); ok {
-		fn, ok := ch.Funcs[name]
-		return fn, ok
+		if fn, ok := ch.Funcs[name]; ok {
+			return *fn, true
+		}
+		return ChainFunc{}, false
 	}
 	u := s.Unit(libPath)
 	if u == nil {
@@ -146,10 +157,11 @@ func (s *Snapshot) ChainFunc(libPath, name string) (ChainFunc, bool) {
 			continue
 		}
 		if fn, ok := s.Chain(ref.Path).Funcs[name]; ok {
+			f := *fn
 			if ref.Private {
-				fn.Private = true
+				f.Private = true
 			}
-			take(fn)
+			take(f)
 		}
 	}
 	if fi, ok := u.Func(name); ok {
@@ -200,8 +212,9 @@ func (s *Snapshot) autoState() *autoState {
 			ch := s.Chain(NormalizeLibPath(auto, "/"))
 			a.unseen = a.unseen || ch.Unseen
 			for name, fn := range ch.Funcs {
-				fn.DefinedIn = "(auto object)"
-				a.funcs[name] = fn
+				f := *fn
+				f.DefinedIn = "(auto object)"
+				a.funcs[name] = f
 			}
 			for _, o := range ch.Objects {
 				a.members[o] = true
@@ -339,7 +352,7 @@ func (s *Snapshot) lookupCallable(ctx context.Context, target, fn string, self b
 	}
 	ch := s.Chain(target)
 	if f, ok := ch.Funcs[fn]; ok {
-		return Lookup{State: LookupFound, Fn: f}
+		return Lookup{State: LookupFound, Fn: *f}
 	}
 	auto := s.autoState()
 	if f, ok := auto.funcs[fn]; ok {
