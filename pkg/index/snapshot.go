@@ -39,6 +39,9 @@ type Snapshot struct {
 	// symbols is where a search by name looks, once the whole lib has
 	// been scanned. It is not passed on.
 	symbols *lazy[*symbolTable]
+	// useScope is where a search for references looks, once the whole
+	// lib has been scanned. It is not passed on.
+	useScope *lazy[*useScope]
 	// isFile remembers what exists. It is not passed on: the next
 	// generation looks again at whatever it still needs.
 	isFile *table[bool]
@@ -52,7 +55,7 @@ func newSnapshot(ix *Index, gen uint64, ext *extent) *Snapshot {
 		lib: ix.lib, ix: ix, gen: gen, ext: ext,
 		headers: newMemo[*header](), units: newMemo[*Unit](),
 		base: &lazy[*baseState]{}, auto: &lazy[*autoState]{},
-		chains: &table[*Chain]{}, symbols: &lazy[*symbolTable]{}, isFile: &table[bool]{}, failed: map[string]string{},
+		chains: &table[*Chain]{}, symbols: &lazy[*symbolTable]{}, useScope: &lazy[*useScope]{}, isFile: &table[bool]{}, failed: map[string]string{},
 	}
 }
 
@@ -474,6 +477,9 @@ func (s *Snapshot) facts(a *analysis) *Unit {
 			u.Partial = true
 		}
 	}
+	if s.uses != nil && !u.Stub {
+		u.setUses(s.uses(&Parsed{Unit: u, Tok: f, Tree: tree, Env: a.env}, s))
+	}
 	return u
 }
 
@@ -631,6 +637,9 @@ func (s *Snapshot) Files(ctx context.Context, dir string) ([]string, error) {
 		return nil, err
 	}
 	if ix := s.ix; s.clean(dir) == s.scanRoot() {
+		for _, p := range files {
+			s.covered.getOrPut(p, func() bool { return true }) // what inScope decides
+		}
 		ix.mu.Lock()
 		if ix.cur == s && !ix.walked {
 			ix.walked, ix.todo = true, map[string]struct{}{}

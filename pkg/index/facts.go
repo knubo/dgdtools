@@ -142,6 +142,8 @@ type Unit struct {
 	// code are the lib paths of the #included files that contribute
 	// declarations to this program.
 	code []string
+	// uses are the file's Uses; nil when they were not read.
+	uses *uses
 }
 
 // collectDecls records the functions and variables declared in tree.

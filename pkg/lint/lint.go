@@ -392,6 +392,29 @@ func (d *Document) Signature(off uint32) *resolve.SignatureHelp {
 	return d.resolver.Signature(off)
 }
 
+// References finds the places that name what the token at byte offset
+// off of the document names (the document's resolve.Resolver's
+// References): in the document for a local, a parameter or a label, in
+// the whole lib for anything else, which needs the whole-lib scan
+// (Linter.Scan). With decl the declarations are among them. It is nil
+// where nothing declared is named.
+func (d *Document) References(ctx context.Context, off uint32, decl bool) *resolve.References {
+	if d.resolver == nil {
+		return nil
+	}
+	return d.resolver.References(ctx, off, decl)
+}
+
+// Highlights returns the places of the document that name what the
+// token at byte offset off names, each with how it uses a variable (the
+// document's resolve.Resolver's Highlights).
+func (d *Document) Highlights(off uint32) []resolve.Site {
+	if d.resolver == nil {
+		return nil
+	}
+	return d.resolver.Highlights(off)
+}
+
 // Symbols lists the declarations of the document, for an outline of it
 // (the document's resolve.Resolver's Symbols).
 func (d *Document) Symbols() []resolve.Symbol {
@@ -473,7 +496,9 @@ func New(prj *config.Project, fsys vfs.FS) (*Linter, error) {
 	if l.kfuns, err = cfg.Kfuns(); err != nil {
 		return nil, fmt.Errorf("dialect.kfuns: %w", err)
 	}
-	l.index = index.Open(prj, fsys)
+	// Every unit keeps the places its file names other files' functions,
+	// variables, macros and objects at, for a search for references.
+	l.index = index.Open(prj, fsys, index.WithUses(resolve.Extractor(l.registry)))
 	return l, nil
 }
 

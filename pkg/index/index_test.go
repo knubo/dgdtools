@@ -454,6 +454,39 @@ func TestChain(t *testing.T) {
 	assert.Equal(t, "(auto object)", s.autoState().funcs["object_name"].DefinedIn)
 }
 
+// ChainFunc and ChainUnseen say what the flattened chain says, without
+// flattening it: asked of one generation, held to the chains of another.
+func TestChainFuncIsChain(t *testing.T) {
+	files := map[string]string{
+		"std/top.c":  "int top_var;\nvoid shared() { }\nvoid only_top() { }\nprivate void secret() { }\nvoid later();\n",
+		"std/mid.c":  "inherit \"/std/top\";\nstring mid_var;\nvoid shared() { }\nvoid later() { }\n",
+		"std/side.c": "void side() { }\nvoid later();\nvoid shared();\n",
+		"obj/leaf.c": "inherit \"/std/mid\";\nprivate inherit \"/std/side\";\nint leaf_var;\nvoid leaf() { }\nvoid only_top();\n",
+		"obj/twin.c": "inherit \"/std/side\";\ninherit \"/std/mid\";\nvoid later();\n",
+		"obj/bad.c":  "inherit UNKNOWN;\nvoid f() { }\n",
+		"obj/lost.c": "inherit \"/std/missing\";\n",
+		"obj/cyc1.c": "inherit \"/obj/cyc2\";\nvoid one() { }\n",
+		"obj/cyc2.c": "inherit \"/obj/cyc1\";\nvoid two() { }\n",
+		"std/torn.c": "inherit \"/std/top\";\nnomask void sealed() { }\nint f( { }\n",
+		"obj/over.c": "inherit \"/std/torn\";\n",
+		"obj/deep.c": "inherit \"/obj/lost\";\n",
+	}
+	objects := []string{"/std/top", "/std/mid", "/std/side", "/obj/leaf", "/obj/twin", "/obj/bad", "/obj/lost",
+		"/obj/cyc1", "/obj/cyc2", "/std/torn", "/obj/over", "/obj/deep", "/std/missing"}
+	names := []string{"top_var", "shared", "only_top", "secret", "later", "side", "leaf", "f", "one", "two", "sealed", "none"}
+	flat := newLib(t, files).ix.Snapshot()
+	for _, obj := range objects {
+		s := newLib(t, files).ix.Snapshot() // nothing flattened
+		assert.Equal(t, flat.Chain(obj).Unseen, s.ChainUnseen(obj), obj)
+		for _, name := range names {
+			want, wantOK := flat.Chain(obj).Funcs[name]
+			got, ok := s.ChainFunc(obj, name)
+			assert.Equal(t, wantOK, ok, "%s %s", obj, name)
+			assert.Equal(t, want, got, "%s %s", obj, name)
+		}
+	}
+}
+
 func TestLookupCallable(t *testing.T) {
 	l := newLib(t, map[string]string{
 		"std/mod.c":      "void here() { }\nstatic void quiet() { }\nvoid decl();\n",

@@ -115,6 +115,68 @@ func (s *Snapshot) chain(libPath string, visiting map[string]bool) (*Chain, bool
 	return s.storeChain(libPath, ch), false
 }
 
+// ChainFunc returns the function called name of the chain of the object
+// at libPath: what Chain(libPath).Funcs[name] is. Unless that chain has
+// been flattened already, it is found from the object's own functions
+// and the chains of what it inherits, without flattening the object's:
+// a whole lib shares the chains of its parents, and a question asked of
+// every object of the lib (a search for references) must not keep a
+// chain for each.
+func (s *Snapshot) ChainFunc(libPath, name string) (ChainFunc, bool) {
+	if ch, ok := s.chains.get(libPath); ok {
+		fn, ok := ch.Funcs[name]
+		return fn, ok
+	}
+	u := s.Unit(libPath)
+	if u == nil {
+		return ChainFunc{}, false
+	}
+	// As chain merges them: each inherited object in turn, then the
+	// object's own; a prototype hides no definition.
+	var out ChainFunc
+	found := false
+	take := func(fn ChainFunc) {
+		if fn.PrototypeOnly && found && !out.PrototypeOnly {
+			return
+		}
+		out, found = fn, true
+	}
+	for _, ref := range u.Inherits {
+		if !ref.Resolved {
+			continue
+		}
+		if fn, ok := s.Chain(ref.Path).Funcs[name]; ok {
+			if ref.Private {
+				fn.Private = true
+			}
+			take(fn)
+		}
+	}
+	if fi, ok := u.Funcs[name]; ok {
+		take(ChainFunc{FuncInfo: fi, DefinedIn: libPath})
+	}
+	return out, found
+}
+
+// ChainUnseen reports whether the chain of the object at libPath has an
+// object that is not known at all: what Chain(libPath).Unseen is, found
+// as ChainFunc finds a function.
+func (s *Snapshot) ChainUnseen(libPath string) bool {
+	if ch, ok := s.chains.get(libPath); ok {
+		return ch.Unseen
+	}
+	u := s.Unit(libPath)
+	if u == nil {
+		return true
+	}
+	for _, ref := range u.Inherits {
+		if !ref.Resolved || s.Chain(ref.Path).Unseen {
+			return true
+		}
+	}
+	return false
+}
+
 // storeChain keeps ch as libPath's chain unless one was stored meanwhile.
 func (s *Snapshot) storeChain(libPath string, ch *Chain) *Chain {
 	return s.chains.getOrPut(libPath, func() *Chain { return ch })

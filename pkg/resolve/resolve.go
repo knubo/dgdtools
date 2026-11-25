@@ -172,6 +172,11 @@ type Resolver struct {
 
 	scoped sync.Once
 	scopes []*syntax.Scope
+
+	// own are the Uses of the file, read on first need when its unit has
+	// none.
+	ownUses sync.Once
+	own     []index.Use
 }
 
 // New returns the resolver of a file.
@@ -183,9 +188,24 @@ func New(f File) *Resolver { return &Resolver{File: f, s: f.Snapshot, u: f.Unit}
 // offset just after a name is on it, as an editor's cursor at the end of
 // a word is.
 func (r *Resolver) At(off uint32) *Ref {
+	ref, use := r.classify(off)
+	if use == nil {
+		return ref
+	}
+	if ref.Defs = r.Lookup(*use); len(ref.Defs) == 0 && use.Kind == index.UseVariable && !use.Decl {
+		return nil // a name that is no variable the file can see
+	}
+	return ref
+}
+
+// classify is At before a name that other files can name too is looked
+// up: the Ref without its Defs, and the Use to look up for them. A
+// local, a parameter and a label are decided by the file, and come with
+// their Defs and no Use.
+func (r *Resolver) classify(off uint32) (*Ref, *index.Use) {
 	f := &r.File
 	if f.Tok == nil || f.Tree == nil || f.Tree.Sel == nil || f.Unit == nil || f.Snapshot == nil {
-		return nil
+		return nil, nil
 	}
 	toks := f.Tok.Tokens
 	ti := f.Tok.TokenAt(off)
@@ -196,22 +216,77 @@ func (r *Resolver) At(off uint32) *Ref {
 	case token.Directive:
 		return r.directive(ti, off)
 	case token.Ident:
-		if _, compiled := slices.BinarySearch(f.Tree.Sel.Sig, ti); !compiled {
-			return nil
+		if !r.compiled(ti) {
+			return nil, nil
 		}
-		return r.ident(ti)
+		return r.ident(ti, syntax.PathAt(f.Tree, ti))
 	case token.StringLit:
-		if _, compiled := slices.BinarySearch(f.Tree.Sel.Sig, ti); !compiled {
-			return nil
+		if !r.compiled(ti) {
+			return nil, nil
 		}
-		return r.str(ti)
+		return r.str(ti, syntax.PathAt(f.Tree, ti))
 	}
 	// Anywhere else in an inherit statement, its keywords and the ';'
 	// included: the object inherited.
-	if _, compiled := slices.BinarySearch(f.Tree.Sel.Sig, ti); compiled {
+	if r.compiled(ti) {
 		return r.inherit(syntax.PathAt(f.Tree, ti), ti)
 	}
+	return nil, nil
+}
+
+// compiled reports whether the token at index ti is code the compiler
+// reads: not in a branch of a conditional that is skipped.
+func (r *Resolver) compiled(ti int) bool {
+	_, ok := slices.BinarySearch(r.Tree.Sel.Sig, ti)
+	return ok
+}
+
+// Lookup returns the declarations a Use of the resolver's file names, in
+// the resolver's generation of the index: what At gives as the Defs of
+// the place. A Use is the index's record of a place (index.Unit.Uses),
+// so the places of the whole lib are looked up without reading their
+// files again.
+func (r *Resolver) Lookup(u index.Use) []Def {
+	name := u.Name
+	switch u.Kind {
+	case index.UseFunction:
+		switch u.Form {
+		case index.FormOwn, index.FormSelf:
+			// What the object's own program has of the name. A function
+			// only an inheritor provides is not searched for: which
+			// inheritor is running nobody can say.
+			return r.function(name)
+		case index.FormSuper:
+			// ::fn() is the inherited function, and the auto object's
+			// when no inherited object has one.
+			if defs := r.defs(name, r.inherited(name, "")); len(defs) > 0 {
+				return defs
+			}
+			return r.auto(name, r.u.LibPath)
+		case index.FormLabel:
+			return r.defs(name, r.inherited(name, u.Aux))
+		case index.FormPath:
+			return r.callable(u.Aux, name)
+		}
+	case index.UseVariable:
+		return r.variable(name)
+	case index.UseMacro:
+		if u.Aux != "" {
+			return []Def{{Kind: Macro, Name: name, Path: u.Aux, Start: u.Off, End: u.Off + uint32(len(name)), Macro: u.Macro}}
+		}
+	case index.UseObject:
+		return r.object(name)
+	case index.UseInclude:
+		if u.Aux != "" {
+			return []Def{{Kind: Include, Name: name, Path: u.Aux}}
+		}
+	}
 	return nil
+}
+
+// use is the Use of the place ref is, of the given kind and form.
+func use(ref *Ref, kind index.UseKind, form index.UseForm) *index.Use {
+	return &index.Use{Name: ref.Name, Start: ref.Start, End: ref.End, Kind: kind, Form: form, Decl: ref.Decl}
 }
 
 // named reports whether a token of kind k can name something.
@@ -226,11 +301,11 @@ func has(n syntax.Node, tok int) bool {
 
 // ----------------------------------------------------------- directives
 
-// directive resolves a place in an active directive: the target of an
+// directive classifies a place in an active directive: the target of an
 // #include, anywhere on its line, and a macro's name in the others.
-func (r *Resolver) directive(ti int, off uint32) *Ref {
+func (r *Resolver) directive(ti int, off uint32) (*Ref, *index.Use) {
 	if r.Env == nil || r.Env.Own() == nil || !r.read(ti) {
-		return nil
+		return nil, nil
 	}
 	tok := r.Tok.Tokens[ti]
 	text := r.Tok.Text(tok)
@@ -247,16 +322,15 @@ func (r *Resolver) directive(ti int, off uint32) *Ref {
 				ref.Start = tok.Off + uint32(arg)
 				ref.End = ref.Start + uint32(len(raw))
 			}
-			if p, ok := r.s.ResolveInclude(r.Tok.Path, inc); ok {
-				ref.Defs = []Def{{Kind: Include, Name: inc.Name, Path: p}}
-			}
-			return ref
+			u := use(ref, index.UseInclude, 0)
+			u.Aux, _ = r.s.ResolveInclude(r.Tok.Path, inc)
+			return ref, u
 		}
 	case "define", "undef", "if", "ifdef", "ifndef", "elif":
 		// The words of the line, as the preprocessor reads them.
 		rel := int(off - tok.Off)
 		if rel < arg {
-			return nil
+			return nil, nil
 		}
 		words := lexer.Lex("", text[arg:], r.Tok.Dialect)
 		rel -= arg
@@ -266,7 +340,7 @@ func (r *Resolver) directive(ti int, off uint32) *Ref {
 		}
 		w := words.Tokens[wi]
 		if w.Kind != token.Ident {
-			return nil
+			return nil, nil
 		}
 		word := string(words.Text(w))
 		start := tok.Off + uint32(arg) + w.Off
@@ -274,23 +348,23 @@ func (r *Resolver) directive(ti int, off uint32) *Ref {
 			if w.Off == 0 {
 				// The name being defined, here.
 				ref := &Ref{Kind: Macro, Name: word, Start: start, End: start + uint32(len(word)), Decl: true}
-				def := Def{Kind: Macro, Name: word, Path: r.Tok.Path, Start: ref.Start, End: ref.End}
+				u := use(ref, index.UseMacro, 0)
+				u.Aux, u.Off = r.Tok.Path, start
 				if m := r.Env.Own().Macros[word]; m != nil && m.NameOff == start {
-					def.Macro = m
+					u.Macro = m
 				}
-				ref.Defs = []Def{def}
-				return ref
+				return ref, u
 			}
 			// A parameter of the macro is no name outside it.
 			if first := words.Tokens[0]; first.Kind == token.Ident {
 				if m := r.Env.Own().Macros[string(words.Text(first))]; m != nil && slices.Contains(m.Params, word) {
-					return nil
+					return nil, nil
 				}
 			}
 		}
 		return r.macro(word, start)
 	}
-	return nil
+	return nil, nil
 }
 
 // read reports whether the preprocessor reads the directive at token
@@ -314,37 +388,36 @@ func (r *Resolver) read(ti int) bool {
 	return true
 }
 
-// macro returns the reference of the name at start to a macro, nil when
-// the name is none in this file.
-func (r *Resolver) macro(name string, start uint32) *Ref {
+// macro classifies the name at start as a macro's, nil when the name is
+// none in this file. The macro is what the file's environment has at
+// its end: of two #defines of a name, the later.
+func (r *Resolver) macro(name string, start uint32) (*Ref, *index.Use) {
 	def := r.Env.Definition(name)
 	if def == nil && r.Env.Lookup(name) == nil {
-		return nil
+		return nil, nil
 	}
 	ref := &Ref{Kind: Macro, Name: name, Start: start, End: start + uint32(len(name))}
+	u := use(ref, index.UseMacro, 0)
 	if def != nil {
-		ref.Defs = []Def{{
-			Kind: Macro, Name: name, Path: def.Path,
-			Start: def.NameOff, End: def.NameOff + uint32(len(name)), Macro: def,
-		}}
+		u.Aux, u.Off, u.Macro = def.Path, def.NameOff, def
 	}
-	return ref
+	return ref, u
 }
 
 // ---------------------------------------------------------------- names
 
-// ident resolves an identifier of the compiled code.
-func (r *Resolver) ident(ti int) *Ref {
+// ident classifies an identifier of the compiled code, path being the
+// nodes around it (syntax.PathAt).
+func (r *Resolver) ident(ti int, path []syntax.Node) (*Ref, *index.Use) {
 	t := r.Tree
 	tok := r.Tok.Tokens[ti]
 	name := string(r.Tok.Text(tok))
-	path := syntax.PathAt(t, ti)
-	if ref := r.inherit(path, ti); ref != nil {
-		return ref
+	if ref, u := r.inherit(path, ti); ref != nil {
+		return ref, u
 	}
 	// The preprocessor takes a macro's name wherever it stands.
-	if ref := r.macro(name, tok.Off); ref != nil {
-		return ref
+	if ref, u := r.macro(name, tok.Off); ref != nil {
+		return ref, u
 	}
 	ref := &Ref{Name: name, Start: tok.Off, End: tok.End}
 	switch n := path[0].(type) {
@@ -352,28 +425,25 @@ func (r *Resolver) ident(ti int) *Ref {
 		if n.Label != nil && has(n.Label, ti) {
 			ref.Kind, ref.Decl = Label, true
 			ref.Defs = r.labels(name)
-			return ref
+			return ref, nil
 		}
 	case *syntax.CallExpr:
 		switch {
 		case n.Label != nil && has(n.Label, ti):
 			ref.Kind, ref.Defs = Label, r.labels(name)
-			return ref
+			return ref, nil
 		case !has(n.Fun, ti):
 		case !n.Scoped:
-			ref.Kind, ref.Defs = Function, r.function(name)
-			return ref
+			ref.Kind = Function
+			return ref, use(ref, index.UseFunction, index.FormOwn)
 		case n.Label != nil:
-			ref.Kind, ref.Defs = Function, r.defs(name, r.inherited(name, n.Label.Name))
-			return ref
+			ref.Kind = Function
+			u := use(ref, index.UseFunction, index.FormLabel)
+			u.Aux = n.Label.Name
+			return ref, u
 		default:
-			// ::fn() is the inherited function, and the auto object's
-			// when no inherited object has one.
-			ref.Kind, ref.Defs = Function, r.defs(name, r.inherited(name, ""))
-			if len(ref.Defs) == 0 {
-				ref.Defs = r.auto(name, r.u.LibPath)
-			}
-			return ref
+			ref.Kind = Function
+			return ref, use(ref, index.UseFunction, index.FormSuper)
 		}
 	case *syntax.ArrowExpr:
 		if has(n.Name, ti) {
@@ -381,8 +451,8 @@ func (r *Resolver) ident(ti int) *Ref {
 		}
 	case *syntax.FuncDecl:
 		if n.Name != nil && has(n.Name, ti) {
-			ref.Kind, ref.Decl, ref.Defs = Function, true, r.function(name)
-			return ref
+			ref.Kind, ref.Decl = Function, true
+			return ref, use(ref, index.UseFunction, index.FormOwn)
 		}
 	case *syntax.Declarator:
 		// A declarator of the file itself is a global variable; one in a
@@ -391,45 +461,43 @@ func (r *Resolver) ident(ti int) *Ref {
 		switch {
 		case !ok || n.Name == nil || !has(n.Name, ti):
 		case len(path) == 3:
-			ref.Kind, ref.Decl, ref.Defs = Variable, true, r.variable(name)
-			return ref
+			ref.Kind, ref.Decl = Variable, true
+			return ref, use(ref, index.UseVariable, 0)
 		default:
-			return r.local(tok, r.declared(ti, &syntax.Local{Name: name, Type: t.TypeText(vd.Type, n.Stars), Ident: n.Name}), true)
+			return r.local(tok, r.declared(ti, &syntax.Local{Name: name, Type: t.TypeText(vd.Type, n.Stars), Ident: n.Name}), true), nil
 		}
 	case *syntax.Param:
 		if n.Name != nil && has(n.Name, ti) {
-			return r.local(tok, r.declared(ti, &syntax.Local{Name: name, Type: t.TypeText(n.Type, n.Stars), Param: true, Ident: n.Name}), true)
+			return r.local(tok, r.declared(ti, &syntax.Local{Name: name, Type: t.TypeText(n.Type, n.Stars), Param: true, Ident: n.Name}), true), nil
 		}
 	case *syntax.CatchStmt:
 		if n.Exc != nil && has(n.Exc, ti) {
-			return r.local(tok, r.declared(ti, &syntax.Local{Name: name, Type: "string", Catch: true, Ident: n.Exc}), true)
+			return r.local(tok, r.declared(ti, &syntax.Local{Name: name, Type: "string", Catch: true, Ident: n.Exc}), true), nil
 		}
 	case *syntax.Ident:
 		// &name(...) names a function; in (*f)(...) f is a variable.
 		if fp, ok := path[1].(*syntax.FuncPtrExpr); ok && fp.Fun == syntax.Expr(n) && r.after(fp.First, token.Amp) == ti {
-			ref.Kind, ref.Defs = Function, r.function(name)
-			return ref
+			ref.Kind = Function
+			return ref, use(ref, index.UseFunction, index.FormOwn)
 		}
 		if n.Name != name {
-			return nil // ::name without a call is no variable
+			return nil, nil // ::name without a call is no variable
 		}
 		// The parameter or the local variable in scope here, before a
 		// global. A statement before this one that the parser could not
 		// read may declare the name: nothing is said then.
 		if sc := r.scope(tok.Off); sc != nil {
 			if l := sc.Lookup(name, tok.Off); l != nil {
-				return r.local(tok, l, false)
+				return r.local(tok, l, false), nil
 			}
 			if sc.Unsure(tok.Off, func(start, end uint32) bool { return r.mentions(start, end, name) }) {
-				return nil
+				return nil, nil
 			}
 		}
-		if defs := r.variable(name); len(defs) > 0 {
-			ref.Kind, ref.Defs = Variable, defs
-			return ref
-		}
+		ref.Kind = Variable
+		return ref, use(ref, index.UseVariable, 0)
 	}
-	return nil
+	return nil, nil
 }
 
 // after returns the index of the token of the code that follows the
@@ -447,43 +515,46 @@ func (r *Resolver) after(tok int, k token.Kind) int {
 	return -1
 }
 
-// str resolves a string constant of the compiled code: the path of an
+// str classifies a string constant of the compiled code: the path of an
 // inherit statement, the name of a function in a call that names one,
 // an object path handed to a function that takes one.
-func (r *Resolver) str(ti int) *Ref {
-	if ref := r.inherit(syntax.PathAt(r.Tree, ti), ti); ref != nil {
-		return ref
+func (r *Resolver) str(ti int, path []syntax.Node) (*Ref, *index.Use) {
+	if ref, u := r.inherit(path, ti); ref != nil {
+		return ref, u
 	}
 	tok := r.Tok.Tokens[ti]
-	if ref := r.late(tok); ref != nil {
-		return ref
+	if ref, u := r.late(tok); ref != nil {
+		return ref, u
 	}
 	for _, p := range r.calls().Paths {
 		if p.Start == tok.Off && p.End == tok.End {
-			return &Ref{Kind: Object, Name: p.Path, Start: tok.Off + 1, End: tok.End - 1, Defs: r.object(p.Path)}
+			ref := &Ref{Kind: Object, Name: p.Path, Start: tok.Off + 1, End: tok.End - 1}
+			return ref, use(ref, index.UseObject, 0)
 		}
 	}
-	return nil
+	return nil, nil
 }
 
-// inherit resolves a token of an inherit statement but its label to the
-// object inherited. The whole statement names it, a macro in the path
-// included: `inherit ROOM;` is about the room, not about the #define.
-func (r *Resolver) inherit(path []syntax.Node, ti int) *Ref {
+// inherit classifies a token of an inherit statement but its label as
+// the object inherited. The whole statement names it, a macro in the
+// path included: `inherit ROOM;` is about the room, not about the
+// #define.
+func (r *Resolver) inherit(path []syntax.Node, ti int) (*Ref, *index.Use) {
 	if len(path) < 2 {
-		return nil
+		return nil, nil
 	}
 	d, ok := path[len(path)-2].(*syntax.InheritDecl)
 	if !ok || d.Path == nil || !has(d, ti) || d.Label != nil && has(d.Label, ti) {
-		return nil
+		return nil, nil
 	}
 	off := r.Tree.Off(d.Path)
 	for _, in := range r.u.Inherits {
 		if in.Off == off && in.Resolved {
-			return &Ref{Kind: Object, Name: in.Path, Start: in.Off, End: in.End, Defs: r.object(in.Path)}
+			ref := &Ref{Kind: Object, Name: in.Path, Start: in.Off, End: in.End}
+			return ref, use(ref, index.UseObject, 0)
 		}
 	}
-	return nil
+	return nil, nil
 }
 
 // object returns the file of the object at libPath, when it has one.
@@ -530,10 +601,10 @@ func (r *Resolver) registry() *calls.Registry {
 
 var driverRegistry = sync.OnceValue(func() *calls.Registry { return calls.NewRegistry(profile.Conventions{}) })
 
-// late resolves the function name at tok in a call that is bound when it
-// runs: x->name(), or "name" handed to call_other, call_out or one of
+// late classifies the function name at tok in a call that is bound when
+// it runs: x->name(), or "name" handed to call_other, call_out or one of
 // the lib's registrars. It is nil when tok is no such name.
-func (r *Resolver) late(tok token.Token) *Ref {
+func (r *Resolver) late(tok token.Token) (*Ref, *index.Use) {
 	for i := range r.calls().Named {
 		c := &r.calls().Named[i]
 		if c.Start != tok.Off || c.End != tok.End {
@@ -543,18 +614,16 @@ func (r *Resolver) late(tok token.Token) *Ref {
 		if tok.Kind == token.StringLit {
 			ref.Start, ref.End = c.Start+1, c.End-1
 		}
+		u := use(ref, index.UseFunction, index.FormUnknown)
 		switch c.Target {
 		case calls.TargetSelf:
-			// What the object's own program has of the name. A function
-			// only an inheritor provides is not searched for: which
-			// inheritor is running nobody can say.
-			ref.Defs = r.function(c.Func)
+			u.Form = index.FormSelf
 		case calls.TargetPath:
-			ref.Defs = r.callable(c.TargetPath, c.Func)
+			u.Form, u.Aux = index.FormPath, c.TargetPath
 		}
-		return ref
+		return ref, u
 	}
-	return nil
+	return nil, nil
 }
 
 // candidate is a function as an inherited object's chain provides it,
@@ -639,7 +708,7 @@ func (r *Resolver) auto(name, libPath string) []Def {
 		return nil
 	}
 	fn, ok := r.s.AutoFunc(name)
-	if !ok || (!fn.Nomask && r.s.Chain(libPath).Unseen) {
+	if !ok || (!fn.Nomask && r.s.ChainUnseen(libPath)) {
 		return nil
 	}
 	d := funcDef(name, fn)
@@ -681,7 +750,7 @@ func (r *Resolver) callable(target, name string) []Def {
 	if r.s.Unit(target) == nil {
 		return nil
 	}
-	if fn, ok := r.s.Chain(target).Funcs[name]; ok {
+	if fn, ok := r.s.ChainFunc(target, name); ok {
 		if fn.Private && fn.DefinedIn != target {
 			return nil
 		}

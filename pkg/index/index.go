@@ -98,6 +98,11 @@ type lib struct {
 	holes    *fileset.Matcher
 	defined  map[string]bool
 	override map[string]pp.Class
+	// uses reads the Uses of a unit; nil: units have none.
+	uses Extractor
+	// covered remembers what covers answered, which only the
+	// configuration decides.
+	covered *table[bool]
 }
 
 // Index is the lib's index across generations. It hands out the current
@@ -144,7 +149,7 @@ type Index struct {
 // Open creates the index of a project: over its lib on disk, and, when
 // the project has a profile, over the profile's stubs for whatever is not
 // on disk.
-func Open(prj *config.Project, fsys vfs.FS) *Index {
+func Open(prj *config.Project, fsys vfs.FS, opts ...Option) *Index {
 	lay := Layout{Tree: prj.Tree()}
 	if p := prj.Profile; p != nil {
 		stubs := profile.NewFS(fsys, p)
@@ -152,11 +157,11 @@ func Open(prj *config.Project, fsys vfs.FS) *Index {
 		lay.Stubs, lay.Covered, lay.Holes = stubs.Location(), p.Covered, p.Holes
 		lay.StubFiles = slices.Sorted(maps.Keys(p.Files))
 	}
-	return New(prj.Config, lay, fsys)
+	return New(prj.Config, lay, fsys, opts...)
 }
 
 // New creates an index over a lib.
-func New(cfg *config.Config, lay Layout, fsys vfs.FS) *Index {
+func New(cfg *config.Config, lay Layout, fsys vfs.FS, opts ...Option) *Index {
 	l := &lib{
 		fs: fsys, cfg: cfg, lay: lay,
 		partial:  lay.Root == "" && (lay.CheckoutDir != "" || lay.Stubs != ""),
@@ -166,6 +171,10 @@ func New(cfg *config.Config, lay Layout, fsys vfs.FS) *Index {
 		holes:    fileset.NewMatcher(lay.Holes),
 		defined:  cfg.Predefined(),
 		override: cfg.MacroClasses(),
+		covered:  &table[bool]{},
+	}
+	for _, o := range opts {
+		o(l)
 	}
 
 	if lay.Root != "" {

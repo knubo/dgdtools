@@ -146,8 +146,23 @@ func (l *lib) scanRoot() string {
 
 // inScope reports whether Walk(scanRoot) visits p.
 func (l *lib) inScope(p string) bool {
+	return filepath.Ext(p) == ".c" && l.covers(p)
+}
+
+// covers reports whether p lies under the scan's root, in no directory
+// the configuration excludes, and is not excluded itself or a stub. The
+// answer depends on the configuration alone, and is remembered.
+func (l *lib) covers(p string) bool {
+	if in, ok := l.covered.get(p); ok {
+		return in
+	}
+	in := l.decideCovers(p)
+	return l.covered.getOrPut(p, func() bool { return in })
+}
+
+func (l *lib) decideCovers(p string) bool {
 	root := l.scanRoot()
-	if root == "" || l.isStub(p) || filepath.Ext(p) != ".c" {
+	if root == "" || l.isStub(p) {
 		return false
 	}
 	below, ok := fileset.Under(root, p)
