@@ -4,7 +4,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { test } from 'node:test';
 
-import { expandHome, explain, findOnPath, resolveServer, serverArgs } from './server.ts';
+import { bundledPath, expandHome, explain, findOnPath, makeRunnable, resolveServer, serverArgs } from './server.ts';
 import type { Host, Missing } from './server.ts';
 
 const posix = process.platform !== 'win32';
@@ -73,8 +73,8 @@ test('findOnPath on Windows looks for NAME.exe', () => {
   assert.equal(findOnPath('lint', win({ PATH: dirs })), 'C:\\tools\\lint.exe');
   assert.equal(findOnPath('dgdtools', win({ PATH: 'C:\\go\\bin' })), undefined);
   assert.equal(findOnPath('dgdtools', win({})), undefined);
-  assert.deepEqual(resolveServer('', win({ Path: dirs })), { path: 'C:\\tools\\dgdtools.exe' });
-  assert.deepEqual(resolveServer('C:\\tools\\lint.exe', win({})), { path: 'C:\\tools\\lint.exe' });
+  assert.deepEqual(resolveServer('', win({ Path: dirs })), { path: 'C:\\tools\\dgdtools.exe', source: 'PATH' });
+  assert.deepEqual(resolveServer('C:\\tools\\lint.exe', win({})), { path: 'C:\\tools\\lint.exe', source: 'setting' });
   assert.deepEqual(resolveServer('tools\\lint.exe', win({})), { problem: 'not-absolute', path: 'tools\\lint.exe' });
   assert.deepEqual(resolveServer('~\\bin\\dgdtools.exe', win({})), { problem: 'not-a-program', path: 'C:\\Users\\me\\bin\\dgdtools.exe' });
 });
@@ -82,12 +82,12 @@ test('findOnPath on Windows looks for NAME.exe', () => {
 test('resolveServer', { skip: !posix }, (t) => {
   const root = tree(t, ['bin/+dgdtools', 'bin/+dgdtools-dev', 'home/go/bin/+dgdtools', 'home/notes.txt']);
   const h: Host = { platform: process.platform, env: { PATH: path.join(root, 'bin') }, home: path.join(root, 'home') };
-  const onPath = { path: path.join(root, 'bin', 'dgdtools') };
+  const onPath = { path: path.join(root, 'bin', 'dgdtools'), source: 'PATH' };
   assert.deepEqual(resolveServer('', h), onPath, 'empty: dgdtools on PATH');
   assert.deepEqual(resolveServer('  ', h), onPath);
-  assert.deepEqual(resolveServer('dgdtools-dev', h), { path: path.join(root, 'bin', 'dgdtools-dev') }, 'a bare name is a command');
-  assert.deepEqual(resolveServer('~/go/bin/dgdtools', h), { path: path.join(root, 'home', 'go', 'bin', 'dgdtools') });
-  assert.deepEqual(resolveServer(path.join(root, 'bin', 'dgdtools'), h), onPath);
+  assert.deepEqual(resolveServer('dgdtools-dev', h), { path: path.join(root, 'bin', 'dgdtools-dev'), source: 'setting' }, 'a bare name is a command');
+  assert.deepEqual(resolveServer('~/go/bin/dgdtools', h), { path: path.join(root, 'home', 'go', 'bin', 'dgdtools'), source: 'setting' });
+  assert.deepEqual(resolveServer(path.join(root, 'bin', 'dgdtools'), h), { ...onPath, source: 'setting' });
 
   assert.deepEqual(resolveServer('', { ...h, env: {} }), { problem: 'not-on-path', command: 'dgdtools' });
   assert.deepEqual(resolveServer('lpc', h), { problem: 'not-on-path', command: 'lpc' });
@@ -96,6 +96,65 @@ test('resolveServer', { skip: !posix }, (t) => {
   assert.deepEqual(resolveServer('/nowhere/dgdtools', h), { problem: 'not-a-program', path: '/nowhere/dgdtools' });
   assert.deepEqual(resolveServer('bin/dgdtools', h), { problem: 'not-absolute', path: 'bin/dgdtools' });
   assert.deepEqual(resolveServer('./dgdtools', h), { problem: 'not-absolute', path: './dgdtools' });
+});
+
+test('resolveServer: the setting, then the package\'s own program, then PATH', { skip: !posix }, (t) => {
+  const root = tree(t, ['ext/bin/+dgdtools', 'bare/package.json', 'path/+dgdtools', 'path/+dgdtools-dev', 'opt/+dgdtools']);
+  const at = (...names: string[]) => path.join(root, ...names);
+  const h: Host = { platform: process.platform, env: { PATH: at('path') }, home: at('home'), extensionPath: at('ext') };
+  const own = { path: at('ext', 'bin', 'dgdtools'), source: 'bundled' };
+  assert.equal(bundledPath(at('ext'), process.platform), own.path);
+
+  // 1. The setting, whatever else there is.
+  assert.deepEqual(resolveServer(at('opt', 'dgdtools'), h), { path: at('opt', 'dgdtools'), source: 'setting' });
+  assert.deepEqual(resolveServer('dgdtools-dev', h), { path: at('path', 'dgdtools-dev'), source: 'setting' });
+  assert.deepEqual(resolveServer('dgdtools', h), { path: at('path', 'dgdtools'), source: 'setting' }, 'the name says: what the shell runs');
+  // A setting that names nothing is the mistake to report: no other
+  // program is run in its place.
+  assert.deepEqual(resolveServer(at('opt', 'none'), h), { problem: 'not-a-program', path: at('opt', 'none') });
+  assert.deepEqual(resolveServer('none', h), { problem: 'not-on-path', command: 'none' });
+
+  // 2. The program of the package, before the one on PATH.
+  assert.deepEqual(resolveServer('', h), own);
+  assert.deepEqual(resolveServer('', { ...h, env: {} }), own, 'and with no PATH');
+
+  // 3. PATH, where the package has no program: the package for every
+  // other platform, a checkout.
+  const onPath = { path: at('path', 'dgdtools'), source: 'PATH' };
+  assert.deepEqual(resolveServer('', { ...h, extensionPath: at('bare') }), onPath);
+  assert.deepEqual(resolveServer('', { ...h, extensionPath: undefined }), onPath);
+  fs.rmSync(own.path);
+  fs.mkdirSync(own.path);
+  assert.deepEqual(resolveServer('', h), onPath, 'a directory of that name is no program');
+
+  // 4. Neither: the message.
+  assert.deepEqual(resolveServer('', { ...h, extensionPath: at('bare'), env: {} }), { problem: 'not-on-path', command: 'dgdtools' });
+});
+
+test('the package\'s program on Windows is bin\\dgdtools.exe', () => {
+  const have = new Set(['c:\\ext\\bin\\dgdtools.exe', 'c:\\tools\\dgdtools.exe']);
+  const win = (extensionPath: string): Host => ({
+    platform: 'win32', env: { Path: 'C:\\tools' }, home: 'C:\\Users\\me', extensionPath,
+    isExecutable: (p) => have.has(p.toLowerCase()), isFile: (p) => have.has(p.toLowerCase()),
+  });
+  assert.equal(bundledPath('C:\\ext', 'win32'), 'C:\\ext\\bin\\dgdtools.exe');
+  assert.equal(bundledPath('/ext', 'linux'), '/ext/bin/dgdtools');
+  assert.deepEqual(resolveServer('', win('C:\\ext')), { path: 'C:\\ext\\bin\\dgdtools.exe', source: 'bundled' });
+  assert.deepEqual(resolveServer('', win('C:\\other')), { path: 'C:\\tools\\dgdtools.exe', source: 'PATH' });
+  assert.deepEqual(resolveServer('dgdtools', win('C:\\ext')), { path: 'C:\\tools\\dgdtools.exe', source: 'setting' });
+});
+
+test('the package\'s program is made a file that can be run', { skip: !posix }, (t) => {
+  // A zip can lose the bit; the program is found without it.
+  const root = tree(t, ['ext/bin/dgdtools']);
+  const h: Host = { platform: process.platform, env: {}, home: root, extensionPath: path.join(root, 'ext') };
+  const found = resolveServer('', h);
+  assert.deepEqual(found, { path: path.join(root, 'ext', 'bin', 'dgdtools'), source: 'bundled' });
+  const runs = (p: string) => (fs.statSync(p).mode & 0o111) !== 0;
+  assert.equal(runs(path.join(root, 'ext', 'bin', 'dgdtools')), false);
+  makeRunnable(path.join(root, 'ext', 'bin', 'dgdtools'));
+  assert.equal(runs(path.join(root, 'ext', 'bin', 'dgdtools')), true);
+  makeRunnable(path.join(root, 'ext', 'bin', 'none')); // nothing to do, and nothing thrown
 });
 
 test('explain says what was looked for and what to do', () => {

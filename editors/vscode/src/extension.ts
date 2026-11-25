@@ -10,7 +10,7 @@ import { LanguageClient, TransportKind } from 'vscode-languageclient/node';
 import type { LanguageClientOptions, ServerOptions } from 'vscode-languageclient/node';
 
 import * as associations from './associations.ts';
-import { explain, installURL, resolveServer, serverArgs } from './server.ts';
+import { explain, installURL, makeRunnable, resolveServer, serverArgs } from './server.ts';
 
 // The scheme of the documents that are a profile's stubs (profile.Scheme
 // on the server's side). Their text is the server's to give: it says so
@@ -20,12 +20,16 @@ import { explain, installURL, resolveServer, serverArgs } from './server.ts';
 const stubScheme = 'dgdtools-profile';
 
 let output: vscode.LogOutputChannel;
+// The folder the extension is installed in: a package made for this
+// platform has dgdtools in it.
+let extensionPath: string;
 let client: LanguageClient | undefined;
 // Starts and stops happen one after the other, in the order asked for.
 let turn: Promise<void> = Promise.resolve();
 
 export function activate(context: vscode.ExtensionContext): void {
   output = vscode.window.createOutputChannel('dgdtools', { log: true });
+  extensionPath = context.extensionPath;
   context.subscriptions.push(
     output,
     vscode.commands.registerCommand('dgdtools.restartServer', restart),
@@ -63,7 +67,9 @@ function restart(): Promise<void> {
 async function start(): Promise<void> {
   const config = vscode.workspace.getConfiguration('dgdtools');
   const home = os.homedir();
-  const server = resolveServer(config.get<string>('path', ''), { platform: process.platform, env: process.env, home });
+  const server = resolveServer(config.get<string>('path', ''), {
+    platform: process.platform, env: process.env, home, extensionPath,
+  });
   if ('problem' in server) {
     output.error(explain(server));
     void reportMissing(explain(server));
@@ -78,10 +84,15 @@ async function start(): Promise<void> {
     synchronize: { configurationSection: 'dgdtools' },
     outputChannel: output,
   };
-  output.info(`starting ${server.path} ${args.join(' ')}`);
+  if (server.source === 'bundled') {
+    makeRunnable(server.path);
+  }
+  const whence = { setting: 'dgdtools.path', bundled: 'the one this extension came with', PATH: 'found on PATH' };
+  output.info(`starting ${server.path} ${args.join(' ')} (${whence[server.source]})`);
   client = new LanguageClient('dgdtools', 'dgdtools', serverOptions, clientOptions);
   try {
     await client.start();
+    output.info(`the server is dgdtools ${client.initializeResult?.serverInfo?.version ?? '(it does not say which version)'}`);
   } catch (err) {
     // The client has told the user already.
     output.error(`the server did not start: ${err}`);

@@ -104,7 +104,7 @@
           "type": "string",
           "default": "",
           "scope": "machine-overridable",
-          "markdownDescription": "The `dgdtools` executable to run as the language server: an absolute path (`~` is your home directory), or a command name to look up on `PATH`. Empty: `dgdtools` on `PATH`."
+          "markdownDescription": "The `dgdtools` executable to run as the language server: an absolute path (`~` is your home directory), or a command name to look up on `PATH`. Empty: the `dgdtools` this extension came with (the package for your platform has one), else `dgdtools` on `PATH`."
         },
         "dgdtools.profile": {
           "type": "string",
