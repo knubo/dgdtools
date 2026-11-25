@@ -323,7 +323,7 @@ no file (`untitled:`) is kept in step and nothing is said about it.
 - Documents are linted with `Options.NoScan`. The first lint that
   comes back with `NeedsScan` (a self-call the module's own chain does
   not provide) makes the server run `Linter.Scan` on a background
-  goroutine with `$/progress` ("indexing lib", a few seconds on
+  goroutine with `$/progress` ("indexing the mudlib", a few seconds on
   VikingMUD); until it completes those lookups are unknown, and the
   documents that needed it are linted again when it finishes. The scan
   survives edits: after the first one, `Scan` reads only the files that
@@ -346,7 +346,9 @@ document linted with `NoScan` right after a change to another file says
 less than it said before (the scan is not complete for a moment), and
 publishing that makes findings blink. So only the first scan of a lib is
 made beside the lints, with `$/progress` when it takes longer than
-300 ms; once a document has been linted with the scan complete, its
+300 ms, and its end logged to the client (`window/logMessage`) and to
+the `--log` file: `mudlib scanned: 5205 files in 2.1 s (/path/to/lib)`,
+or a warning when it does not complete. Once a document has been linted with the scan complete, its
 lints are made without `NoScan` and complete it themselves, which is a
 file or two after a change.
 

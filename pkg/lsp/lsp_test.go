@@ -12,6 +12,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -199,17 +200,32 @@ func TestDiagnosticsAreTheLinters(t *testing.T) {
 }
 
 // The scan of the whole lib, which the first question about who inherits
-// a file starts, is shown to a client that shows progress.
+// a file starts, is shown to a client that shows progress, and its end is
+// logged.
 func TestScanProgress(t *testing.T) {
 	defer func(d time.Duration) { *lsp.ProgressDelay = d }(*lsp.ProgressDelay)
 	*lsp.ProgressDelay = 0
 	dir := tree(t, lib())
 	path := filepath.Join(dir, "std/mixin.c")
+	files := 0
+	for rel := range lib() {
+		if strings.HasSuffix(rel, ".c") {
+			files++
+		}
+	}
 	for _, plain := range []bool{false, true} {
 		c := start(t)
 		c.Initialize(lsptest.Capabilities{Plain: plain}, dir)
 		c.Open(path, lib()["std/mixin.c"])
 		assert.Contains(t, fmt.Sprint(published(t, c, path)), "'later' is not defined", "what only the scan finds")
+		c.Idle()
+		var logged strings.Builder
+		for _, m := range c.Received("window/logMessage") {
+			var p lsp.LogMessageParams
+			require.NoError(t, json.Unmarshal(m.Params, &p))
+			fmt.Fprintln(&logged, p.Type, p.Message)
+		}
+		assert.Regexp(t, fmt.Sprintf(`(?m)^3 mudlib scanned: %d files in \d+\.\d s \(%s\)$`, files, regexp.QuoteMeta(dir)), logged.String())
 		var shown []string
 		for _, m := range c.Received("$/progress") {
 			var p struct {
@@ -223,7 +239,7 @@ func TestScanProgress(t *testing.T) {
 			assert.Empty(t, shown)
 			assert.Empty(t, c.Received("window/workDoneProgress/create"))
 		} else {
-			assert.Equal(t, []string{"begin dgdtools: indexing the lib", "end "}, shown)
+			assert.Equal(t, []string{"begin dgdtools: indexing the mudlib", "end "}, shown)
 			assert.Len(t, c.Received("window/workDoneProgress/create"), 1)
 		}
 		require.NoError(t, c.Shutdown())

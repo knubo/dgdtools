@@ -217,11 +217,12 @@ func (s *server) scan(sess *session.Session, l *lint.Linter, doc *document) {
 			progress.Add(1)
 			go func() {
 				defer progress.Done()
-				s.progress(done, fmt.Sprintf("dgdtools-scan-%p", sc), "dgdtools: indexing the lib")
+				s.progress(done, fmt.Sprintf("dgdtools-scan-%p", sc), "dgdtools: indexing the mudlib")
 			}()
 		}
 		// A scan that a change overtakes stops, having kept what it
 		// read; the next one goes on from there.
+		start := time.Now()
 		ok := false
 		for {
 			gen := l.Generation()
@@ -229,6 +230,7 @@ func (s *server) scan(sess *session.Session, l *lint.Linter, doc *document) {
 				break
 			}
 		}
+		took := time.Since(start).Seconds()
 		close(done)
 		progress.Wait()
 
@@ -236,6 +238,21 @@ func (s *server) scan(sess *session.Session, l *lint.Linter, doc *document) {
 		defer s.mu.Unlock()
 		if s.scans[l] == sc {
 			delete(s.scans, l)
+		}
+		root := l.Project().Root
+		if l.Project().Partial {
+			root = l.Project().Base
+		}
+		switch {
+		case ok && !s.said["scanned "+root]:
+			// Once: the scans after a change read only what it touched.
+			s.said["scanned "+root] = true
+			n := l.Index().Snapshot().ScannedFiles()
+			s.logMessage(MessageInfo, fmt.Sprintf("mudlib scanned: %d files in %.1f s (%s)", n, took, root))
+		case !ok && s.ctx.Err() != nil:
+			s.log.Info("mudlib scan stopped", "root", root, "seconds", took)
+		case !ok:
+			s.logMessage(MessageWarning, fmt.Sprintf("mudlib scan did not complete after %.1f s (%s)", took, root))
 		}
 		if !ok || s.session != sess {
 			return

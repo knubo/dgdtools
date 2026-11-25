@@ -654,6 +654,21 @@ func (s *Snapshot) Scanned() bool {
 	return s.ix.cur == s && s.ix.walked && len(s.ix.todo) == 0
 }
 
+// ScannedFiles returns the number of files the whole-lib scan covers when
+// it is complete for this generation, and 0 when it is not.
+func (s *Snapshot) ScannedFiles() int {
+	if !s.Scanned() {
+		return 0
+	}
+	n := 0
+	for p := range s.units.complete() {
+		if s.inScope(p) {
+			n++
+		}
+	}
+	return n
+}
+
 // Scan indexes every .c file of the lib that the configuration does not
 // exclude, in parallel. Only questions about who inherits a file need it.
 // What an earlier scan indexed and no change has touched is not read
