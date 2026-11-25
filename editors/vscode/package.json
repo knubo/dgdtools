@@ -1,7 +1,7 @@
 {
   "name": "dgdtools",
   "displayName": "DGD LPC (dgdtools)",
-  "description": "DGD-dialect LPC: syntax highlighting, brackets and comments for the language `dgdlpc`.",
+  "description": "DGD-dialect LPC: syntax highlighting, and the dgdtools language server (diagnostics as you type, fixes, formatting) for the language `dgdlpc`.",
   "version": "0.0.1",
   "publisher": "dgdtools",
   "private": true,
@@ -11,10 +11,12 @@
     "directory": "editors/vscode"
   },
   "engines": {
-    "vscode": "^1.75.0"
+    "vscode": "^1.91.0"
   },
   "categories": [
-    "Programming Languages"
+    "Programming Languages",
+    "Linters",
+    "Formatters"
   ],
   "keywords": [
     "lpc",
@@ -22,10 +24,25 @@
     "mud",
     "lpmud"
   ],
+  "main": "./dist/extension.js",
   "activationEvents": [
     "workspaceContains:**/dgdtools.yml",
     "workspaceContains:**/.dgdtools.yml"
   ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": "limited",
+      "description": "In a workspace that is not trusted, the workspace's own values of dgdtools.path and dgdtools.logFile are ignored: the server that runs is the one you chose.",
+      "restrictedConfigurations": [
+        "dgdtools.path",
+        "dgdtools.logFile"
+      ]
+    },
+    "virtualWorkspaces": {
+      "supported": "limited",
+      "description": "The language server reads files on disk. In a virtual workspace there is highlighting only."
+    }
+  },
   "contributes": {
     "languages": [
       {
@@ -48,6 +65,95 @@
       "[dgdlpc]": {
         "files.autoGuessEncoding": true
       }
+    },
+    "commands": [
+      {
+        "command": "dgdtools.restartServer",
+        "title": "Restart Server",
+        "category": "dgdtools"
+      },
+      {
+        "command": "dgdtools.associateFolder",
+        "title": "Treat This Folder as an LPC Lib",
+        "category": "dgdtools"
+      },
+      {
+        "command": "dgdtools.dissociateFolder",
+        "title": "Stop Treating This Folder as an LPC Lib",
+        "category": "dgdtools"
+      }
+    ],
+    "menus": {
+      "explorer/context": [
+        {
+          "command": "dgdtools.associateFolder",
+          "when": "explorerResourceIsFolder && dgdtools.active",
+          "group": "2_workspace@90"
+        },
+        {
+          "command": "dgdtools.dissociateFolder",
+          "when": "explorerResourceIsFolder && dgdtools.active",
+          "group": "2_workspace@91"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "dgdtools",
+      "properties": {
+        "dgdtools.path": {
+          "type": "string",
+          "default": "",
+          "scope": "machine-overridable",
+          "markdownDescription": "The `dgdtools` executable to run as the language server: an absolute path (`~` is your home directory), or a command name to look up on `PATH`. Empty: `dgdtools` on `PATH`."
+        },
+        "dgdtools.profile": {
+          "type": "string",
+          "default": "",
+          "scope": "resource",
+          "markdownDescription": "The mudlib profile to work against in a folder that has no `dgdtools.yml`: a name or a file, as `profile:` in a config file. A config file always wins over this."
+        },
+        "dgdtools.libPath": {
+          "type": "string",
+          "default": "",
+          "scope": "resource",
+          "markdownDescription": "Where a folder that has no `dgdtools.yml` sits in the lib (for example `/players/me`), as `lib_path:` in a config file. A config file always wins over this."
+        },
+        "dgdtools.logFile": {
+          "type": "string",
+          "default": "",
+          "scope": "machine-overridable",
+          "markdownDescription": "A file the server appends its debug log to (`dgdtools lsp --log FILE`): an absolute path (`~` is your home directory). Empty: no log."
+        },
+        "dgdtools.trace.server": {
+          "type": "string",
+          "enum": [
+            "messages",
+            "verbose"
+          ],
+          "enumDescriptions": [
+            "The name of each message, and how long a request took.",
+            "The content of each message too."
+          ],
+          "default": "messages",
+          "scope": "window",
+          "markdownDescription": "How much of what the editor and the server say to each other is traced. The trace is made while the log level of the *dgdtools* channel of the Output panel is *Trace* (the gear of the panel, or *Developer: Set Log Level…*), and is shown there."
+        }
+      }
     }
+  },
+  "scripts": {
+    "build": "esbuild src/extension.ts --bundle --platform=node --format=cjs --target=node20 --external:vscode --sourcemap --outfile=dist/extension.js",
+    "check": "tsc -p .",
+    "test": "node --test \"src/**/*.test.ts\"",
+    "vscode:prepublish": "npm run check && npm run build -- --minify"
+  },
+  "dependencies": {
+    "vscode-languageclient": "11.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.0",
+    "@types/vscode": "1.91.0",
+    "esbuild": "0.28.2",
+    "typescript": "7.0.2"
   }
 }

@@ -577,9 +577,9 @@ format` for a file or a selection. It reads the same `dgdtools.yml` as
 the commands, so the editor and the command line cannot disagree.
 [`editors/`](editors/README.md) has what each editor needs: syntax
 highlighting for VS Code and for Vim and Neovim, under the language name
-`dgdlpc`, and how to start the server from Neovim and others. A `.c`
-file is LPC there only inside a lib: nothing claims the extension on a
-machine that has C sources too.
+`dgdlpc`, a VS Code extension that starts the server, and how to start
+it from Neovim and others. A `.c` file is LPC there only inside a lib:
+nothing claims the extension on a machine that has C sources too.
 
 ## License note
 

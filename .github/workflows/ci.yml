@@ -40,3 +40,23 @@ jobs:
       - run: go install honnef.co/go/tools/cmd/staticcheck@2026.2.2
       - run: staticcheck ./...
       - run: staticcheck -tags corpus ./...
+
+  # The VS Code client is TypeScript: its types are checked, its tests
+  # run and the extension is built, with the tools its lockfile pins.
+  # (go test ./editors compares its manifest with its code.)
+  vscode:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: editors/vscode
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: editors/vscode/package-lock.json
+      - run: npm ci
+      - run: npm run check
+      - run: npm test
+      - run: npm run build

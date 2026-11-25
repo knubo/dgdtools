@@ -1,0 +1,10 @@
+# What a packaged extension is: the manifest, the grammar, the language
+# configuration and dist/extension.js, which the build writes with the
+# client library inside it. Everything else stays out.
+src/**
+node_modules/**
+dist/**/*.map
+tsconfig.json
+package-lock.json
+.gitignore
+**/*.vsix

@@ -1,11 +1,13 @@
 # `dgdtools lsp`: implementation plan
 
-Status: a plan, of which the first two steps of section 12 are built:
-the editor-side grammars of section 10.1, under `editors/`, and the
-server itself for steps 1 to 3 of section 8 (live diagnostics, code
-actions, formatting), as `dgdtools lsp` and `pkg/lsp`; "What is built"
-below says exactly what, and where it differs from the plan. The rest of
-section 8 is still a plan, and the command reserves the name `rename`.
+Status: a plan, of which the first three steps of section 12 are built:
+the editor-side grammars of section 10.1, under `editors/`; the server
+itself for steps 1 to 3 of section 8 (live diagnostics, code actions,
+formatting), as `dgdtools lsp` and `pkg/lsp`; and the VS Code client of
+section 11, in `editors/vscode`, which has been built and checked but
+not yet run in a VS Code. "What is built" below says exactly what, and
+where it differs from the plan. The rest of section 8 is still a plan,
+and the command reserves the name `rename`.
 The server builds on the library described in
 [architecture.md](architecture.md) (sections 6 and 10),
 [config.md](config.md) and [formatter.md](formatter.md), and on one type
@@ -879,12 +881,10 @@ servers under one id is worse than a new word.
   `dgdtools-profile:` documents. Binary acquisition: use `dgdtools.path` or
   PATH first; otherwise download the release asset for the platform
   (GoReleaser already builds them) with a checksum, after asking.
-  There so far: the manifest, which contributes the language (with no
-  file names), the grammar, the language configuration and the encoding
-  default of section 6, and names the activation events. It has no code,
-  so until the client exists a lib says which files are LPC itself, with
-  `files.associations` in its workspace settings; that setting is what
-  the command will write.
+  Built, but for the last sentence and what waits for the server
+  (`semanticTokenScopes`, `dgdtools.showBaselined`): 11.1 says what is
+  there, and 11.2 how a release is to carry the binary instead of
+  downloading it.
 - **Vim and Neovim:** the `editors/vim` runtime files from 10.1 (install
   as a plugin directory) set the filetype. For Neovim 0.11 and later,
   `editors/nvim/lsp/dgdtools.lua` is the `vim.lsp.config` entry (`cmd =
@@ -905,6 +905,195 @@ servers under one id is worse than a new word.
 - Emacs (`eglot`), Sublime (`LSP`), Kate: a line of configuration each,
   documented, not maintained.
 
+### 11.1 The VS Code client, as built
+
+`editors/vscode` is the whole extension: the manifest, the grammar and
+the language configuration of 10.1, and `src/`, some 230 lines of
+TypeScript over `vscode-languageclient` and 200 that know nothing of VS
+Code. `dist/extension.js` is built from it and is not in the
+repository.
+
+- **TypeScript, bundled into one file** (by esbuild). That is what
+  rust-analyzer, vscode-go, Biome and Ruff do, and for the same two
+  reasons: the VS Code API and the client library are large and typed,
+  so the compiler is the test that an extension with no VS Code at hand
+  can have of its calls; and one bundled file is what a packaged
+  extension should be (the client library and what it needs are some
+  180 files otherwise). The price is a build step, `npm ci && npm run
+  build`, which plain JavaScript would not have spared: the client
+  library has to be fetched either way. One dependency when installed
+  (`vscode-languageclient`), four to build (`typescript`, `esbuild`, the
+  types of VS Code and of Node), all pinned by `package-lock.json`;
+  nothing is installed outside the folder. No linter, no formatter, no
+  test framework: `tsc` with `strict`, and Node's own test runner on the
+  TypeScript as it is.
+- **`vscode-languageclient` 11**, the current release, which speaks LSP
+  3.18 and wants VS Code 1.91 (June 2024) or later; the manifest says
+  so. The server is the executable itself with `lsp`, and `--log FILE`
+  from `dgdtools.logFile`; the library adds `--stdio`. The document
+  selector is the language `dgdlpc`, whatever the scheme: a document
+  that is no file (a stub, an untitled one) is synchronized and the
+  server says nothing of it, which is what steps 4 and later will build
+  on for the stubs.
+- **Activation** is as planned (`workspaceContains` for the two config
+  file names) and what VS Code adds by itself: a document of the
+  language, one of the commands. The server is started then, not at the
+  first document: an idle server is a process that has read nothing.
+- **Settings.** `dgdtools.path` (empty: `dgdtools` on `PATH`; a bare
+  name: that command on `PATH`; else a file, absolute once `~` is the
+  home directory), `dgdtools.profile` and `dgdtools.libPath` (resource
+  scope: the server asks for the section `dgdtools` of each folder, and
+  the client tells it when the section changed, with
+  `synchronize.configurationSection`), `dgdtools.logFile`,
+  `dgdtools.trace.server`. A change of the path or the log file starts
+  the server again. Both are `machine-overridable` and listed as
+  `restrictedConfigurations`: in a workspace that is not trusted, a
+  workspace cannot say which program is run or which file is written.
+  That is vscode-go's arrangement; the extension is otherwise allowed
+  there, since the server reads and never runs what a workspace has.
+- **`dgdtools.trace.server` is not the three-valued switch it used to
+  be** in this library. In the version used a trace is made while the
+  log level of the client's output channel is *Trace*, which is VS
+  Code's own control, and the setting chooses between `messages` and
+  `verbose`; `off` would be read as `messages`. The manifest offers the
+  two values and says where the switch is. Either way the library sends
+  `$/setTrace`, and the server's `$/logTrace` lines appear in the
+  channel.
+- **No executable: one message**, saying what was looked for (the
+  command on `PATH`, or the file the setting names) and what to do, with
+  two buttons: the setting, and the installation section of the README.
+  Nothing is looked for in other places (`~/go/bin`): what a shell
+  would run is what the editor runs.
+- **Commands:** `dgdtools.restartServer`; `dgdtools.associateFolder`
+  ("Treat This Folder as an LPC Lib") and its inverse,
+  `dgdtools.dissociateFolder`. The two are in the command palette, for
+  the workspace's folder (asked for when there are several), and in the
+  explorer's menu of a folder once the extension is active: a menu of
+  every folder of every workspace is no place for them otherwise.
+- **What "an LPC lib" is written as.** `files.associations` in the
+  workspace's settings (`ConfigurationTarget.Workspace`), never the
+  user's. The setting has window scope in VS Code, not resource scope:
+  a folder's own settings file is not read for it in a workspace of
+  several folders, and one pattern list serves the window. So the
+  patterns say which folder they mean. For the one folder of a
+  workspace they are `*.c` and `*.h`, in its `.vscode/settings.json`,
+  as the README always said. For a folder below it, or a folder of a
+  multi-root workspace, they are `**/DIR/**/*.c` and `**/DIR/**/*.h`,
+  with the folder's path from the workspace folder (led by the
+  workspace folder's own name when there are several): VS Code matches
+  a pattern that has a `/` against the whole path of a file. Relative,
+  so that committed settings mean the same in another checkout; the
+  price is that a directory of the same name and place elsewhere in the
+  window matches too. The inverse removes exactly those keys, and only
+  where their value is `dgdlpc`.
+- **The offer.** On activation the extension looks for config files in
+  the workspace, and for the outermost directory of each nest (a
+  project's files are everything below its config; a config further
+  down is a scope or a project inside it) whose files are not
+  associated yet it asks once whether they should be: *Yes* runs the
+  command, *Never* is remembered for the workspace, closing the message
+  asks again next time. Without it, a lib opened for the first time
+  shows C and a server with nothing to do.
+- **Stubs** (`dgdtools-profile://NAME/std/room.c`). The plan had a
+  content provider in the extension. What is built is the request LSP
+  3.18 has for exactly this, `workspace/textDocumentContent`: the server
+  names the scheme in its capabilities, and the client library registers
+  the `TextDocumentContentProvider` and asks the server for the text, so
+  the extension has no code for it and any other client of 3.18 has the
+  same. The server (`content.go`) answers from the profile of that name
+  which a project in use has (`Project.Profile.Files`), a project of an
+  open document before one of a workspace folder; the name is compared
+  again without regard to case when nothing matches exactly, since VS
+  Code writes the host of a URI in lower case. A stub's URI is escaped
+  where its location was not one (`uriOf`). Such a document is
+  read-only in VS Code by its kind. The extension adds one thing: a
+  stub is given the language `dgdlpc` when the workspace's associations
+  do not (they are about the workspace's folders). Not built:
+  `workspace/textDocumentContent/refresh` when a profile changes; a stub
+  that is shown stays as it was until it is opened again.
+- **Checked without VS Code**, which is not on the machine this was
+  written on. `npm run check` (`tsc`: every call of the VS Code API and
+  of the client library against their types), `npm test` (Node's test
+  runner over `server.ts` and `associations.ts`: the lookup on `PATH`
+  on both kinds of system, what each value of `dgdtools.path` comes to,
+  the messages, the arguments, the patterns for each kind of folder,
+  adding and removing them), `npm run build`; all three in CI. `go test
+  ./editors` (`TestVSCodeClient`) holds the manifest to the code:
+  commands contributed and registered, settings contributed and read,
+  the scope and the trust of each, the scheme of a stub as
+  `profile.Scheme` has it. `TestStubContent` in `pkg/lsp` is the
+  request. **Not checked:** the client in a running VS Code. Nothing
+  above replaces opening a lib in it once; the integration test of
+  section 13 is how that would be kept.
+
+### 11.2 How a release carries the binary (design; not built)
+
+Today the extension has no binary and downloads none: `dgdtools.path`,
+else `PATH`, else the message. That is right for whoever has a checkout,
+and wrong for whoever installs from a marketplace and has never heard of
+`go install`.
+
+How the extensions this one is modelled on do it:
+
+| | |
+|---|---|
+| rust-analyzer | a package for each platform (`vsce package --target`), the server inside it; a setting to use another |
+| Ruff | the same: the binary bundled, a package for each platform; settings to prefer the environment's own |
+| Biome | the project's own copy first (a JavaScript project pins its tools), then `PATH` |
+| vscode-go | `go install` of gopls, which needs the Go toolchain: every one of its users has it |
+
+A wizard has no toolchain and no project that pins tools, so the first
+two are the model. **Proposal: platform-specific packages with the
+binary inside.**
+
+- **The packages.** One `.vsix` for each of the six binaries GoReleaser
+  already builds (`darwin-arm64`, `darwin-x64`, `linux-arm64`,
+  `linux-x64`, `win32-arm64`, `win32-x64` are VS Code's names for
+  them), with the binary at `bin/dgdtools` (`bin/dgdtools.exe`), some
+  5 MB each; and one package without a target and without a binary,
+  which is what every other platform gets and behaves as today. The
+  Marketplace and Open VSX both serve the package of the user's
+  platform. `bin/` is not in the repository, and `.vscodeignore` lets
+  it into the package.
+- **Which binary runs.** `dgdtools.path` when it is set; else the one in
+  the package; else `PATH`. The package's own before `PATH` because a
+  grammar, a client and a server are one commit here (section 14) and
+  then one release: the client never meets a server older than itself.
+  Whoever wants the editor to run what their shell runs says so with
+  `dgdtools.path: dgdtools`. The client makes the packaged file
+  executable before it starts it, a zip not being a reliable keeper of
+  that bit, and writes the path and `dgdtools version` to its output
+  channel.
+- **The version** of the extension is the version of the tool: tag
+  `v0.4.0` publishes extension `0.4.0`, set in `package.json` by the
+  release job and not by hand.
+- **The release job**, after GoReleaser's in `release.yml`, once for
+  each target: take that target's binary from the release just made,
+  compare it with `checksums.txt`, put it in `editors/vscode/bin/`,
+  `npm ci`, `vsce package --target T --no-dependencies` (the
+  prepublish script checks the types and builds minified), then
+  `vsce publish --packagePath` and `ovsx publish --packagePath` with
+  the owner's two tokens as repository secrets. `@vscode/vsce` and
+  `ovsx` are installed by that job at pinned versions; they are not
+  dependencies of the extension. The darwin binaries need nothing more:
+  the Go linker signs an arm64 binary ad hoc wherever it runs, and a
+  file VS Code unpacks is not quarantined.
+- **Before the first release**, what the Marketplace asks of a listing
+  and the folder does not have: a `README.md` and a `LICENSE` in
+  `editors/vscode`, an icon, the real publisher, and `private` gone.
+
+**Not proposed: downloading.** The plan above had the extension fetch
+the release asset when it finds no binary, with a checksum, after
+asking. It is what a single package for all platforms would force, and
+it costs what the packages avoid: network code in an editor extension
+(proxies, firewalls, GitHub's rate limits, a first run that can fail);
+a checksum that proves little when it comes from where the binary came
+from, so signing to do it properly; a place to keep the binary, to
+update it and to clean it up; and an extension that fetches and runs
+programs, which is what a careful user and a marketplace look at
+hardest. A package for each platform is delivered, verified and updated
+by the marketplace like any other extension, and works with no network.
+
 ## 12. Order of work
 
 1. **Grammars first** (3.5 days, no server needed, useful on day one and
@@ -916,7 +1105,8 @@ servers under one id is worse than a new word.
    `dgdtools lsp` and test with Neovim (no extension needed) (9 days).
    **Done** ("What is built", above).
 3. VS Code extension (client, settings, grammar packaging) against steps
-   1 to 3 (4 days).
+   1 to 3 (4 days). **Written** (11.1), and not yet run in a VS Code;
+   packaging waits for the first release (11.2).
 4. `syntax.PathAt`; steps 4 to 6 (9 days); then semantic tokens 9a (2
    days), which needs only what hover needs.
 5. Scopes and kfun table in the library (also unlock linter rules:
@@ -1028,6 +1218,15 @@ grammars alone can ship in the first.
   (`@vscode/test-electron`) that opens the fixture lib and waits for a
   known diagnostic. The grammars are tested from Go (10.1).
 
+  **As built:** the integration test is not there. `@vscode/test-electron`
+  is a small package that downloads VS Code itself (well over 100 MB,
+  at each run in CI) and needs a display, which there is one more job
+  with `xvfb`;
+  and a test of that kind written where it cannot be run once would be
+  a guess. It is the next thing to add once the client has been seen to
+  work, as the one test that starts the real editor. Until then the
+  client has the checks of 11.1, none of which starts VS Code.
+
 ## 14. Decisions
 
 Each with the alternative it was chosen over.
@@ -1063,7 +1262,7 @@ Each with the alternative it was chosen over.
   the server with the protocol's own request
   (`workspace/textDocumentContent`, LSP 3.18), not with one of ours and
   not by a provider the extension would write: the client library has
-  it, and so will any other client (section 11).
+  it, and so will any other client (11.1).
 - **Editor support lives in this repository**, under `editors/` (10.1),
   so a grammar, a client and the server they talk to are one commit.
 - **The grammars are tested by `go test`**, by running them, not by a
@@ -1084,3 +1283,14 @@ Each with the alternative it was chosen over.
   account**, to both the Visual Studio Marketplace and Open VSX (so
   VSCodium and Cursor users get it too), when the client ships. Until
   then the manifest stays `private` with a placeholder publisher.
+- **The VS Code client is TypeScript bundled into one file**, with one
+  runtime dependency, not plain JavaScript without a build: the types
+  are its first test, and the client library has to be fetched either
+  way (11.1).
+- **Which files are LPC is a workspace setting the user is asked
+  about**, `files.associations` with patterns for that folder; the
+  extension never sets a document's language behind the user's back
+  (but for a profile's stub), and never writes user settings (11.1).
+- **Proposed: a release carries the binary in a package for each
+  platform**, and the extension downloads nothing (11.2). The owner's
+  to decide before the first release.

@@ -8,7 +8,7 @@ knows none of `nil`, `atomic` and `rlimits`.)
 
 | | |
 |---|---|
-| `vscode/` | the VS Code extension: a TextMate grammar and the language configuration (comments, brackets, indentation) |
+| `vscode/` | the VS Code extension: a TextMate grammar, the language configuration (comments, brackets, indentation), and the client that starts the language server |
 | `vim/` | runtime files for Vim and Neovim: filetype detection, syntax, filetype plugin, indent |
 | `nvim/` | for Neovim 0.11 and later: the entry that starts the language server (`lsp/dgdtools.lua`) |
 | `common/` | what the two share: the word list (`dgdlpc.json`) and the sample files the tests run over |
@@ -29,22 +29,43 @@ sources too, they stay C. A file is `dgdlpc` because of where it lies:
 - **Vim, Neovim:** under a directory that has a `dgdtools.yml` or a
   `.dgdtools.yml` (the file's own directory or any above it), or under a
   directory listed in `g:dgdlpc_roots`.
-- **VS Code:** in a workspace whose settings associate the files (below).
+- **VS Code:** in a workspace whose settings associate the files, which
+  the extension writes when asked to (below).
 
 ## VS Code
 
-The extension is not published yet. From a checkout of this repository:
+The extension is the folder `vscode/`: the grammar, and a client that
+starts `dgdtools lsp` ([below](#vs-code-1)). It is not published yet,
+and it is built before it is used, which needs Node.js (its tests need
+22.18 or later) and installs nothing outside the folder:
+
+```
+cd /path/to/dgdtools/editors/vscode
+npm ci           # the client library and the build tools, as package-lock.json pins them
+npm run build    # writes dist/extension.js, the one file VS Code runs
+```
 
 - **To try it:** `code --extensionDevelopmentPath=/path/to/dgdtools/editors/vscode /path/to/your/lib`
-- **To keep it:** copy or link the folder into the extensions directory
-  under the name VS Code expects, and restart VS Code:
+- **To keep it:** link the folder into the extensions directory under
+  the name VS Code expects, and restart VS Code:
 
   ```
   ln -s /path/to/dgdtools/editors/vscode ~/.vscode/extensions/dgdtools.dgdtools-0.0.1
   ```
 
-Then say which files are LPC, in the lib's own `.vscode/settings.json`
-(workspace settings, so that it holds for this lib and nowhere else):
+  A packaged extension is the other way, and the one that is sure to be
+  listed: `npx @vscode/vsce package --no-dependencies` in the folder
+  writes `dgdtools-0.0.1.vsix`, and `code --install-extension
+  dgdtools-0.0.1.vsix` installs it. (Neither was run here: there is no
+  VS Code on the machine this was written on.)
+
+Then say which files are LPC. The command **dgdtools: Treat This Folder
+as an LPC Lib** does (the command palette, or a folder's menu in the
+explorer once the extension is at work), and the extension offers it
+when a folder with a `dgdtools.yml` is opened whose files are not LPC
+yet. What it writes is `files.associations` in the workspace's settings,
+so that it holds for this lib and nowhere else; by hand, in the lib's
+own `.vscode/settings.json`:
 
 ```json
 {
@@ -52,9 +73,12 @@ Then say which files are LPC, in the lib's own `.vscode/settings.json`
 }
 ```
 
-A single file can be switched with *Change Language Mode* → *DGD LPC*.
-(When the extension gets its language client, it will offer to write
-that setting for a folder that has a `dgdtools.yml`.)
+That is the form for the folder that is open. For a folder below it, or
+for one folder of a workspace with several, the patterns name the
+folder, since the setting is the whole window's: `**/lib/**/*.c` and
+`**/lib/**/*.h` for a folder `lib`. **dgdtools: Stop Treating This
+Folder as an LPC Lib** takes out what the first command put in. A single
+file can be switched with *Change Language Mode* → *DGD LPC*.
 
 A lib whose files are Latin-1 should also say so, or saving a file
 opened as UTF-8 damages it:
@@ -266,36 +290,47 @@ standard input and output.
 
 ### VS Code
 
-The extension in `vscode/` has no client yet: it is the next step
-([lsp.md](../docs/design/lsp.md), section 12), and until it is there VS
-Code shows the highlighting and nothing of the server. Whoever wants to
-try the server in VS Code before that needs only what the client will
-be, a dozen lines over `vscode-languageclient`. In `editors/vscode`:
+The extension (built and installed as [above](#vs-code)) starts the
+server when a workspace has a `dgdtools.yml` or a file is `dgdlpc`, and
+needs `dgdtools` itself on the machine: it is not in the extension. It
+runs the `dgdtools` on `PATH`, or the program `dgdtools.path` names, and
+says what to do when there is neither.
 
+| setting | |
+|---|---|
+| `dgdtools.path` | the executable: an absolute path (`~` is the home directory) or a command name on `PATH`. Empty: `dgdtools` on `PATH` |
+| `dgdtools.profile`, `dgdtools.libPath` | the two settings [above](#the-language-server), for a folder with no `dgdtools.yml`; each workspace folder can have its own |
+| `dgdtools.logFile` | a file for the server's debug log (`--log`) |
+| `dgdtools.trace.server` | `messages` or `verbose`: how much is traced while the log level of the *dgdtools* channel of the Output panel is *Trace* |
+
+A change of the first or the third starts the server again, and so does
+**dgdtools: Restart Server**. In a workspace that is not trusted, what
+the workspace itself says of those two is not listened to. What the
+server writes for a person to read (the project a file was found to
+belong to, a text the formatter refuses) is in the *dgdtools* channel of
+the Output panel.
+
+Fixes are in the lightbulb, formatting is *Format Document* and *Format
+Selection*, and both can be had on saving, in the lib's settings:
+
+```json
+{
+  "[dgdlpc]": {
+    "editor.formatOnSave": true,
+    "editor.codeActionsOnSave": { "source.fixAll.dgdtools": "explicit" }
+  }
+}
 ```
-npm install vscode-languageclient
-```
 
-add `"main": "./client.js"` to `package.json`, and as `client.js`:
+A finding that points at a declaration which comes from a profile opens
+the stub, read-only: a document `dgdtools-profile://NAME/std/room.c`,
+whose text the server gives (`workspace/textDocumentContent`).
 
-```js
-const { LanguageClient, TransportKind } = require('vscode-languageclient/node');
-let client;
-exports.activate = () => {
-  client = new LanguageClient('dgdtools', 'dgdtools',
-    { command: 'dgdtools', args: ['lsp'], transport: TransportKind.stdio },
-    { documentSelector: [{ language: 'dgdlpc' }] });
-  return client.start();
-};
-exports.deactivate = () => client && client.stop();
-```
-
-Then start it as above (`code --extensionDevelopmentPath=...`), with the
-lib's files associated with `dgdlpc`. The server takes the `--stdio`
-the client adds, asks for the two settings as `dgdtools.profile` and
-`dgdtools.libPath`, and registers its own file watchers. This was not
-run here (no VS Code on the machine the server was built on): it is the
-recipe, not a tested client.
+To work on the extension: `npm run check` checks the types, `npm test`
+runs the tests of what needs no VS Code (finding the executable, the
+association patterns), and `go test ./editors` holds the manifest to
+the code. None of them starts VS Code: the client has not been run in
+one here, which is the first thing to do with it.
 
 ## Helix, Zed
 
