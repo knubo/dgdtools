@@ -130,8 +130,13 @@ func TestFormatSettingsPerFile(t *testing.T) {
 		"two/lib/d/old/gone.c":            messy,
 		"two/lib/d/sub/dgdtools.yml":      "root: false\nformat: {indent_width: 8}\n",
 		"two/lib/d/sub/deep.c":            messy,
-		"two/lib/d/own/dgdtools.yml":      "profile: not-installed\nformat: {indent_style: tab}\n",
+		"two/lib/d/own/dgdtools.yml":      "format: {indent_style: tab}\nexclude: [\"attic/**\"]\n",
 		"two/lib/d/own/mine.c":            messy,
+		"two/lib/d/own/attic/x.c":         messy,
+		"lost/dgdtools.yml":               "",
+		"lost/a.c":                        messy,
+		"lost/own/dgdtools.yml":           "profile: not-installed\n",
+		"lost/own/mine.c":                 messy,
 		"tabs/dgdtools.yml":               "format: {indent_style: tab}\n",
 		"tabs/b.c":                        messy,
 		"none/c.c":                        messy,
@@ -160,14 +165,20 @@ func TestFormatSettingsPerFile(t *testing.T) {
 
 	// A directory: the excludes of its project are matched from the lib
 	// root wherever the walk starts; a settings scope adjusts the files
-	// under it; a wizard's own root config in the tree counts as one,
-	// and its project keys (a profile nobody here has) are not looked at.
+	// under it; a root config in the tree is a project of its own, with
+	// its own settings and excludes.
 	code, listed, errs := dgdtools(t, "", "format", "--check", "-q", filepath.Join(dir, "two/lib/d"))
 	assert.Equal(t, 1, code, errs)
 	assert.Equal(t, []string{"a.c", "own/mine.c", "sub/deep.c"}, relLines(listed, filepath.Join(dir, "two/lib/d")))
 	out = show(filepath.Join(dir, "two/lib/d"))
 	assert.Contains(t, out, "deep.c\n@@ -1,4 +1,6 @@\n-void f() {\n-if (x)\n-y();\n+void\n+f()\n+{\n+        if (x)\n+                y();\n")
 	assert.Contains(t, out, "mine.c\n@@ -1,4 +1,6 @@\n-void f() {\n-if (x)\n-y();\n+void\n+f()\n+{\n+\tif (x)\n+\t\ty();\n")
+	// A project below that cannot be resolved is an error for its files,
+	// as it is when they are named by themselves; the rest is done.
+	code, listed, errs = dgdtools(t, "", "format", "--check", "-q", filepath.Join(dir, "lost"))
+	assert.Equal(t, 2, code)
+	assert.Contains(t, errs, `profile "not-installed" not found`)
+	assert.Equal(t, []string{"a.c"}, relLines(listed, filepath.Join(dir, "lost")))
 	// A file named explicitly is formatted even if excluded.
 	assert.Contains(t, show(filepath.Join(dir, "two/lib/d/old/gone.c")), "+  if (x)\n")
 
@@ -349,6 +360,34 @@ func TestFormatProfileDialectAndConventions(t *testing.T) {
 	code, out, _ = dgdtools(t, src, "format", "--profile", filepath.Join(dir, "mine/test.profile"), "--stdin-filename", filepath.Join(dir, "bare/a.c"))
 	assert.Equal(t, 0, code)
 	assert.Contains(t, out, "\nmake()\n{\n")
+}
+
+// A file is replaced whole: the new text is written beside it and renamed
+// over it. Its mode stays, a link to it stays a link, nothing is left
+// behind.
+func TestFormatReplacesTheFile(t *testing.T) {
+	dir := tree(t, map[string]string{"real/a.c": messy, "b.c": messy})
+	require.NoError(t, os.Chmod(filepath.Join(dir, "b.c"), 0o600))
+	link := filepath.Join(dir, "link.c")
+	if err := os.Symlink(filepath.Join("real", "a.c"), link); err != nil {
+		t.Skip("no symbolic links here:", err)
+	}
+	code, _, errs := dgdtools(t, "", "format", "-q", link, filepath.Join(dir, "b.c"))
+	require.Equal(t, 0, code, errs)
+	assert.Equal(t, formatted, read(t, filepath.Join(dir, "real/a.c")))
+	info, err := os.Lstat(link)
+	require.NoError(t, err)
+	assert.NotZero(t, info.Mode()&os.ModeSymlink)
+	info, err = os.Stat(filepath.Join(dir, "b.c"))
+	require.NoError(t, err)
+	assert.Equal(t, os.FileMode(0o600), info.Mode().Perm())
+	for _, d := range []string{dir, filepath.Join(dir, "real")} {
+		entries, err := os.ReadDir(d)
+		require.NoError(t, err)
+		for _, e := range entries {
+			assert.False(t, strings.HasPrefix(e.Name(), "."), "%s was left behind", e.Name())
+		}
+	}
 }
 
 func TestFormatErrors(t *testing.T) {

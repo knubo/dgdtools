@@ -109,8 +109,10 @@ type Unit struct {
 	// header and what that includes.
 	Deps []string
 
-	// gen is the generation the unit was built in.
+	// gen is the generation the unit was built in, and sum the textSum
+	// of the source it was built from.
 	gen uint64
+	sum uint64
 	// watch are the files, other than Path and the force-included header's,
 	// whose change makes the unit stale: its include closure, and the
 	// places an #include was looked for and not found.

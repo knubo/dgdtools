@@ -64,7 +64,7 @@ func (q *Query) about(libPath string) {
 	set[q.unit.Path] = q.s.gen
 }
 
-// usersOf answers Snapshot.UsersOf for the file itself, once, and records
+// usersOf answers Snapshot.usersOf for the file itself, once, and records
 // that the file's diagnostics depend on who inherits it.
 func (q *Query) usersOf(ctx context.Context, libPath string) ([]string, bool) {
 	if q.users != nil {
@@ -81,7 +81,7 @@ func (q *Query) usersOf(ctx context.Context, libPath string) ([]string, bool) {
 		a.users, a.ok = q.s.users(libPath)
 		q.needsScan = !a.ok
 	} else {
-		a.users, a.ok = q.s.UsersOf(ctx, libPath)
+		a.users, a.ok = q.s.usersOf(ctx, libPath)
 	}
 	if a.ok || ctx.Err() == nil {
 		q.users = a // an answer cut short by cancellation is not kept
@@ -111,16 +111,18 @@ func (q *Query) Chain(libPath string) *Chain {
 	return q.s.Chain(libPath)
 }
 
-// LookupCallable resolves function fn in the object at target; see
-// Snapshot.LookupCallable. With self, target is the file itself.
+// LookupCallable resolves function fn in the object at target. With
+// self, target is the file itself and the receiver this_object(): the
+// function may then come from any object that inherits or includes the
+// file.
 func (q *Query) LookupCallable(ctx context.Context, target, fn string, self bool) Lookup {
 	q.about(target)
 	return q.s.lookupCallable(ctx, target, fn, self, q.usersOf)
 }
 
 // ProvidedByUsers reports whether an object that inherits or includes
-// the file supplies a real definition of fn; see
-// Snapshot.ProvidedByUsers.
+// the file supplies a real definition of fn. It reports true (assume
+// provided) whenever that cannot be decided.
 func (q *Query) ProvidedByUsers(ctx context.Context, fn string) bool {
 	return q.s.providedByUsers(ctx, q.unit.LibPath, fn, q.usersOf)
 }

@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/mmcdole/dgdtools/pkg/config"
+	"github.com/mmcdole/dgdtools/pkg/diag"
 	"github.com/mmcdole/dgdtools/pkg/lint"
 	"github.com/mmcdole/dgdtools/pkg/vfs"
 )
@@ -29,8 +30,8 @@ func TestSettingsScopes(t *testing.T) {
 			"  overrides:\n    - paths: [\"keep/**\"]\n      rules: {missing-visibility: info}\n",
 		"/mud/lib/players/bob/c.c":      bare,
 		"/mud/lib/players/bob/keep/d.c": bare,
-		// A wizard's own project config, met inside the whole lib.
-		"/mud/lib/players/cyd/dgdtools.yml": "profile: nowhere\nlint:\n  rules: {missing-visibility: off}\n  fail_on: info\n",
+		// A wizard's own project, met inside the whole lib.
+		"/mud/lib/players/cyd/dgdtools.yml": "profile: nowhere\nlint:\n  rules: {missing-visibility: info}\n",
 		"/mud/lib/players/cyd/e.c":          bare,
 	}
 	prj, err := config.Discover(m, []string{"/mud/lib"}, config.DiscoverOptions{})
@@ -41,6 +42,12 @@ func TestSettingsScopes(t *testing.T) {
 		t.Helper()
 		res, err := l.Run(context.Background(), lint.Request{Options: opt})
 		require.NoError(t, err)
+		// The project below is passed over, and the run says so.
+		require.Len(t, res.Notes, 1)
+		assert.Equal(t, diag.Note{
+			Kind: diag.NoteNestedProject, Path: "/mud/lib/players/cyd/dgdtools.yml",
+			Message: "1 file(s) under /mud/lib/players/cyd are a project of their own (dgdtools.yml) and were not linted: lint that directory by itself",
+		}, res.Notes[0])
 		var out []string
 		for _, d := range res.Diagnostics {
 			out = append(out, fmt.Sprintf("%s %s %s", strings.TrimPrefix(d.Path, "/mud/lib/"), d.Rule, d.Severity))
@@ -82,14 +89,22 @@ func TestSettingsScopes(t *testing.T) {
 	assert.Equal(t, "error", severity("/mud/lib/players/ann/b.c"))
 	assert.Equal(t, "off", severity("/mud/lib/players/bob/c.c"))
 	assert.Equal(t, "info", severity("/mud/lib/players/bob/keep/d.c"))
-	assert.Equal(t, "off", severity("/mud/lib/players/cyd/e.c"))
+	_, err = l.EffectiveRules("/mud/lib/players/cyd/e.c")
+	assert.EqualError(t, err, "/mud/lib/players/cyd/e.c belongs to the project of /mud/lib/players/cyd/dgdtools.yml")
+	_, err = l.Lint(context.Background(), "/mud/lib/players/cyd/e.c", lint.Options{})
+	assert.ErrorContains(t, err, "belongs to the project of")
 
 	// A scope that names a rule that does not exist, or is not a valid
 	// file, fails the run instead of linting its files by other rules.
+	again := func() {
+		t.Helper()
+		prj, err = config.Discover(m, []string{"/mud/lib"}, config.DiscoverOptions{})
+		require.NoError(t, err)
+		l, err = lint.New(prj, m)
+		require.NoError(t, err)
+	}
 	m["/mud/lib/players/bob/dgdtools.yml"] = "root: false\nlint:\n  rules: {no-such-rule: off}\n"
-	l, err = lint.New(prj, m)
-	require.NoError(t, err)
-	prj.ResetSettings()
+	again()
 	_, err = l.Run(context.Background(), lint.Request{})
 	assert.ErrorContains(t, err, "/mud/lib/players/bob/dgdtools.yml: lint.rules: unknown rule \"no-such-rule\"")
 	_, err = l.Lint(context.Background(), "/mud/lib/players/bob/c.c", lint.Options{})
@@ -97,7 +112,7 @@ func TestSettingsScopes(t *testing.T) {
 	_, err = l.Lint(context.Background(), "/mud/lib/std/a.c", lint.Options{})
 	assert.NoError(t, err)
 	m["/mud/lib/players/bob/dgdtools.yml"] = "root: false\nexclude: [\"x\"]\n"
-	prj.ResetSettings()
+	again()
 	_, err = l.Run(context.Background(), lint.Request{})
 	assert.ErrorContains(t, err, "exclude belongs in the project's root config")
 }

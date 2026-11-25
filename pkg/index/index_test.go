@@ -294,6 +294,28 @@ func TestHeadersReadAsUnits(t *testing.T) {
 	assert.Equal(t, []string{"quiet", "sure"}, slices.Sorted(maps.Keys(s.Unit("/obj/includes").Funcs)))
 }
 
+// The tree of a file is of the text its facts were built from, or the
+// file is refused: a change the index was not told about does not get
+// mixed in.
+func TestParseRefusesChangedText(t *testing.T) {
+	l := newLib(t, map[string]string{"obj/a.c": "inherit \"/std/nope\";\n"})
+	s := l.ix.Snapshot()
+	p, err := s.Parse("/lib/obj/a.c")
+	require.NoError(t, err)
+	require.Len(t, p.Unit.Inherits, 1)
+
+	l.ov.Set("/lib/obj/a.c", []byte("\n\nvoid f() { }\n")) // and no Invalidate
+	_, err = s.Parse("/lib/obj/a.c")
+	assert.ErrorIs(t, err, ErrChanged)
+	assert.Same(t, p.Unit, s.Unit("/obj/a"), "the generation's facts are what they were")
+
+	l.ix.Invalidate("/lib/obj/a.c")
+	p, err = l.ix.Snapshot().Parse("/lib/obj/a.c")
+	require.NoError(t, err)
+	assert.Empty(t, p.Unit.Inherits)
+	assert.Contains(t, p.Unit.Funcs, "f")
+}
+
 func TestParse(t *testing.T) {
 	l := newLib(t, map[string]string{
 		"std/base.c": "void create() { }\n",
@@ -357,7 +379,7 @@ func TestCrashIsRecorded(t *testing.T) {
 
 	assert.Nil(t, s.Unit("/std/base"))
 	assert.True(t, s.Chain("/obj/a").Partial, "nothing is concluded from a parent that could not be analyzed")
-	assert.Equal(t, LookupUnknown, s.LookupCallable(context.Background(), "/obj/a", "nowhere", false).State)
+	assert.Equal(t, LookupUnknown, s.lookupCallable(context.Background(), "/obj/a", "nowhere", false, s.usersOf).State)
 	require.Len(t, s.Crashed(), 1)
 	assert.Equal(t, "/lib/std/base.c", s.Crashed()[0].Path)
 
@@ -412,8 +434,8 @@ func TestChain(t *testing.T) {
 	assert.True(t, cyc.Partial, "a cycle cannot be flattened")
 	assert.Contains(t, cyc.Funcs, "one")
 
-	assert.Contains(t, s.AutoFuncs(), "object_name")
-	assert.Equal(t, "(auto object)", s.AutoFuncs()["object_name"].DefinedIn)
+	assert.Contains(t, s.autoState().funcs, "object_name")
+	assert.Equal(t, "(auto object)", s.autoState().funcs["object_name"].DefinedIn)
 }
 
 func TestLookupCallable(t *testing.T) {
@@ -432,14 +454,14 @@ func TestLookupCallable(t *testing.T) {
 	})
 	s := l.ix.Snapshot()
 	state := func(target, fn string, self bool) LookupState {
-		return s.LookupCallable(bg, target, fn, self).State
+		return s.lookupCallable(bg, target, fn, self, s.usersOf).State
 	}
 
-	lk := s.LookupCallable(bg, "/std/mod", "here", false)
+	lk := s.lookupCallable(bg, "/std/mod", "here", false, s.usersOf)
 	assert.Equal(t, LookupFound, lk.State)
 	assert.Equal(t, "/std/mod", lk.Fn.DefinedIn)
 	assert.Equal(t, LookupFound, state("/obj/leaf", "here", false), "through the chain")
-	assert.True(t, s.LookupCallable(bg, "/std/mod", "quiet", false).Fn.Static)
+	assert.True(t, s.lookupCallable(bg, "/std/mod", "quiet", false, s.usersOf).Fn.Static)
 	assert.Equal(t, LookupFound, state("/obj/alone", "object_name", false), "from the auto object")
 	assert.Equal(t, LookupFound, state("/obj/alone", "in_base", false), "from the auto object's parent")
 	assert.Equal(t, LookupFound, state("/obj/alone", "in_code", false), "from code the auto object includes")
@@ -452,13 +474,13 @@ func TestLookupCallable(t *testing.T) {
 	// this_object() in a module may be any inheritor.
 	assert.Equal(t, LookupFoundInUser, state("/std/mod", "cb", true))
 	assert.Equal(t, LookupFoundInUser, state("/std/mod", "deep_cb", true), "an indirect inheritor")
-	lk = s.LookupCallable(bg, "/std/mod", "nowhere", true)
+	lk = s.lookupCallable(bg, "/std/mod", "nowhere", true, s.usersOf)
 	assert.Equal(t, LookupMissing, lk.State)
 	assert.Equal(t, SearchedUsers, lk.Searched)
 	assert.Equal(t, 2, lk.Users)
-	lk = s.LookupCallable(bg, "/obj/alone", "nowhere", true)
+	lk = s.lookupCallable(bg, "/obj/alone", "nowhere", true, s.usersOf)
 	assert.Equal(t, Lookup{State: LookupMissing, Searched: SearchedUsers}, lk, "nobody inherits it")
-	assert.Equal(t, SearchedChain, s.LookupCallable(bg, "/obj/alone", "nowhere", false).Searched)
+	assert.Equal(t, SearchedChain, s.lookupCallable(bg, "/obj/alone", "nowhere", false, s.usersOf).Searched)
 
 	// Code in the auto object's chain runs as every object.
 	assert.Equal(t, LookupUnknown, state("/sys/auto", "nowhere", true))
@@ -469,14 +491,14 @@ func TestLookupCallable(t *testing.T) {
 	assert.Equal(t, LookupFoundInUser, state("/std/code", "provided", true))
 	assert.Equal(t, LookupFoundInUser, state("/std/code", "inherited_cb", true))
 
-	assert.True(t, s.ProvidedByUsers(bg, "/std/mod", "decl"), "leaf defines what mod declares")
-	assert.False(t, s.ProvidedByUsers(bg, "/std/mod", "nowhere"))
-	assert.False(t, s.ProvidedByUsers(bg, "/obj/alone", "f"), "nobody inherits it")
+	assert.True(t, s.providedByUsers(bg, "/std/mod", "decl", s.usersOf), "leaf defines what mod declares")
+	assert.False(t, s.providedByUsers(bg, "/std/mod", "nowhere", s.usersOf))
+	assert.False(t, s.providedByUsers(bg, "/obj/alone", "f", s.usersOf), "nobody inherits it")
 
-	users, ok := s.UsersOf(bg, "/std/mod")
+	users, ok := s.usersOf(bg, "/std/mod")
 	require.True(t, ok)
 	assert.Equal(t, []string{"/obj/deep", "/obj/leaf"}, users)
-	users, _ = s.UsersOf(bg, "/std/code")
+	users, _ = s.usersOf(bg, "/std/code")
 	assert.Equal(t, []string{"/obj/heir", "/obj/user"}, users)
 }
 
@@ -492,9 +514,9 @@ func TestNoLib(t *testing.T) {
 	assert.Equal(t, []string{"/any/a.c", "/any/b.h"}, u.Deps, "a relative include still resolves")
 	assert.False(t, u.Inherits[0].Resolved)
 	assert.Nil(t, s.Unit("/std/x"))
-	assert.Equal(t, LookupUnknown, s.LookupCallable(bg, "/std/x", "f", false).State)
+	assert.Equal(t, LookupUnknown, s.lookupCallable(bg, "/std/x", "f", false, s.usersOf).State)
 	assert.False(t, s.Scan(bg))
-	_, ok := s.UsersOf(bg, "/std/x")
+	_, ok := s.usersOf(bg, "/std/x")
 	assert.False(t, ok)
 }
 
@@ -587,7 +609,9 @@ func TestInvalidateAffectedSet(t *testing.T) {
 		load(l)
 		assert.Equal(t, []string{"/lib/obj/other.c"}, l.set(t, "obj/other.c", "void g() { }\n"))
 		assert.Equal(t, []string{"/lib/obj/never-loaded.c"}, l.set(t, "obj/never-loaded.c", ""))
+		gen := l.ix.Generation()
 		assert.Equal(t, []string{"/elsewhere/x.c"}, l.ix.Invalidate("/elsewhere/x.c"))
+		assert.Equal(t, gen, l.ix.Generation(), "a path that is nothing to the lib starts no generation")
 	})
 
 	t.Run("edges follow the units", func(t *testing.T) {
@@ -666,12 +690,104 @@ func TestInvalidateForceIncludeAndAutoObject(t *testing.T) {
 	// The auto object's functions are everybody's.
 	s = l.ix.Snapshot()
 	s.Unit("/obj/a")
-	require.Contains(t, s.AutoFuncs(), "object_name")
+	require.Contains(t, s.autoState().funcs, "object_name")
 	affected = l.set(t, "sys/auto.c", "string other_name() { return \"y\"; }\n")
 	assert.Subset(t, affected, []string{"/lib/obj/a.c", "/lib/obj/b.c", "/lib/sys/auto.c"})
-	assert.Contains(t, l.ix.Snapshot().AutoFuncs(), "other_name")
-	assert.NotContains(t, l.ix.Snapshot().AutoFuncs(), "object_name")
-	assert.Contains(t, s.AutoFuncs(), "object_name", "the old generation keeps its answer")
+	assert.Contains(t, l.ix.Snapshot().autoState().funcs, "other_name")
+	assert.NotContains(t, l.ix.Snapshot().autoState().funcs, "object_name")
+	assert.Contains(t, s.autoState().funcs, "object_name", "the old generation keeps its answer")
+}
+
+// A directory that is deleted, created or renamed is reported as the
+// directory: it stands for the files under it.
+func TestInvalidateDirectory(t *testing.T) {
+	l := newLib(t, map[string]string{
+		"std/base.c":  "void base() { }\n",
+		"std/defs.h":  "#define N 1\n",
+		"obj/leaf.c":  "inherit \"/std/base\";\n",
+		"obj/user.c":  "#include \"/std/defs.h\"\nint n = N;\n",
+		"obj/other.c": "void f() { }\n",
+	})
+	s := l.ix.Snapshot()
+	require.True(t, s.Scan(bg))
+	require.Contains(t, s.Chain("/obj/leaf").Funcs, "base")
+	other := s.Unit("/obj/other")
+
+	delete(l.disk, "/lib/std/base.c")
+	delete(l.disk, "/lib/std/defs.h")
+	affected := l.ix.Invalidate("/lib/std")
+	assert.Equal(t, []string{"/lib/obj/leaf.c", "/lib/obj/user.c", "/lib/std", "/lib/std/base.c", "/lib/std/defs.h"}, affected)
+	s = l.ix.Snapshot()
+	assert.Nil(t, s.Unit("/std/base"))
+	assert.True(t, s.Chain("/obj/leaf").Partial)
+	assert.NotContains(t, s.Chain("/obj/leaf").Funcs, "base")
+	assert.Len(t, s.Unit("/obj/user").BadIncludes, 1)
+	assert.Same(t, other, s.Unit("/obj/other"), "what the directory did not hold is shared")
+	l.fs.reset()
+	require.True(t, s.Scan(bg))
+	assert.Empty(t, l.fs.reads, "the scan has nothing to read for files that are gone")
+
+	// It comes back under another name, and then under its own.
+	l.disk["/lib/lib2/base.c"] = "void base() { }\n"
+	assert.Equal(t, []string{"/lib/lib2", "/lib/lib2/base.c"}, l.ix.Invalidate("/lib/lib2"))
+	assert.False(t, l.ix.Snapshot().Scanned(), "the new directory's files are the scan's to read")
+	l.disk["/lib/std/base.c"] = "void base2() { }\n"
+	l.disk["/lib/std/defs.h"] = "#define N 2\n"
+	affected = l.ix.Invalidate("/lib/std")
+	assert.Subset(t, affected, []string{"/lib/obj/leaf.c", "/lib/obj/user.c", "/lib/std/base.c"})
+	s = l.ix.Snapshot()
+	assert.Contains(t, s.Chain("/obj/leaf").Funcs, "base2")
+	assert.Empty(t, s.Unit("/obj/user").BadIncludes)
+	users, ok := s.usersOf(bg, "/std/base")
+	require.True(t, ok)
+	assert.Equal(t, []string{"/obj/leaf"}, users)
+}
+
+// Whether the lib is all there is looked at again when one of the things
+// a whole lib has comes or goes; what was concluded from the old answer
+// is dropped.
+func TestCompletenessFollowsTheLib(t *testing.T) {
+	l := newLib(t, map[string]string{"obj/a.c": "#include \"nowhere.h\"\n"})
+	s := l.ix.Snapshot()
+	require.True(t, s.Complete())
+	require.Len(t, s.Unit("/obj/a").BadIncludes, 1)
+
+	delete(l.disk, "/lib/sys/auto.c")
+	assert.Contains(t, l.ix.Invalidate("/lib/sys/auto.c"), "/lib/obj/a.c")
+	s2 := l.ix.Snapshot()
+	assert.False(t, s2.Complete())
+	require.Len(t, s2.Notes(), 1)
+	assert.Contains(t, s2.Notes()[0].Message, "missing /sys/auto")
+	assert.Empty(t, s2.Unit("/obj/a").BadIncludes, "nothing is provably missing from an incomplete lib")
+	assert.Equal(t, 1, s2.Unit("/obj/a").UnknownIncludes)
+	assert.True(t, s.Complete(), "the old generation keeps its answer")
+
+	l.disk["/lib/sys/auto.c"] = "void f() { }\n"
+	assert.Contains(t, l.ix.Invalidate("/lib/sys"), "/lib/obj/a.c")
+	s3 := l.ix.Snapshot()
+	assert.True(t, s3.Complete())
+	assert.Empty(t, s3.Notes())
+	assert.Len(t, s3.Unit("/obj/a").BadIncludes, 1)
+}
+
+// An object's name may have dots: its source is the name with ".c".
+func TestObjectNameWithDot(t *testing.T) {
+	l := newLib(t, map[string]string{
+		"obj/sword.v2.c": "void swing() { }\n",
+		"obj/user.c":     "inherit \"/obj/sword.v2\";\n",
+		"obj/odd.h":      "void in_header();\n",
+	})
+	s := l.ix.Snapshot()
+	assert.Equal(t, "/obj/sword.v2", s.LibPath("/lib/obj/sword.v2.c"))
+	assert.Equal(t, "/lib/obj/sword.v2.c", s.ObjectFile("/obj/sword.v2"))
+	assert.True(t, s.ObjectExists("/obj/sword.v2"))
+	assert.False(t, s.ObjectExists("/obj/sword.v3"))
+	ch := s.Chain("/obj/user")
+	assert.False(t, ch.Partial)
+	assert.Contains(t, ch.Funcs, "swing")
+	// A header linted on its own is known by its own name.
+	assert.Equal(t, "/lib/obj/odd.h", s.ObjectFile(s.LibPath("/lib/obj/odd.h")))
+	assert.Contains(t, s.Chain("/obj/odd.h").Funcs, "in_header")
 }
 
 // A unit that is still being built when the files change belongs to the
@@ -716,7 +832,7 @@ func TestScan(t *testing.T) {
 	assert.False(t, s.Scanned())
 	require.True(t, s.Scan(bg))
 	assert.True(t, s.Scanned())
-	users, ok := s.UsersOf(bg, "/std/mod")
+	users, ok := s.usersOf(bg, "/std/mod")
 	require.True(t, ok)
 	assert.Equal(t, []string{"/obj/leaf", "/obj/sub/deep"}, users, "excluded files are not scanned")
 	assert.Equal(t, 1, l.fs.walks)
@@ -732,9 +848,9 @@ func TestScan(t *testing.T) {
 	l.set(t, "obj/leaf.c", "void f() { }\n")
 	s2 := l.ix.Snapshot()
 	assert.False(t, s2.Scanned())
-	_, ok = s.UsersOf(bg, "/std/mod")
+	_, ok = s.usersOf(bg, "/std/mod")
 	assert.False(t, ok, "a generation that has been replaced cannot say who inherits")
-	users, ok = s2.UsersOf(bg, "/std/mod")
+	users, ok = s2.usersOf(bg, "/std/mod")
 	require.True(t, ok)
 	assert.Empty(t, users)
 	assert.Zero(t, l.fs.walks)
@@ -747,7 +863,7 @@ func TestScan(t *testing.T) {
 	l.set(t, "obj/new.h", "inherit \"/std/mod\";\n")
 	delete(l.disk, "/lib/obj/sub/deep.c")
 	l.ix.Invalidate("/lib/obj/sub/deep.c")
-	users, ok = l.ix.Snapshot().UsersOf(bg, "/std/mod")
+	users, ok = l.ix.Snapshot().usersOf(bg, "/std/mod")
 	require.True(t, ok)
 	assert.Equal(t, []string{"/obj/new"}, users)
 	assert.Zero(t, l.fs.walks)
@@ -770,7 +886,7 @@ func TestScanCancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(bg)
 	cancel()
 	assert.False(t, s.Scan(ctx))
-	_, ok := s.UsersOf(ctx, "/std/mod")
+	_, ok := s.usersOf(ctx, "/std/mod")
 	assert.False(t, ok, "a cancelled scan is not an answer")
 	assert.Empty(t, l.fs.reads)
 
@@ -786,7 +902,7 @@ func TestScanCancelled(t *testing.T) {
 	assert.False(t, <-done)
 	assert.False(t, s.Scanned())
 
-	users, ok := s.UsersOf(bg, "/std/mod")
+	users, ok := s.usersOf(bg, "/std/mod")
 	require.True(t, ok)
 	assert.Len(t, users, n)
 	for i := range n {
@@ -805,9 +921,34 @@ func TestScanCancelled(t *testing.T) {
 	close(l.fs.release)
 	assert.True(t, <-done)
 	assert.True(t, s.Scanned())
-	users, ok = s.UsersOf(ctx, "/std/mod")
+	users, ok = s.usersOf(ctx, "/std/mod")
 	require.True(t, ok)
 	assert.Len(t, users, n-1)
+}
+
+// A scan the index has moved on from stops reading: it holds the one
+// scan slot, and nobody will ask its generation.
+func TestSupersededScanStops(t *testing.T) {
+	const passed = 10
+	n := passed + 2*runtime.GOMAXPROCS(0) + 200
+	files := map[string]string{}
+	for i := range n {
+		files[fmt.Sprintf("obj/o%d.c", i)] = "void f() { }\n"
+	}
+	l := newLib(t, files)
+	s := l.ix.Snapshot()
+	l.fs.holdReads(func(_ string, before int) bool { return before >= passed })
+	done := make(chan bool)
+	go func() { done <- s.Scan(bg) }()
+	<-l.fs.entered
+	l.set(t, "obj/o0.c", "void g() { }\n")
+	close(l.fs.release)
+	assert.False(t, <-done)
+	l.fs.mu.Lock()
+	read := l.fs.total
+	l.fs.mu.Unlock()
+	assert.LessOrEqual(t, read, passed+2*runtime.GOMAXPROCS(0), "of %d files", n)
+	assert.True(t, l.ix.Snapshot().Scan(bg))
 }
 
 // ------------------------------------------------------------- query
@@ -839,6 +980,25 @@ func TestQueryRecordsWhatItAsked(t *testing.T) {
 	l.ix.Snapshot().Unit("/obj/asker")
 	assert.Equal(t, []string{"/lib/obj/target.c"}, l.set(t, "obj/target.c", "void hit() { }\n"))
 	assert.Empty(t, l.ix.refs["/obj/target"], "the void question is forgotten")
+}
+
+// A lookup made after its context was cancelled reads nothing and
+// concludes nothing.
+func TestQueryCancelled(t *testing.T) {
+	l := newLib(t, map[string]string{
+		"std/mod.c":  "void m() { }\n",
+		"obj/leaf.c": "inherit \"/std/mod\";\n",
+	})
+	s := l.ix.Snapshot()
+	q := s.Query(s.Unit("/obj/leaf"), false)
+	l.fs.reset()
+	ctx, cancel := context.WithCancel(bg)
+	cancel()
+	assert.Equal(t, LookupUnknown, q.LookupCallable(ctx, "/std/mod", "nowhere", false).State)
+	assert.Equal(t, LookupUnknown, q.LookupCallable(ctx, "/obj/leaf", "nowhere", true).State)
+	assert.True(t, q.ProvidedByUsers(ctx, "nowhere"), "unknown is assumed provided")
+	assert.Empty(t, l.fs.reads)
+	assert.Equal(t, LookupMissing, q.LookupCallable(bg, "/std/mod", "nowhere", false).State)
 }
 
 func TestQueryWithoutScan(t *testing.T) {
@@ -893,15 +1053,15 @@ func TestStubsAndCheckout(t *testing.T) {
 	}, both)
 	assert.True(t, ix.HasLib())
 	assert.True(t, ix.Partial())
-	assert.False(t, ix.Complete())
+	assert.False(t, ix.Snapshot().Complete())
 
 	assert.Equal(t, "/players/ann/hall", ix.LibPath("/home/ann/hall.c"))
 	assert.Equal(t, "/std/room", ix.LibPath("stub://lib/std/room.c"))
 	assert.Empty(t, ix.LibPath("/home/bob/x.c"))
-	assert.True(t, ix.Covers("/players/ann/anything"))
-	assert.True(t, ix.Covers("/std/anything"))
-	assert.False(t, ix.Covers("/std/secret/thing"))
-	assert.False(t, ix.Covers("/obj/anything"))
+	assert.True(t, ix.Snapshot().Covers("/players/ann/anything"))
+	assert.True(t, ix.Snapshot().Covers("/std/anything"))
+	assert.False(t, ix.Snapshot().Covers("/std/secret/thing"))
+	assert.False(t, ix.Snapshot().Covers("/obj/anything"))
 
 	s := ix.Snapshot()
 	hall := s.Unit("/players/ann/hall")
@@ -920,15 +1080,15 @@ func TestStubsAndCheckout(t *testing.T) {
 	assert.False(t, s.ObjectExists("/std/nothing"))
 	assert.Nil(t, s.Unit("/players/ann/nothing"), "the checkout alone speaks for its directory")
 
-	lk := s.LookupCallable(bg, "/std/room", "hidden", false)
+	lk := s.lookupCallable(bg, "/std/room", "hidden", false, s.usersOf)
 	assert.Equal(t, LookupMissing, lk.State)
 	assert.Equal(t, SearchedStub, lk.Searched)
 
 	// The scan covers the checkout only.
-	users, ok := s.UsersOf(bg, "/players/ann/hall")
+	users, ok := s.usersOf(bg, "/players/ann/hall")
 	require.True(t, ok)
 	assert.Equal(t, []string{"/players/ann/sub/closet"}, users)
-	lk = s.LookupCallable(bg, "/players/ann/sub/closet", "nowhere", true)
+	lk = s.lookupCallable(bg, "/players/ann/sub/closet", "nowhere", true, s.usersOf)
 	assert.Equal(t, LookupMissing, lk.State)
 	assert.Equal(t, SearchedCheckout, lk.Searched)
 }
@@ -1029,7 +1189,7 @@ func TestConcurrentReadersAndInvalidate(t *testing.T) {
 	// The last generation is exactly the edited lib.
 	s := l.ix.Snapshot()
 	assert.Equal(t, uint64(1+150+4+6), s.Generation())
-	users, ok := s.UsersOf(bg, "/std/mod")
+	users, ok := s.usersOf(bg, "/std/mod")
 	require.True(t, ok)
 	assert.Len(t, users, n)
 	for i := range n {

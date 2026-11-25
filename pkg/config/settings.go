@@ -10,6 +10,7 @@ import (
 
 	"github.com/mmcdole/dgdtools/pkg/editorconfig"
 	"github.com/mmcdole/dgdtools/pkg/fileset"
+	"github.com/mmcdole/dgdtools/pkg/vfs"
 )
 
 // Format are the formatter's settings (docs/design/formatter.md). A zero
@@ -123,10 +124,8 @@ const (
 	FromDefault = "default"
 )
 
-// Scope is the settings one nested dgdtools.yml gives the files under
-// its directory. It is usually a settings scope (`root: false`); a root
-// config found below the project being worked on counts the same way,
-// its project keys unused.
+// Scope is the settings one settings scope, a nested dgdtools.yml that
+// says `root: false`, gives the files under its directory.
 type Scope struct {
 	// Path is the file and Dir its directory, which the globs of
 	// Overrides are relative to.
@@ -146,30 +145,66 @@ type settingsCache struct {
 type scopeList struct {
 	list []*Scope
 	err  error
+	// nested is the root config, below the project's own, of the project
+	// the directory belongs to instead; "" when it is this project's.
+	nested string
 }
 
-// ResetSettings forgets the nested configuration and .editorconfig files
-// read so far. A long-lived caller calls it when one of them changes.
-func (prj *Project) ResetSettings() {
+// forgetEditors drops the .editorconfig files read so far.
+func (prj *Project) forgetEditors() {
 	prj.mu.Lock()
 	defer prj.mu.Unlock()
-	prj.scopes, prj.editors = nil, nil
+	prj.editors = nil
 }
+
+// NestedProjectError says a file is not the project's: a root config
+// between the project's own and the file makes it another project's.
+type NestedProjectError struct {
+	Path string
+	// Config is the root config of the project the file belongs to.
+	Config string
+}
+
+func (e *NestedProjectError) Error() string {
+	return fmt.Sprintf("%s belongs to the project of %s", e.Path, e.Config)
+}
+
+// Nested returns the root config of the project the file or directory at
+// path belongs to when that is not this project but one below it: a
+// dgdtools.yml that is not a settings scope, between the project's own
+// and the path. Every tool treats such a directory as the other
+// project's: a walk of this project passes over it. It is "" for the
+// project's own files.
+func (prj *Project) Nested(path string) string {
+	dir := filepath.Clean(path)
+	if !prj.isDir(dir) {
+		dir = filepath.Dir(dir)
+	}
+	prj.mu.Lock()
+	defer prj.mu.Unlock()
+	return prj.scopesAt(dir).nested
+}
+
+func (prj *Project) isDir(path string) bool { return prj.fs != nil && prj.fs.IsDir(path) }
 
 // Settings returns the settings of the file at path (absolute; the file
 // need not exist). It fails when a configuration file that applies to
-// the file is not valid.
+// the file is not valid, and with a *NestedProjectError when the file
+// belongs to a project below this one.
 func (prj *Project) Settings(path string) (*Settings, error) {
 	dir := filepath.Dir(path)
 	prj.mu.Lock()
 	scopes := prj.scopesAt(dir)
 	var editors []*editorconfig.File
-	if scopes.err == nil {
+	if scopes.err == nil && scopes.nested == "" {
 		editors = prj.editorsAt(dir)
 	}
 	prj.mu.Unlock()
-	if scopes.err != nil {
+	switch {
+	case scopes.err != nil:
 		return nil, scopes.err
+	case scopes.nested != "":
+		return nil, &NestedProjectError{Path: path, Config: scopes.nested}
 	}
 
 	s := &Settings{Scopes: scopes.list}
@@ -216,9 +251,10 @@ func (prj *Project) Settings(path string) (*Settings, error) {
 	return s, nil
 }
 
-// scopesAt returns the nested configuration files that apply to the
-// files in dir: those in dir and the directories above it, as far as the
-// project reaches. Called with prj.mu held.
+// scopesAt returns the settings scopes that apply to the files in dir:
+// those in dir and the directories above it, as far as the project
+// reaches. A root config on the way makes dir another project's. Called
+// with prj.mu held.
 func (prj *Project) scopesAt(dir string) *scopeList {
 	if l, ok := prj.scopes[dir]; ok {
 		return l
@@ -228,12 +264,15 @@ func (prj *Project) scopesAt(dir string) *scopeList {
 		parent := filepath.Dir(dir)
 		if dir != top && parent != dir {
 			up := prj.scopesAt(parent)
-			l.list, l.err = up.list, up.err
+			l.list, l.err, l.nested = up.list, up.err, up.nested
 		}
-		if p := fileIn(prj.fs, dir); p != "" && p != prj.ConfigPath && l.err == nil {
-			if c, err := Load(prj.fs, p); err != nil {
+		if p := fileIn(prj.fs, dir); p != "" && p != prj.ConfigPath && l.err == nil && l.nested == "" {
+			switch c, err := loadScope(prj.fs, p); {
+			case err != nil:
 				l.err = err
-			} else {
+			case c == nil:
+				l.nested = p
+			default:
 				l.list = append(l.list[:len(l.list):len(l.list)], &Scope{
 					Path: p, Dir: dir, Format: c.Format, Rules: c.Lint.Rules, Overrides: c.Lint.Overrides,
 				})
@@ -245,6 +284,21 @@ func (prj *Project) scopesAt(dir string) *scopeList {
 	}
 	prj.scopes[dir] = l
 	return l
+}
+
+// loadScope loads the settings scope at path; nil when the file is a
+// root config, which is not read further: it is another project's.
+func loadScope(fs vfs.FS, path string) (*Config, error) {
+	head, _, err := readHeader(fs, path)
+	if err != nil {
+		return nil, err
+	}
+	if scope, err := head.scope(); err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
+	} else if !scope {
+		return nil, nil
+	}
+	return Load(fs, path)
 }
 
 // top returns the highest directory whose configuration file can apply

@@ -214,3 +214,64 @@ func TestDocumentEnvIsReadConcurrently(t *testing.T) {
 	wg.Wait()
 	assert.Equal(t, `"/std/"`, doc.Env.Lookup("STD").Body)
 }
+
+// A file whose text changed without the linter being told is not linted
+// from a mixture of what the index knew and what the file now says.
+func TestLintRefusesTextItWasNotToldOf(t *testing.T) {
+	prj, m := memProject(map[string]string{"obj/a.c": "inherit \"/std/nope\";\n"})
+	ov := vfs.NewOverlay(m)
+	l, err := lint.New(prj, ov)
+	require.NoError(t, err)
+	ctx := context.Background()
+	doc, err := l.Lint(ctx, "/lib/obj/a.c", lint.Options{})
+	require.NoError(t, err)
+	require.Len(t, doc.Diagnostics, 1)
+	assert.Same(t, l.Index().Snapshot(), doc.Snapshot)
+
+	ov.Set("/lib/obj/a.c", []byte("\n\n\n\ninherit \"/std/base\";\n"))
+	_, err = l.Lint(ctx, "/lib/obj/a.c", lint.Options{})
+	var fe *lint.FileError
+	require.ErrorAs(t, err, &fe)
+	assert.Equal(t, lint.FileError{Path: "/lib/obj/a.c", Kind: lint.Stale, Message: "changed while it was being linted"}, *fe)
+	// A run says the same of that file, and lints the rest.
+	res, err := l.Run(ctx, lint.Request{Paths: []string{"/lib/obj/a.c", "/lib/std/base.c"}})
+	require.NoError(t, err)
+	require.Len(t, res.Errors, 1)
+	assert.Equal(t, lint.Stale, res.Errors[0].Kind)
+	assert.Equal(t, 1, res.Stats.Files)
+
+	l.Invalidate("/lib/obj/a.c")
+	doc, err = l.Lint(ctx, "/lib/obj/a.c", lint.Options{})
+	require.NoError(t, err)
+	assert.Empty(t, doc.Diagnostics)
+}
+
+// An object whose name has a dot is an object like any other: found by
+// those that name it, checked against the lib itself, and matched by the
+// globs of an override under its file name.
+func TestObjectNameWithDot(t *testing.T) {
+	prj, m := memProject(map[string]string{
+		"obj/sword.v2.c": "inherit \"/std/base\";\nvoid swing() { this_object()->nowhere(); }\n",
+		"obj/user.c":     "inherit \"/obj/sword.v2\";\nvoid f() { \"/obj/sword.v2\"->swing(); clone_object(\"/obj/sword.v2\"); \"/obj/sword.v2\"->gone(); }\n",
+	})
+	prj.Config.Lint.Overrides = []config.Override{{Paths: []string{"obj/*.v2.c"}, Rules: map[string]config.RuleSettings{"callable-not-found": {Severity: "info"}}}}
+	l, err := lint.New(prj, m)
+	require.NoError(t, err)
+	res, err := l.Run(context.Background(), lint.Request{Paths: []string{"/lib/obj"}})
+	require.NoError(t, err)
+	var got []string
+	for _, d := range res.Diagnostics {
+		got = append(got, fmt.Sprintf("%s:%d: %s: %s", d.Path, d.Line, d.Severity, d.Rule))
+	}
+	assert.Equal(t, []string{
+		"/lib/obj/sword.v2.c:2: info: callable-not-found",
+		"/lib/obj/user.c:2: error: callable-not-found",
+	}, got, "%v", res.Diagnostics)
+	rules, err := l.EffectiveRules("/lib/obj/sword.v2.c")
+	require.NoError(t, err)
+	for _, r := range rules {
+		if r.Name == "callable-not-found" {
+			assert.Equal(t, "info", r.Severity.String(), "`dgdtools config` and the lint agree")
+		}
+	}
+}

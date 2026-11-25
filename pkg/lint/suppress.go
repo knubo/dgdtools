@@ -103,7 +103,7 @@ func (l *Linter) suppressions(f *token.File) *suppressions {
 				bad(t.Off, t.End, "unknown target %q: want lint/RULE, lint or format", t)
 				continue
 			case t.Rule != "":
-				r := l.RuleByName(t.Rule)
+				r := l.rule(t.Rule)
 				switch {
 				case r == nil:
 					bad(t.Off, t.End, "unknown rule %q (see `dgdtools rules`)", t.Rule)

@@ -17,13 +17,9 @@ import (
 // root, or under the checkout for the lib directory the checkout holds)
 // or the location of a profile's stub.
 
-// withC is the lib path of an object's source file.
-func withC(libPath string) string {
-	if path.Ext(libPath) == "" {
-		return libPath + ".c"
-	}
-	return libPath
-}
+// objectFile is the lib file an object's source is in: an object path
+// never has the extension, whatever dots it has ("/obj/sword.v2").
+func objectFile(libPath string) string { return libPath + ".c" }
 
 // isStub reports whether p is the location of a profile stub.
 func (l *lib) isStub(p string) bool {
@@ -69,9 +65,10 @@ func (l *lib) LibPath(p string) string {
 // location, so that "not found" there means "does not exist". With a whole
 // lib that is the lib's completeness; with a partial checkout it is the
 // checkout itself and the directories the profile captured completely.
-func (l *lib) Covers(libPath string) bool {
+func (s *Snapshot) Covers(libPath string) bool {
+	l := s.lib
 	if !l.partial {
-		return l.complete
+		return s.ext.complete
 	}
 	if l.inCheckout(libPath) {
 		return true
@@ -165,9 +162,10 @@ func (l *lib) inScope(p string) bool {
 
 // includeProvablyMissing reports whether an unresolved include is known
 // not to exist: every place the driver would look is covered.
-func (l *lib) includeProvablyMissing(from string, inc pp.Include) bool {
+func (s *Snapshot) includeProvablyMissing(from string, inc pp.Include) bool {
+	l := s.lib
 	if !l.partial {
-		return l.complete
+		return s.ext.complete
 	}
 	var cands []string
 	if !inc.Angle {
@@ -185,7 +183,7 @@ func (l *lib) includeProvablyMissing(from string, inc pp.Include) bool {
 		cands = append(cands, path.Join(dir, inc.Name))
 	}
 	for _, c := range cands {
-		if !l.Covers(path.Clean(c)) {
+		if !s.Covers(path.Clean(c)) {
 			return false
 		}
 	}

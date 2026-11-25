@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
-	"slices"
 	"strings"
 
 	"github.com/mmcdole/dgdtools/pkg/config"
@@ -20,11 +18,13 @@ import (
 const lintUsage = `usage: dgdtools lint [flags] [path ...]
        dgdtools lint [flags] -
 
-Lints the named files and the .c and .h files under the named
-directories. With no path, the whole project: the lib root of the nearest
-dgdtools.yml at or above the working directory. Without a dgdtools.yml
-only file-local rules run. A wizard with only their own folder puts
-"profile: NAME" in a dgdtools.yml there (or passes --profile).
+Lints the named files and the .c files under the named directories: the
+objects, with the headers they include read as part of them. A header
+named by itself is linted on its own. With no path, the whole project:
+the lib root of the nearest dgdtools.yml at or above the working
+directory. Without a dgdtools.yml only file-local rules run. A wizard
+with only their own folder puts "profile: NAME" in a dgdtools.yml there
+(or passes --profile).
 
 "-" lints standard input. With --stdin-filename it is linted as that
 file, in that file's project, in place of what is on disk (an editor's
@@ -77,10 +77,10 @@ func lintCmd(ctx context.Context, args []string, stdin io.Reader, stdout, stderr
 	if err != nil {
 		return fail(err)
 	}
-	fromStdin := len(paths) == 1 && paths[0] == "-" || len(paths) == 0 && stdinName != ""
+	stdinPath, fromStdin, err := p.standardInput(paths, stdinName)
 	switch {
-	case !fromStdin && (stdinName != "" || slices.Contains(paths, "-")):
-		return fail(errors.New("standard input (\"-\", --stdin-filename) cannot be combined with paths"))
+	case err != nil:
+		return fail(err)
 	case fromStdin && writeBaseline:
 		return fail(errors.New("--write-baseline records the findings of files, not of standard input"))
 	case fromStdin:
@@ -90,15 +90,10 @@ func lintCmd(ctx context.Context, args []string, stdin io.Reader, stdout, stderr
 		if err != nil {
 			return fail(err)
 		}
-		path := filepath.Join(p.wd, "<stdin>")
-		if stdinName != "" {
-			path = p.abs(stdinName)
-		} else {
-			local = true // nameless, it is no object of any lib
-		}
+		local = local || stdinName == "" // nameless, it is no object of any lib
 		buffer := vfs.NewOverlay(p.fsys)
-		buffer.Set(path, src)
-		p.fsys, paths = buffer, []string{path}
+		buffer.Set(stdinPath, src)
+		p.fsys, paths = buffer, []string{stdinPath}
 	default:
 		for i, path := range paths {
 			paths[i] = p.abs(path)

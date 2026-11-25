@@ -35,6 +35,7 @@
 package index
 
 import (
+	"context"
 	"maps"
 	"path/filepath"
 	"slices"
@@ -82,11 +83,10 @@ type lib struct {
 	// partial says there is no whole lib on disk: what exists is decided
 	// per path by Covers.
 	partial bool
-	// complete is false when the lib on disk lacks things the config says
-	// it has (include dirs, the force-include, an auto object): a wrong
-	// root. Missing references are then Unknown.
-	complete bool
-	notes    []diag.Note
+	// required are the places on disk of what the configuration says a
+	// whole lib has: its include dirs, the force-included header, the
+	// auto objects.
+	required []requirement
 
 	dialect  token.Dialect
 	exclude  *fileset.Matcher
@@ -163,39 +163,75 @@ func New(cfg *config.Config, lay Layout, fsys vfs.FS) *Index {
 		override: cfg.MacroClasses(),
 	}
 
-	l.complete = lay.Root != ""
-	if l.complete {
-		real := func(libPath string) string {
-			return filepath.Join(lay.Root, filepath.FromSlash(strings.TrimPrefix(libPath, "/")))
+	if lay.Root != "" {
+		real := func(libFile string) string {
+			return filepath.Join(lay.Root, filepath.FromSlash(strings.TrimPrefix(libFile, "/")))
 		}
-		var missing []string
 		for _, d := range cfg.IncludeDirs {
-			if !fsys.IsDir(real(d)) {
-				missing = append(missing, d)
-			}
+			l.required = append(l.required, requirement{name: d, path: real(d), dir: true})
 		}
-		if f := cfg.IncludeFile; f != "" && !fsys.Exists(real(f)) {
-			missing = append(missing, f)
+		if f := cfg.IncludeFile; f != "" {
+			l.required = append(l.required, requirement{name: f, path: real(f)})
 		}
 		for _, a := range cfg.AutoObjects {
-			if !fsys.Exists(real(withC(a))) {
-				missing = append(missing, a)
-			}
-		}
-		if len(missing) > 0 {
-			l.complete = false
-			l.notes = append(l.notes, diag.Note{
-				Kind: diag.NoteIncompleteLib, Path: lay.Root,
-				Message: "lib looks incomplete under " + lay.Root + " (missing " +
-					strings.Join(missing, ", ") + "): missing-reference findings are disabled",
-			})
+			l.required = append(l.required, requirement{name: a, path: real(objectFile(NormalizeLibPath(a, "/")))})
 		}
 	}
 
 	ix := &Index{lib: l, scanning: make(chan struct{}, 1)}
 	ix.forget()
-	ix.cur = newSnapshot(ix, 1)
+	ix.cur = newSnapshot(ix, 1, l.extent())
 	return ix
+}
+
+// requirement is one thing a whole lib has when the configuration is
+// right about it.
+type requirement struct {
+	name, path string
+	dir        bool
+}
+
+// extent says how much of the lib is on disk, as one generation found
+// it.
+type extent struct {
+	// complete is false when the lib on disk lacks things the config says
+	// it has: a wrong root. Missing references are then Unknown.
+	complete bool
+	notes    []diag.Note
+}
+
+// extent looks at the disk for what a whole lib has.
+func (l *lib) extent() *extent {
+	e := &extent{complete: l.lay.Root != ""}
+	var missing []string
+	for _, r := range l.required {
+		if r.dir && !l.fs.IsDir(r.path) || !r.dir && !l.fs.Exists(r.path) {
+			missing = append(missing, r.name)
+		}
+	}
+	if len(missing) > 0 {
+		e.complete = false
+		e.notes = []diag.Note{{
+			Kind: diag.NoteIncompleteLib, Path: l.lay.Root,
+			Message: "lib looks incomplete under " + l.lay.Root + " (missing " +
+				strings.Join(missing, ", ") + "): missing-reference findings are disabled",
+		}}
+	}
+	return e
+}
+
+// requires reports whether a change at p can add or remove something a
+// whole lib has: p is such a place, lies in one, or holds one.
+func (l *lib) requires(p string) bool {
+	for _, r := range l.required {
+		if _, in := fileset.Under(r.path, p); in {
+			return true
+		}
+		if _, holds := fileset.Under(p, r.path); holds {
+			return true
+		}
+	}
+	return false
 }
 
 // forget empties the reverse edges. The caller holds mu (or is New).
@@ -214,13 +250,6 @@ func (l *lib) HasLib() bool { return l.lay.Root != "" || l.partial }
 // one subtree and/or a profile's stubs.
 func (l *lib) Partial() bool { return l.partial }
 
-// Complete reports whether the whole lib is on disk and has everything
-// the configuration says it has.
-func (l *lib) Complete() bool { return l.complete }
-
-// Notes are the remarks about the lib as a whole.
-func (l *lib) Notes() []diag.Note { return slices.Clone(l.notes) }
-
 // Snapshot returns the current generation.
 func (ix *Index) Snapshot() *Snapshot {
 	ix.mu.RLock()
@@ -233,32 +262,88 @@ func (ix *Index) Snapshot() *Snapshot {
 func (ix *Index) Generation() uint64 { return ix.Snapshot().gen }
 
 // Invalidate tells the index that the named files changed, were created
-// or were deleted (on disk or in an overlay). It makes a new generation
-// that shares everything the change cannot have touched, and returns, in
-// sorted order, the files whose diagnostics the change can affect: the
-// named files; the files built from them; the objects that inherit one of
-// those, however indirectly; the files that were linted and asked about
-// one of those objects; and, when an object changed, the files whose lint
-// asked who inherits them.
+// or were deleted (on disk or in an overlay). A path may also be a
+// directory that was created, deleted or renamed: it stands for the files
+// under it. It makes a new generation that shares everything the change
+// cannot have touched, and returns, in sorted order, the files whose
+// diagnostics the change can affect: the named files; the files built
+// from them; the objects that inherit one of those, however indirectly;
+// the files that were linted and asked about one of those objects; and,
+// when an object changed, the files whose lint asked who inherits them.
+//
+// A change that cannot matter (a path outside the lib that nothing was
+// read from or looked for at) makes no generation and affects nothing
+// but the path itself.
 //
 // Snapshots handed out before are not disturbed, and what they answer
 // stays what it was; results computed from one are results about the
 // generation before the change.
 func (ix *Index) Invalidate(paths ...string) []string {
 	changed := map[string]struct{}{}
-	exists := map[string]bool{} // of the changed files the scan covers
+	var dirs []string // the paths that are not a file now: a directory, or nothing
+	checkExtent := false
 	for _, p := range paths {
 		p = ix.clean(p)
 		changed[p] = struct{}{}
-		if ix.inScope(p) {
-			exists[p] = ix.fs.Exists(p) && !ix.fs.IsDir(p)
+		if !ix.fs.Exists(p) || ix.fs.IsDir(p) {
+			dirs = append(dirs, p)
+		}
+		checkExtent = checkExtent || ix.requires(p)
+	}
+	// The files of a directory that appeared.
+	for _, d := range dirs {
+		if ix.fs.IsDir(d) {
+			ix.lay.Walk(context.Background(), ix.fs, d, []string{".c", ".h"}, ix.exclude, func(p string) {
+				changed[ix.clean(p)] = struct{}{}
+			})
 		}
 	}
 
 	ix.mu.Lock()
 	defer ix.mu.Unlock()
 	old := ix.cur
-	next := newSnapshot(ix, old.gen+1)
+	// The files known under a directory that changed or went away.
+	for _, d := range dirs {
+		prefix := strings.TrimSuffix(d, string(filepath.Separator)) + string(filepath.Separator)
+		under := func(p string) {
+			if strings.HasPrefix(p, prefix) {
+				changed[p] = struct{}{}
+			}
+		}
+		for p := range old.units.keys() {
+			under(p)
+		}
+		for p := range old.headers.keys() {
+			under(p)
+		}
+		for p := range ix.builtFrom {
+			under(p)
+		}
+		for p := range ix.todo {
+			under(p)
+		}
+	}
+	// A path that is no place in the lib and that nothing was read from
+	// or looked for at changes nothing.
+	known := func(p string) bool {
+		_, built := ix.builtFrom[p]
+		return built || ix.LibPath(p) != "" || old.units.has(p) || old.headers.has(p)
+	}
+	if !checkExtent && !slices.ContainsFunc(slices.Collect(maps.Keys(changed)), known) {
+		return sorted(changed)
+	}
+	exists := map[string]bool{} // of the changed files the scan covers
+	for p := range changed {
+		if ix.inScope(p) {
+			exists[p] = ix.fs.Exists(p) && !ix.fs.IsDir(p)
+		}
+	}
+
+	ext := old.ext
+	if checkExtent {
+		ext = ix.extent()
+	}
+	next := newSnapshot(ix, old.gen+1, ext)
 	affected := maps.Clone(changed)
 	everyUnit := func() {
 		for key, u := range old.units.complete() {
@@ -284,8 +369,9 @@ func (ix *Index) Invalidate(paths ...string) []string {
 		}
 	}
 
-	// The force-included header is part of every file.
-	if b, ok := old.base.get(); ok && b.touchedBy(changed) {
+	// The force-included header is part of every file, and whether the
+	// lib is all there decides what every file may conclude from a miss.
+	if b, ok := old.base.get(); ok && b.touchedBy(changed) || ext.complete != old.ext.complete {
 		everyUnit()
 		for key := range old.units.keys() {
 			rescan(key)

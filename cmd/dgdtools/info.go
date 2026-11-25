@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"io/fs"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -56,32 +55,30 @@ func explainCmd(_ context.Context, args []string, _ io.Reader, stdout, stderr io
 		fs.Usage()
 		return 2
 	}
-	for _, r := range lint.Rules() {
-		if r.Name != pos[0] && !strings.EqualFold(r.Code, pos[0]) {
-			continue
-		}
-		def := "off by default"
-		if r.Default {
-			def = "on by default"
-		}
-		scope := "file-local"
-		if r.CrossFile {
-			scope = "needs the lib index"
-		}
-		fmt.Fprintf(stdout, "%s  %s\n%s group, %s, %s, %s\n\n%s\n\n%s\n", r.Code, r.Name, r.Group, r.Severity, def, scope, r.Doc, r.Explain)
-		if opts := r.OptionList(); len(opts) > 0 {
-			fmt.Fprintf(stdout, "\nOptions, in lint.rules under %s:\n", r.Name)
-			for _, o := range opts {
-				fmt.Fprintf(stdout, "    %s: %s; %s\n", o.Key, o.Takes, o.Doc)
-			}
-		}
-		if !r.Late {
-			fmt.Fprintf(stdout, "\nSuppress one occurrence with a comment on its line, or on the line above:\n    /* dgdtools-ignore lint/%s */\n", r.Name)
-		}
-		fmt.Fprintf(stdout, "\n%s\n", r.URL())
-		return 0
+	r := lint.RuleByName(pos[0])
+	if r == nil {
+		return failure(stderr, "explain", fmt.Errorf("unknown rule %q (see `dgdtools rules`)", pos[0]))
 	}
-	return failure(stderr, "explain", fmt.Errorf("unknown rule %q (see `dgdtools rules`)", pos[0]))
+	def := "off by default"
+	if r.Default {
+		def = "on by default"
+	}
+	scope := "file-local"
+	if r.CrossFile {
+		scope = "needs the lib index"
+	}
+	fmt.Fprintf(stdout, "%s  %s\n%s group, %s, %s, %s\n\n%s\n\n%s\n", r.Code, r.Name, r.Group, r.Severity, def, scope, r.Doc, r.Explain)
+	if opts := r.OptionList(); len(opts) > 0 {
+		fmt.Fprintf(stdout, "\nOptions, in lint.rules under %s:\n", r.Name)
+		for _, o := range opts {
+			fmt.Fprintf(stdout, "    %s: %s; %s\n", o.Key, o.Takes, o.Doc)
+		}
+	}
+	if !r.Late {
+		fmt.Fprintf(stdout, "\nSuppress one occurrence with a comment on its line, or on the line above:\n    /* dgdtools-ignore lint/%s */\n", r.Name)
+	}
+	fmt.Fprintf(stdout, "\n%s\n", r.URL())
+	return 0
 }
 
 const configUsage = `usage: dgdtools config [flags] [path]
@@ -89,8 +86,9 @@ const configUsage = `usage: dgdtools config [flags] [path]
 Checks the configuration of a path (default: the working directory) and
 shows what it comes to: the project, and the settings a file there is
 formatted and linted by, with where each comes from. For a directory the
-settings are those of a .c file in it, and every dgdtools.yml below the
-directory is checked as well.
+settings are those of a .c file in it, and every settings scope below the
+directory is checked as well; a root config below it is another project,
+checked when asked about by itself.
 
 Exit codes: 0 the configuration is valid; 2 it is not (an unknown key,
 value, rule or rule option, a project key in a settings scope, a profile
@@ -137,16 +135,23 @@ func configCmd(ctx context.Context, args []string, _ io.Reader, stdout, stderr i
 		return fail(err)
 	}
 	// The configuration files further down are part of what is asked
-	// about: each is checked as the files next to it would meet it.
-	var nested []string
+	// about: each settings scope is checked as the files next to it would
+	// meet it. A root config down there is another project's.
+	var scopes, projects []string
 	if p.fsys.IsDir(target) {
-		if nested, err = nestedConfigs(ctx, p.fsys, l.Project(), target); err != nil {
+		nested, err := nestedConfigs(ctx, p.fsys, l.Project(), target)
+		if err != nil {
 			return fail(err)
 		}
 		for _, n := range nested {
+			if l.Project().Nested(n) != "" {
+				projects = append(projects, n)
+				continue
+			}
 			if _, err := l.EffectiveRules(filepath.Join(filepath.Dir(n), "_.c")); err != nil {
 				return fail(err)
 			}
+			scopes = append(scopes, n)
 		}
 	}
 
@@ -170,7 +175,7 @@ func configCmd(ctx context.Context, args []string, _ io.Reader, stdout, stderr i
 		fmt.Fprintf(w, "mode:          file-local (cross-file rules need a lib root)\n")
 	case prj.Partial:
 		fmt.Fprintf(w, "mode:          partial checkout (what is not in the checkout or the profile is unknown)\n")
-	case l.Index().Complete():
+	case l.Index().Snapshot().Complete():
 		fmt.Fprintf(w, "mode:          whole lib\n")
 	default:
 		fmt.Fprintf(w, "mode:          whole lib, incomplete\n")
@@ -193,7 +198,7 @@ func configCmd(ctx context.Context, args []string, _ io.Reader, stdout, stderr i
 	fmt.Fprintf(w, "typechecking:  %s\n", tc)
 	fmt.Fprintf(w, "baseline:      %s\n", orNone(l.BaselinePath()))
 	fmt.Fprintf(w, "fail on:       %s\n", l.FailOn())
-	for _, n := range slices.Concat(prj.Notes, l.Index().Notes()) {
+	for _, n := range slices.Concat(prj.Notes, l.Index().Snapshot().Notes()) {
 		fmt.Fprintf(w, "note: %s\n", n.Message)
 	}
 
@@ -201,8 +206,11 @@ func configCmd(ctx context.Context, args []string, _ io.Reader, stdout, stderr i
 	for _, sc := range settings.Scopes {
 		fmt.Fprintf(w, "scope:         %s\n", sc.Path)
 	}
-	for _, n := range nested {
+	for _, n := range scopes {
 		fmt.Fprintf(w, "below:         %s (valid)\n", n)
+	}
+	for _, n := range projects {
+		fmt.Fprintf(w, "below:         %s (a project of its own)\n", n)
 	}
 	f, from := settings.Format, settings.From
 	fmt.Fprintf(w, "indent style:  %-9s (%s)\n", f.IndentStyle, from.IndentStyle)
@@ -217,27 +225,17 @@ func configCmd(ctx context.Context, args []string, _ io.Reader, stdout, stderr i
 
 // nestedConfigs lists the configuration files below dir, the project's
 // own aside, that a walk of dir meets: not those in directories the
-// project excludes.
+// project excludes, and of a project below only its root config.
 func nestedConfigs(ctx context.Context, fsys vfs.FS, prj *config.Project, dir string) ([]string, error) {
-	exclude, tree := fileset.NewMatcher(prj.Config.Exclude), prj.Tree()
 	var found []string
-	err := fsys.WalkDir(dir, func(p string, d fs.DirEntry, err error) error {
-		switch {
-		case ctx.Err() != nil:
-			return fs.SkipAll
-		case err != nil:
-			return nil
-		case d.IsDir():
-			if rel, inLib := tree.Rel(p); p != dir && inLib && (exclude.Match(rel) || exclude.MatchDir(rel)) {
-				return fs.SkipDir
-			}
-		case (d.Name() == config.FileName || d.Name() == config.AltFileName) && p != prj.ConfigPath:
+	err := prj.Tree().Walk(ctx, fsys, dir, []string{filepath.Ext(config.FileName)}, fileset.NewMatcher(prj.Config.Exclude), func(p string) {
+		name := filepath.Base(p)
+		if (name != config.FileName && name != config.AltFileName) || p == prj.ConfigPath {
+			return
+		}
+		if other := prj.Nested(p); other == "" || other == p {
 			found = append(found, p)
 		}
-		return nil
 	})
-	if err == nil {
-		err = ctx.Err()
-	}
 	return found, err
 }

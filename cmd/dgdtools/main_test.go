@@ -267,3 +267,51 @@ func TestUserLevelConfig(t *testing.T) {
 	assert.Equal(t, 0, code)
 	assert.Equal(t, formatted, out)
 }
+
+// An interrupted command says so and exits the way a shell reports an
+// interrupt, not as an error of the command.
+func TestInterrupted(t *testing.T) {
+	dir := tree(t, map[string]string{"dgdtools.yml": "", "a.c": "void f() { }\n"})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	for _, args := range [][]string{{"lint", dir}, {"format", "--check", dir}} {
+		var out, errb bytes.Buffer
+		code := run(ctx, args, strings.NewReader(""), &out, &errb)
+		assert.Equal(t, 130, code, args)
+		assert.Equal(t, "dgdtools "+args[0]+": interrupted\n", errb.String())
+	}
+}
+
+// A directory below the project with a root config of its own is another
+// project to every command: lint passes over it and says so, format
+// formats it by its own settings, config names it.
+func TestNestedProject(t *testing.T) {
+	const bare = "int f() {\nreturn 1;\n}\n"
+	dir := tree(t, map[string]string{
+		"dgdtools.yml":     "lint:\n  rules: {missing-visibility: warning}\n",
+		"a.c":              bare,
+		"own/dgdtools.yml": "lint:\n  rules: {missing-visibility: error}\nformat: {indent_style: tab}\n",
+		"own/b.c":          bare,
+	})
+	own := filepath.Join(dir, "own")
+	code, out, errs := dgdtools(t, "", "lint", dir)
+	assert.Equal(t, 0, code, errs)
+	assert.Contains(t, out, "a.c:1:5: warning")
+	assert.NotContains(t, out, "b.c")
+	assert.Contains(t, errs, "1 file(s) under "+own+" are a project of their own (dgdtools.yml) and were not linted")
+	code, out, _ = dgdtools(t, "", "lint", own)
+	assert.Equal(t, 1, code)
+	assert.Contains(t, out, "b.c:1:5: error")
+	code, out, _ = dgdtools(t, "", "lint", filepath.Join(own, "b.c"))
+	assert.Equal(t, 1, code)
+	assert.Contains(t, out, "b.c:1:5: error")
+
+	code, out, errs = dgdtools(t, "", "config", dir)
+	assert.Equal(t, 0, code, errs)
+	assert.Contains(t, out, "below:         "+filepath.Join(own, "dgdtools.yml")+" (a project of its own)")
+
+	code, _, errs = dgdtools(t, "", "format", "-q", dir)
+	assert.Equal(t, 0, code, errs)
+	assert.Equal(t, "int\nf()\n{\n    return 1;\n}\n", read(t, filepath.Join(dir, "a.c")))
+	assert.Equal(t, "int\nf()\n{\n\treturn 1;\n}\n", read(t, filepath.Join(own, "b.c")))
+}

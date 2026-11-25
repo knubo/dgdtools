@@ -14,11 +14,13 @@
 //
 // Exit codes, for every subcommand: 0 success; 1 what was looked for was
 // found (lint findings at or above the fail-on severity, files that
-// `format --check` would change); 2 usage, configuration or I/O error.
+// `format --check` would change); 2 usage, configuration or I/O error;
+// 130 interrupted.
 package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -35,8 +37,13 @@ import (
 var version = "dev"
 
 func main() {
+	// The first interrupt stops the command in an orderly way; after it
+	// the signal has its usual effect again.
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
-	defer stop()
+	go func() {
+		<-ctx.Done()
+		stop()
+	}()
 	os.Exit(run(ctx, os.Args[1:], os.Stdin, os.Stdout, os.Stderr))
 }
 
@@ -107,8 +114,13 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 }
 
 // failure reports an error of the named command and returns the exit code
-// for errors.
+// for it: 2, or 130 (128 + SIGINT, as a shell reports it) when the
+// command was interrupted.
 func failure(stderr io.Writer, cmd string, err error) int {
+	if errors.Is(err, context.Canceled) {
+		fmt.Fprintf(stderr, "dgdtools %s: interrupted\n", cmd)
+		return 130
+	}
 	fmt.Fprintf(stderr, "dgdtools %s: %v\n", cmd, err)
 	return 2
 }
@@ -143,6 +155,23 @@ func (p process) abs(path string) string {
 		return filepath.Clean(path)
 	}
 	return filepath.Join(p.wd, path)
+}
+
+// standardInput reports whether a command's arguments ask for standard
+// input: "-" alone, or --stdin-filename with no path. It then returns
+// where the text stands: at the file named, or at a nameless one in the
+// working directory. Asking for it beside paths is an error.
+func (p process) standardInput(paths []string, name string) (path string, ok bool, err error) {
+	switch {
+	case len(paths) == 1 && paths[0] == "-" || len(paths) == 0 && name != "":
+		if name == "" {
+			name = "<stdin>"
+		}
+		return p.abs(name), true, nil
+	case name != "" || slices.Contains(paths, "-"):
+		return "", false, errors.New("standard input (\"-\", --stdin-filename) cannot be combined with paths")
+	}
+	return "", false, nil
 }
 
 // projectFlags are the flags that say where the project is, the same for

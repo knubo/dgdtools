@@ -3,11 +3,13 @@ package config
 import (
 	"fmt"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
 
 	"github.com/mmcdole/dgdtools/pkg/diag"
+	"github.com/mmcdole/dgdtools/pkg/editorconfig"
 	"github.com/mmcdole/dgdtools/pkg/fileset"
 	"github.com/mmcdole/dgdtools/pkg/lexer"
 	"github.com/mmcdole/dgdtools/pkg/profile"
@@ -49,6 +51,8 @@ type Project struct {
 	// root, or the first path's directory. It is what a run with no path
 	// arguments works on when there is no whole lib.
 	Base string
+	// inputs are the files the project was resolved from; see Inputs.
+	inputs []string
 	// Notes are remarks about how the project was resolved.
 	Notes []diag.Note
 
@@ -64,6 +68,13 @@ type Project struct {
 // disk, or part of it is and a profile or a lib path places it.
 func (prj *Project) HasLib() bool { return prj.Root != "" || prj.Partial }
 
+// Inputs returns the files the project was resolved from: its config
+// file and the files that extends, the profile, the driver's
+// configuration. When one of them changes the project is another one,
+// and is resolved again (Workspace.Invalidate); a long-lived caller
+// watches them.
+func (prj *Project) Inputs() []string { return slices.Clone(prj.inputs) }
+
 // Tree returns where the project's lib is on disk.
 func (prj *Project) Tree() fileset.Tree {
 	return fileset.Tree{Root: prj.Root, CheckoutDir: prj.CheckoutDir, CheckoutLib: prj.CheckoutLib}
@@ -78,7 +89,9 @@ type DiscoverOptions struct {
 	Root       string // use this lib root
 	NoConfig   bool   // read no configuration file of any kind
 	Profile    string // use this profile (name or file)
-	LibPath    string // the checkout's lib path
+	// LibPath is the lib path of the checkout, for a project whose
+	// config does not say: the lib path of WorkDir.
+	LibPath string
 	// Format are format settings that win over every configuration file
 	// (command-line flags).
 	Format Format
@@ -205,6 +218,7 @@ func resolve(fs vfs.FS, opt DiscoverOptions, found, base string) (*Project, erro
 			return nil, err
 		}
 		prj.Config = c
+		prj.inputs = slices.Clone(c.Files)
 		switch {
 		case c.Scope:
 			return nil, fmt.Errorf("%s is a settings scope (root: false), not a project's config", prj.ConfigPath)
@@ -233,6 +247,7 @@ func resolve(fs vfs.FS, opt DiscoverOptions, found, base string) (*Project, erro
 			return nil, err
 		}
 		prj.Profile = p
+		prj.inputs = append(prj.inputs, p.Path)
 		applyProfile(cfg, p)
 		// What the profile says is checked like what the file says.
 		if err := cfg.Validate(); err != nil {
@@ -247,16 +262,13 @@ func resolve(fs vfs.FS, opt DiscoverOptions, found, base string) (*Project, erro
 		if err != nil {
 			return nil, fmt.Errorf("profile_build.driver_config: %w", err)
 		}
+		prj.inputs = append(prj.inputs, dc)
 		d.Apply(cfg)
 		if err := cfg.Validate(); err != nil {
 			return nil, fmt.Errorf("%s: %w", dc, err)
 		}
 	}
 
-	libPath := opt.LibPath
-	if libPath == "" {
-		libPath = cfg.LibPath
-	}
 	switch {
 	case opt.Root != "":
 		root, err := opt.abs(opt.Root)
@@ -264,8 +276,14 @@ func resolve(fs vfs.FS, opt DiscoverOptions, found, base string) (*Project, erro
 			return nil, err
 		}
 		prj.Root = root
-	case libPath != "":
-		prj.mount(base, libPath)
+	case opt.LibPath != "" && prj.Root == "" && opt.WorkDir != "":
+		// With no config to say which directory the lib path is of, it
+		// is the working directory's, whatever paths were asked about.
+		prj.mount(opt.WorkDir, opt.LibPath)
+	case opt.LibPath != "":
+		prj.mount(base, opt.LibPath)
+	case cfg.LibPath != "":
+		prj.mount(base, cfg.LibPath)
 	case prj.Profile != nil && !prj.wholeLib(fs):
 		// A profile and something that is not the whole lib: a partial
 		// checkout. Where it sits is read off its path when one of the
@@ -303,7 +321,8 @@ func unplaced(dir string, checkouts []string) string {
 
 // Workspace finds the project of each path it is asked about, for tools
 // that take files from anywhere: the formatter, an editor server. Each
-// project is resolved once. It is safe for concurrent use.
+// project is resolved once, and again after Invalidate was told that
+// what it was resolved from changed. It is safe for concurrent use.
 type Workspace struct {
 	fs  vfs.FS
 	opt DiscoverOptions
@@ -369,6 +388,58 @@ func (w *Workspace) root(dir string) (string, error) {
 	}
 	w.roots[dir] = r
 	return r, nil
+}
+
+// Invalidate tells the workspace that the file or directory at path
+// (absolute) changed, was created or was deleted. When it is something
+// projects are configured by, the workspace forgets what it resolved from
+// it and reports true: settings may be different now, for any file. The
+// projects that are not what they were are returned too; Project resolves
+// them again when next asked, as new values.
+//
+// A dgdtools.yml drops the project it is the root config of and the
+// projects it is, or may now be, a settings scope of; one of a project's
+// other Inputs drops that project; an .editorconfig is read again by
+// all.
+func (w *Workspace) Invalidate(path string) (dropped []*Project, changed bool) {
+	path = filepath.Clean(path)
+	name, dir := filepath.Base(path), filepath.Dir(path)
+	config := name == FileName || name == AltFileName
+	source := filepath.Ext(name) == ".c" || filepath.Ext(name) == ".h"
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	for root, f := range w.projects {
+		prj := f.prj
+		if prj == nil {
+			// One that could not be resolved is tried again after any
+			// change that may be to what was wrong with it.
+			if !source {
+				delete(w.projects, root)
+				changed = true
+			}
+			continue
+		}
+		_, scoped := prj.top(dir)
+		drop := config && scoped
+		for _, in := range prj.inputs {
+			if _, under := fileset.Under(path, in); under {
+				drop = true
+			}
+		}
+		switch {
+		case drop:
+			delete(w.projects, root)
+			dropped = append(dropped, prj)
+		case name == editorconfig.FileName:
+			prj.forgetEditors()
+			changed = true
+		}
+	}
+	if config || len(dropped) > 0 {
+		clear(w.roots)
+		changed = true
+	}
+	return dropped, changed
 }
 
 // mount makes the project a partial checkout: dir on disk is lib path lib.

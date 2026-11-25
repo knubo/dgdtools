@@ -70,9 +70,8 @@ type baselineFile struct {
 }
 
 // Baseline returns the baseline in the file at path (absolute), nil when
-// there is no such file. A file is read once in the linter's life: a
-// linter is rebuilt when a baseline changes, as when its configuration
-// does.
+// there is no such file. A file is read once, and again after
+// BaselineChanged.
 func (l *Linter) Baseline(path string) (*Baseline, error) {
 	if path == "" {
 		return nil, nil
@@ -99,6 +98,15 @@ func (l *Linter) Baseline(path string) (*Baseline, error) {
 		f.b = b
 	})
 	return f.b, f.err
+}
+
+// BaselineChanged tells the linter that the file at path changed. When
+// it is a baseline the linter has read, the next lint reads it again;
+// the result says so, since every finding may then be reported
+// differently.
+func (l *Linter) BaselineChanged(path string) bool {
+	_, read := l.baselines.LoadAndDelete(filepath.Clean(path))
+	return read
 }
 
 // baselineFor returns the baseline a lint with the given options

@@ -95,12 +95,7 @@ type Options struct {
 // c whose format settings are s (config.Settings.Format; unset keys are
 // the defaults).
 func OptionsFor(c *config.Config, s config.Format) Options {
-	return Options{Defined: c.Predefined(), Macros: c.MacroClasses()}.With(s)
-}
-
-// With returns o with its three settings replaced by s.
-func (o Options) With(s config.Format) Options {
-	o.IndentStyle, o.IndentWidth, o.LineEndings = Spaces, s.IndentWidth, Preserve
+	o := Options{IndentWidth: s.IndentWidth, Defined: c.Predefined(), Macros: c.MacroClasses()}
 	if s.IndentStyle == config.IndentTab {
 		o.IndentStyle = Tabs
 	}
@@ -111,6 +106,25 @@ func (o Options) With(s config.Format) Options {
 		o.LineEndings = CRLF
 	}
 	return o
+}
+
+// Source formats src, the text of the file at path (absolute; it need
+// not exist), as its project prj has that file formatted: in the
+// project's dialect, with the file's own settings (config.Project.Settings).
+// With lines, only those lines are formatted (Lines). It is the whole of
+// what `dgdtools format` and an editor's formatting request do to a
+// text; Edits turns the result into text edits.
+func Source(prj *config.Project, path string, src []byte, lines []LineRange) ([]byte, error) {
+	set, err := prj.Settings(path)
+	if err != nil {
+		return nil, err
+	}
+	f := lexer.Lex(path, src, prj.Config.TokenDialect())
+	o := OptionsFor(prj.Config, set.Format)
+	if len(lines) == 0 {
+		return Format(f, o)
+	}
+	return Lines(f, o, lines)
 }
 
 // unit returns one level of indentation.

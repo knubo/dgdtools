@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -19,9 +20,10 @@ import (
 	"github.com/mmcdole/dgdtools/pkg/config"
 	"github.com/mmcdole/dgdtools/pkg/fileset"
 	"github.com/mmcdole/dgdtools/pkg/format"
-	"github.com/mmcdole/dgdtools/pkg/lexer"
-	"github.com/mmcdole/dgdtools/pkg/token"
 )
+
+// sourceExts are the files a directory stands for.
+var sourceExts = []string{".c", ".h"}
 
 const formatUsage = `usage: dgdtools format [flags] path ...
        dgdtools format [flags] -
@@ -48,7 +50,7 @@ could not be formatted.
 // formatCmd is `dgdtools format`: pkg/format applied to each file with
 // the settings pkg/config resolves for it.
 func formatCmd(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) int {
-	c := &formatter{ctx: ctx, stdout: stdout, stderr: stderr, base: map[*config.Project]format.Options{}}
+	c := &formatter{ctx: ctx, stdout: stdout, stderr: stderr}
 	var (
 		project                  projectFlags
 		stdinName                string
@@ -96,12 +98,12 @@ func formatCmd(ctx context.Context, args []string, stdin io.Reader, stdout, stde
 	}
 	c.projects = config.NewWorkspace(c.fsys, opt)
 
-	fromStdin := len(paths) == 1 && paths[0] == "-" || len(paths) == 0 && stdinName != ""
+	stdinPath, fromStdin, err := c.standardInput(paths, stdinName)
 	switch {
-	case len(paths) == 0 && stdinName == "":
+	case err != nil:
+		return c.fail(err)
+	case len(paths) == 0 && !fromStdin:
 		return c.fail(errors.New("nothing to format: give a path (\".\" is the working directory) or \"-\" for standard input"))
-	case !fromStdin && (stdinName != "" || slices.Contains(paths, "-")):
-		return c.fail(errors.New("standard input (\"-\", --stdin-filename) cannot be combined with paths"))
 	case c.gitBase != "" && !c.changed:
 		return c.fail(errors.New("--base goes with --changed"))
 	case c.changed && (fromStdin || len(c.lines) > 0):
@@ -111,7 +113,10 @@ func formatCmd(ctx context.Context, args []string, stdin io.Reader, stdout, stde
 	}
 
 	if fromStdin {
-		return c.stdin(stdin, stdinName)
+		if stdinName == "" {
+			stdinName = "<stdin>"
+		}
+		return c.stdin(stdin, stdinPath, stdinName)
 	}
 	jobs := c.collect(paths)
 	// Format on all CPUs, report in order.
@@ -158,21 +163,17 @@ type formatter struct {
 	gitBase            string
 
 	projects *config.Workspace
-	// base is each project's part of the formatter's options.
-	base map[*config.Project]format.Options
 
 	reformatted, unchanged, failed int
 	errored                        bool
 }
 
-// job is one file to format: its path, how the user named it, and what
-// it is formatted with.
+// job is one file to format: its path, how the user named it, and the
+// project whose settings it is formatted by.
 type job struct {
 	path, name string
-	opts       format.Options
-	dialect    token.Dialect
-	// lines, when whole is not set, are the only lines to format.
-	whole bool
+	prj        *config.Project
+	// lines, when not empty, are the only lines to format.
 	lines []format.LineRange
 }
 
@@ -199,46 +200,17 @@ func (c *formatter) exit() int {
 	return 0
 }
 
-// job makes the job for the file at path, which belongs to prj.
-func (c *formatter) job(prj *config.Project, path, name string) (job, error) {
-	settings, err := prj.Settings(path)
-	if err != nil {
-		return job{}, err
-	}
-	base, ok := c.base[prj]
-	if !ok {
-		base = format.OptionsFor(prj.Config, config.Format{})
-		c.base[prj] = base
-	}
-	return job{
-		path: path, name: name,
-		opts: base.With(settings.Format), dialect: prj.Config.TokenDialect(),
-		whole: len(c.lines) == 0, lines: c.lines,
-	}, nil
-}
-
-// stdin formats standard input, named name when that is not empty, to
-// standard output.
-func (c *formatter) stdin(stdin io.Reader, name string) int {
+// stdin formats standard input, as the file at path, to standard output.
+func (c *formatter) stdin(stdin io.Reader, path, name string) int {
 	src, err := io.ReadAll(stdin)
 	if err != nil {
 		return c.fail(err)
-	}
-	path := filepath.Join(c.wd, "<stdin>")
-	if name != "" {
-		path = c.abs(name)
-	} else {
-		name = "<stdin>"
 	}
 	prj, err := c.projects.Project(filepath.Dir(path))
 	if err != nil {
 		return c.fail(err)
 	}
-	j, err := c.job(prj, path, name)
-	if err != nil {
-		return c.fail(err)
-	}
-	r := c.format(j, src)
+	r := c.format(job{path: path, name: name, prj: prj, lines: c.lines}, src)
 	if r.err == nil && !c.check && !c.diff {
 		c.stdout.Write(r.out)
 		return 0
@@ -249,8 +221,10 @@ func (c *formatter) stdin(stdin io.Reader, name string) int {
 
 // collect returns the jobs for the paths given on the command line. A
 // file is formatted even if its project excludes it; a directory stands
-// for the .c and .h files under it that its project does not exclude,
-// all of them files of that project.
+// for the .c and .h files under it that their project does not exclude.
+// The project of a file is that of the nearest root config above it, so
+// a directory with a root config of its own, below the one named, is
+// walked as the project it is.
 func (c *formatter) collect(paths []string) []job {
 	var jobs []job
 	var changed *changes
@@ -258,16 +232,10 @@ func (c *formatter) collect(paths []string) []job {
 		changed = &changes{base: c.gitBase, lines: map[string][]format.LineRange{}, whole: map[string]bool{}}
 	}
 	add := func(prj *config.Project, path, name string) {
-		j, err := c.job(prj, path, name)
-		if err != nil {
-			c.fail(err)
-			return
-		}
-		if changed != nil {
-			if j.whole = changed.whole[path]; !j.whole {
-				if j.lines = changed.lines[path]; len(j.lines) == 0 {
-					return // nothing in it changed
-				}
+		j := job{path: path, name: name, prj: prj, lines: c.lines}
+		if changed != nil && !changed.whole[path] {
+			if j.lines = changed.lines[path]; len(j.lines) == 0 {
+				return // nothing in it changed
 			}
 		}
 		jobs = append(jobs, j)
@@ -278,11 +246,6 @@ func (c *formatter) collect(paths []string) []job {
 			c.fail(fmt.Errorf("%s: no such file or directory", arg))
 			continue
 		}
-		prj, err := c.projects.Project(path)
-		if err != nil {
-			c.fail(err)
-			continue
-		}
 		if changed != nil {
 			if err := changed.read(c.ctx, path, c.fsys.IsDir(path)); err != nil {
 				c.fail(err)
@@ -290,36 +253,51 @@ func (c *formatter) collect(paths []string) []job {
 			}
 		}
 		if !c.fsys.IsDir(path) {
+			prj, err := c.projects.Project(path)
+			if err != nil {
+				c.fail(err)
+				continue
+			}
 			add(prj, path, arg)
 			continue
 		}
-		err = prj.Tree().Walk(c.ctx, c.fsys, path, []string{".c", ".h"}, fileset.NewMatcher(prj.Config.Exclude), func(file string) {
-			shown := file
-			if rel, err := filepath.Rel(path, file); err == nil {
-				shown = filepath.Join(arg, rel)
+		first := len(jobs)
+		var walk func(dir string)
+		walk = func(dir string) {
+			prj, err := c.projects.Project(dir)
+			if err != nil {
+				c.fail(err)
+				return
 			}
-			add(prj, file, shown)
-		})
-		if err != nil && c.ctx.Err() == nil {
-			c.fail(err)
+			nested := map[string]bool{} // the directories below that are projects of their own
+			err = prj.Tree().Walk(c.ctx, c.fsys, dir, sourceExts, fileset.NewMatcher(prj.Config.Exclude), func(file string) {
+				if other := prj.Nested(file); other != "" {
+					nested[filepath.Dir(other)] = true
+					return
+				}
+				shown := file
+				if rel, err := filepath.Rel(path, file); err == nil {
+					shown = filepath.Join(arg, rel)
+				}
+				add(prj, file, shown)
+			})
+			if err != nil && c.ctx.Err() == nil {
+				c.fail(err)
+			}
+			for _, d := range slices.Sorted(maps.Keys(nested)) {
+				walk(d)
+			}
 		}
+		walk(path)
+		slices.SortFunc(jobs[first:], func(a, b job) int { return strings.Compare(a.path, b.path) })
 	}
 	return jobs
 }
 
 // format formats one file's source.
 func (c *formatter) format(j job, src []byte) result {
-	r := result{job: j, src: src}
-	f := lexer.Lex(j.path, src, j.dialect)
-	if r.err = f.CheckRoundTrip(); r.err != nil {
-		return r
-	}
-	if j.whole {
-		r.out, r.err = format.Format(f, j.opts)
-	} else {
-		r.out, r.err = format.Lines(f, j.opts, j.lines)
-	}
-	return r
+	out, err := format.Source(j.prj, j.path, src, j.lines)
+	return result{job: j, src: src, out: out, err: err}
 }
 
 // report does what the mode asks with one file's result.
@@ -392,13 +370,38 @@ func (c *formatter) summary() {
 	fmt.Fprintln(c.stderr, msg)
 }
 
-// writeFile replaces path's contents, preserving its permission bits.
-func writeFile(path string, out []byte) error {
+// writeFile replaces the contents of the file at path, keeping its
+// permission bits. The text is written beside the file and renamed over
+// it, so that an interrupted run leaves either the old file or the new
+// one. A symbolic link stays one: what it points to is replaced.
+func writeFile(path string, out []byte) (err error) {
+	if path, err = filepath.EvalSymlinks(path); err != nil {
+		return err
+	}
 	info, err := os.Stat(path)
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, out, info.Mode().Perm())
+	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".*")
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err != nil {
+			os.Remove(tmp.Name())
+		}
+	}()
+	_, err = tmp.Write(out)
+	if err == nil {
+		err = tmp.Chmod(info.Mode().Perm())
+	}
+	if cerr := tmp.Close(); err == nil {
+		err = cerr
+	}
+	if err != nil {
+		return err
+	}
+	return os.Rename(tmp.Name(), path)
 }
 
 // lineRanges is the value of the repeatable --lines flag.

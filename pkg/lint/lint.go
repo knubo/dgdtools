@@ -22,8 +22,9 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"path"
+	"maps"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -276,11 +277,18 @@ const (
 	// what the run says about the rest of the lib may be missing
 	// something.
 	Internal
+	// Stale: the file's text changed under the lint, which would have
+	// had to mix what it knew of the old text with the new. Lint again
+	// (after Invalidate, when the linter has not been told).
+	Stale
 )
 
 func (k ErrorKind) String() string {
-	if k == Internal {
+	switch k {
+	case Internal:
 		return "internal"
+	case Stale:
+		return "stale"
 	}
 	return "unreadable"
 }
@@ -290,6 +298,9 @@ func fileError(file string, err error) *FileError {
 	var crash *index.InternalError
 	if errors.As(err, &crash) {
 		return &FileError{Path: crash.Path, Kind: Internal, Message: "internal error (please report): " + crash.Panic}
+	}
+	if errors.Is(err, index.ErrChanged) {
+		return &FileError{Path: file, Kind: Stale, Message: "changed while it was being linted"}
 	}
 	msg := err.Error()
 	var pe *fs.PathError
@@ -304,8 +315,10 @@ func fileError(file string, err error) *FileError {
 // answering hover, symbols, semantic tokens) need not parse again.
 type Document struct {
 	Path string
-	// Generation is the index generation the document was linted
-	// against; see Linter.Generation.
+	// Snapshot is the generation of the index the document was linted
+	// against, for further questions about the lib as the diagnostics
+	// saw it; Generation is its number. See Linter.Generation.
+	Snapshot   *index.Snapshot
 	Generation uint64
 	File       *token.File
 	Tree       *syntax.File
@@ -336,7 +349,6 @@ type Linter struct {
 	overrides []*layer           // the project's lint.overrides
 	scopes    sync.Map           // *config.Scope -> *scopeLayers
 	layerIDs  atomic.Int32
-	format    format.Options // the project's part of the formatter's options
 	registry  *calls.Registry
 	failOn    diag.Severity
 
@@ -358,7 +370,6 @@ func New(prj *config.Project, fsys vfs.FS) (*Linter, error) {
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
-	l.format = format.OptionsFor(cfg, config.Format{})
 	if cfg.Lint.FailOn != "" {
 		l.failOn, _ = diag.ParseSeverity(cfg.Lint.FailOn)
 	}
@@ -444,7 +455,7 @@ func (l *Linter) Run(ctx context.Context, req Request) (*Result, error) {
 		}
 	}
 	var files []string
-	seen := map[string]bool{}
+	seen, nested := map[string]bool{}, map[string]int{}
 	add := func(f string) {
 		if !seen[f] {
 			seen[f] = true
@@ -464,12 +475,24 @@ func (l *Linter) Run(ctx context.Context, req Request) (*Result, error) {
 			if err != nil {
 				return res, err
 			}
+			// A directory with a root config of its own is another
+			// project, with a lib and settings of its own to be linted
+			// by: its files are part of this lib, and not of this run.
 			for _, f := range list {
-				add(f)
+				if other := prj.Nested(f); other != "" {
+					nested[other]++
+				} else {
+					add(f)
+				}
 			}
 		default:
 			add(p) // a file named explicitly is linted even if excluded
 		}
+	}
+	for _, other := range slices.Sorted(maps.Keys(nested)) {
+		res.Notes = append(res.Notes, diag.Note{Kind: diag.NoteNestedProject, Path: other, Message: fmt.Sprintf(
+			"%d file(s) under %s are a project of their own (%s) and were not linted: lint that directory by itself",
+			nested[other], filepath.Dir(other), filepath.Base(other))})
 	}
 	if place, what := prj.Root, "lib root"; prj.HasLib() && (place != "" || prj.CheckoutLib != "") {
 		if place == "" {
@@ -570,7 +593,7 @@ func (l *Linter) Run(ctx context.Context, req Request) (*Result, error) {
 
 // release drops what a run over many files must not keep in memory.
 func (d *Document) release() *Document {
-	d.File, d.Tree, d.Env = nil, nil, nil
+	d.Snapshot, d.File, d.Tree, d.Env = nil, nil, nil, nil
 	return d
 }
 
@@ -620,18 +643,16 @@ func (l *Linter) lintFile(ctx context.Context, s *index.Snapshot, file string, s
 	}
 	u := parsed.Unit
 	doc = &Document{
-		Path: file, Generation: s.Generation(),
+		Path: file, Snapshot: s, Generation: s.Generation(),
 		File: parsed.Tok, Tree: parsed.Tree, Env: parsed.Env, Unit: u,
 	}
-	rel := strings.TrimPrefix(u.LibPath, "/") // the file's lib-relative name
-	if u.LibPath != "" && path.Ext(rel) == "" {
-		rel += ".c"
-	}
+	rel, _ := l.project.Tree().Rel(file) // the file's lib-relative name
 	rules, err := sel.rules(file, rel, set)
 	if err != nil {
 		return nil, err
 	}
 	query := s.Query(u, opt.NoScan)
+	formatting := format.OptionsFor(l.project.Config, set.Format)
 	shared := &fileShared{}
 	stats := &shared.stats
 	if u.Partial {
@@ -674,7 +695,7 @@ func (l *Linter) lintFile(ctx context.Context, s *index.Snapshot, file string, s
 			pass := &Pass{
 				Ctx: ctx, File: parsed.Tok, Tree: parsed.Tree, Env: parsed.Env,
 				Unit: u, Index: query, LibPath: u.LibPath,
-				Config: l.project.Config, Options: a.options, Format: l.format.With(set.Format),
+				Config: l.project.Config, Options: a.options, Format: formatting,
 				shared: shared, registry: l.registry, rule: r, severity: a.severity, out: &out,
 			}
 			// A rule that crashes costs its own findings and no more.
@@ -763,11 +784,22 @@ func (l *Linter) EffectiveRules(path string) ([]*Rule, error) {
 	return out, nil
 }
 
-// RuleByName returns the rule with the given name or code, or nil.
-func (l *Linter) RuleByName(key string) *Rule {
+// rule returns the rule with the given name or code, or nil.
+func (l *Linter) rule(key string) *Rule {
 	rs := l.lookup(key)
 	if len(rs) == 1 && (rs[0].Name == key || strings.EqualFold(rs[0].Code, key)) {
 		return rs[0]
+	}
+	return nil
+}
+
+// RuleByName returns the rule of the rule table with the given name or
+// code, or nil.
+func RuleByName(key string) *Rule {
+	for _, r := range Rules() {
+		if r.Name == key || strings.EqualFold(r.Code, key) {
+			return r
+		}
 	}
 	return nil
 }

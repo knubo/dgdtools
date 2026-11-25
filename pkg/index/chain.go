@@ -142,23 +142,19 @@ func (s *Snapshot) autoState() *autoState {
 	})
 }
 
-// AutoFuncs returns the functions every object gets from the configured
-// auto objects.
-func (s *Snapshot) AutoFuncs() map[string]ChainFunc { return s.autoState().funcs }
-
-// UsersOf returns the objects whose program includes libPath's: those
+// usersOf returns the objects whose program includes libPath's: those
 // that inherit it, however indirectly, and those that #include it as
 // code. It needs the whole-lib scan and runs it if it has not completed.
 // The second result is false when the answer cannot be had: the scan was
 // cancelled, or the index has moved on to a newer generation.
-func (s *Snapshot) UsersOf(ctx context.Context, libPath string) ([]string, bool) {
+func (s *Snapshot) usersOf(ctx context.Context, libPath string) ([]string, bool) {
 	if !s.Scan(ctx) {
 		return nil, false
 	}
 	return s.users(libPath)
 }
 
-// users answers UsersOf from the index's reverse edges, which are those
+// users answers usersOf from the index's reverse edges, which are those
 // of this generation only while it is the current one.
 func (s *Snapshot) users(libPath string) ([]string, bool) {
 	ix := s.ix
@@ -225,10 +221,10 @@ const (
 // maxUserChains bounds the fallback search through inheritors' chains.
 const maxUserChains = 20
 
-// usersFunc answers UsersOf, or declines to.
+// usersFunc answers usersOf, or declines to.
 type usersFunc func(ctx context.Context, libPath string) ([]string, bool)
 
-// LookupCallable resolves function name fn in the object at target.
+// lookupCallable resolves function name fn in the object at target.
 //
 // self says the receiver is this_object() in code that lives in target:
 // the running object may then be any inheritor (or includer) of target,
@@ -236,12 +232,10 @@ type usersFunc func(ctx context.Context, libPath string) ([]string, bool)
 // too — the callback a module registers is routinely provided by a
 // sibling module or the leaf. When the receiver is the named object
 // itself ("/path"->fn()), only its own chain counts.
-func (s *Snapshot) LookupCallable(ctx context.Context, target, fn string, self bool) Lookup {
-	return s.lookupCallable(ctx, target, fn, self, s.UsersOf)
-}
-
+//
+// A lookup made after ctx was cancelled reads nothing and is unknown.
 func (s *Snapshot) lookupCallable(ctx context.Context, target, fn string, self bool, usersOf usersFunc) Lookup {
-	if !s.HasLib() || target == "" {
+	if !s.HasLib() || target == "" || ctx.Err() != nil {
 		return Lookup{State: LookupUnknown}
 	}
 	ch := s.Chain(target)
@@ -302,13 +296,9 @@ func (s *Snapshot) lookupCallable(ctx context.Context, target, fn string, self b
 	return Lookup{State: LookupMissing, Searched: SearchedUsers, Users: len(users)}
 }
 
-// ProvidedByUsers reports whether any inheritor/includer of libPath
+// providedByUsers reports whether any inheritor/includer of libPath
 // supplies a real definition of fn. It returns true (assume provided)
 // whenever the bounded search cannot decide.
-func (s *Snapshot) ProvidedByUsers(ctx context.Context, libPath, fn string) bool {
-	return s.providedByUsers(ctx, libPath, fn, s.UsersOf)
-}
-
 func (s *Snapshot) providedByUsers(ctx context.Context, libPath, fn string, usersOf usersFunc) bool {
 	users, ok := usersOf(ctx, libPath)
 	if !ok {

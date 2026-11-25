@@ -15,7 +15,10 @@ import (
 
 const nShards = 64
 
-var shardSeed = maphash.MakeSeed()
+var seed = maphash.MakeSeed()
+
+// textSum identifies a file's text within this process.
+func textSum(src []byte) uint64 { return maphash.Bytes(seed, src) }
 
 // table is a concurrent map from string to V.
 type table[V any] struct {
@@ -26,7 +29,7 @@ type table[V any] struct {
 }
 
 func (t *table[V]) get(key string) (V, bool) {
-	sh := &t.shards[maphash.String(shardSeed, key)%nShards]
+	sh := &t.shards[maphash.String(seed, key)%nShards]
 	sh.mu.Lock()
 	v, ok := sh.m[key]
 	sh.mu.Unlock()
@@ -36,7 +39,7 @@ func (t *table[V]) get(key string) (V, bool) {
 // getOrPut returns the value for key, storing mk's result first if there
 // is none. mk runs with the shard locked and must not use the table.
 func (t *table[V]) getOrPut(key string, mk func() V) V {
-	sh := &t.shards[maphash.String(shardSeed, key)%nShards]
+	sh := &t.shards[maphash.String(seed, key)%nShards]
 	sh.mu.Lock()
 	defer sh.mu.Unlock()
 	v, ok := sh.m[key]
@@ -51,7 +54,7 @@ func (t *table[V]) getOrPut(key string, mk func() V) V {
 }
 
 func (t *table[V]) delete(key string) {
-	sh := &t.shards[maphash.String(shardSeed, key)%nShards]
+	sh := &t.shards[maphash.String(seed, key)%nShards]
 	sh.mu.Lock()
 	delete(sh.m, key)
 	sh.mu.Unlock()

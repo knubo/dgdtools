@@ -80,12 +80,9 @@ func TestSettingsPerFile(t *testing.T) {
 	// A file that does not exist yet has settings too (an editor buffer).
 	assert.Equal(t, s.Format, settings("/mud/lib/players/bob/new/unsaved.c").Format)
 
-	// A root config below the project being run counts as a scope: its
-	// settings apply, its project keys do not.
-	s = settings("/mud/lib/players/cyd/c.c")
-	assert.Equal(t, Format{IndentSpace, 2, LineEndingsCRLF}, s.Format)
-	require.Len(t, s.Scopes, 2)
-	assert.Equal(t, "/mud/lib/players/cyd/dgdtools.yml", s.Scopes[1].Path)
+	// A root config below the project is another project (TestNestedProject).
+	_, err = prj.Settings("/mud/lib/players/cyd/c.c")
+	assert.ErrorContains(t, err, "belongs to the project of /mud/lib/players/cyd/dgdtools.yml")
 
 	// The caller's settings win over every file.
 	prj, err = Discover(m, []string{"/mud/lib"}, DiscoverOptions{Format: Format{IndentWidth: 3}})
@@ -193,14 +190,162 @@ func TestScopeValidation(t *testing.T) {
 	// A scope cannot be the project.
 	_, err = Discover(m, []string{"/p"}, DiscoverOptions{ConfigPath: "/p/sub/dgdtools.yml"})
 	assert.ErrorContains(t, err, "is a settings scope")
-	// Fixed, it is read again once the cache is reset.
-	m["/p/bad/dgdtools.yml"] = "root: false\nformat: {indent_width: 1}\n"
-	_, err = prj.Settings("/p/bad/deep/b.c")
-	assert.Error(t, err)
-	prj.ResetSettings()
-	s, err = prj.Settings("/p/bad/deep/b.c")
+}
+
+// A root config below a project's own is another project: its directory
+// is not the outer project's, whichever way it is come by.
+func TestNestedProject(t *testing.T) {
+	m := vfs.Mem{
+		"/p/dgdtools.yml":               "format: {indent_width: 8}\n",
+		"/p/a.c":                        "",
+		"/p/sub/dgdtools.yml":           "root: false\nformat: {indent_width: 2}\n",
+		"/p/sub/own/dgdtools.yml":       "format: {indent_style: tab}\nconventions: {specifier_macros: [public]}\n",
+		"/p/sub/own/deep/b.c":           "",
+		"/p/sub/own/deep/.dgdtools.yml": "root: false\nformat: {indent_width: 3}\n",
+	}
+	outer, err := Discover(m, []string{"/p"}, DiscoverOptions{})
 	require.NoError(t, err)
-	assert.Equal(t, 1, s.Format.IndentWidth)
+	assert.Empty(t, outer.Nested("/p/a.c"))
+	assert.Empty(t, outer.Nested("/p/sub/x.c"))
+	assert.Equal(t, "/p/sub/own/dgdtools.yml", outer.Nested("/p/sub/own/deep/b.c"))
+	assert.Equal(t, "/p/sub/own/dgdtools.yml", outer.Nested("/p/sub/own"))
+	_, err = outer.Settings("/p/sub/own/deep/b.c")
+	var nested *NestedProjectError
+	require.ErrorAs(t, err, &nested)
+	assert.Equal(t, "/p/sub/own/dgdtools.yml", nested.Config)
+	assert.EqualError(t, err, "/p/sub/own/deep/b.c belongs to the project of /p/sub/own/dgdtools.yml")
+
+	// The same file, asked about by itself or through a workspace.
+	for _, inner := range []func() (*Project, error){
+		func() (*Project, error) { return Discover(m, []string{"/p/sub/own/deep/b.c"}, DiscoverOptions{}) },
+		func() (*Project, error) { return NewWorkspace(m, DiscoverOptions{}).Project("/p/sub/own/deep/b.c") },
+	} {
+		prj, err := inner()
+		require.NoError(t, err)
+		assert.Equal(t, "/p/sub/own/dgdtools.yml", prj.ConfigPath)
+		assert.Equal(t, []string{"public"}, prj.Config.Conventions.SpecifierMacros)
+		s, err := prj.Settings("/p/sub/own/deep/b.c")
+		require.NoError(t, err)
+		assert.Equal(t, Format{IndentTab, 3, LineEndingsPreserve}, s.Format, "its own scopes, and none of the outer project's")
+	}
+	// A config named by hand is the whole configuration.
+	only, err := Discover(m, []string{"/p"}, DiscoverOptions{ConfigPath: "/p/dgdtools.yml"})
+	require.NoError(t, err)
+	assert.Empty(t, only.Nested("/p/sub/own/deep/b.c"))
+}
+
+// A workspace is told what changed, and resolves again what was resolved
+// from it.
+func TestWorkspaceInvalidate(t *testing.T) {
+	m := vfs.Mem{
+		"/ws/lib/dgdtools.yml":   "extends: base.yml\nprofile: /ws/x.profile\nformat:\n  indent_width: 2\n",
+		"/ws/lib/base.yml":       "lint:\n  rules: {syntax: error}\n",
+		"/ws/x.profile":          "dgdtools-profile 1\n{\"name\":\"x\",\"dialect\":{\"driver\":\"dgd\"},\"conventions\":{}}\n",
+		"/ws/lib/a.c":            "",
+		"/ws/lib/sub/b.c":        "",
+		"/ws/other/dgdtools.yml": "",
+		"/ws/other/c.c":          "",
+		"/ws/.editorconfig":      "[*]\nend_of_line = lf\n",
+	}
+	w := NewWorkspace(m, DiscoverOptions{})
+	project := func(path string) *Project {
+		t.Helper()
+		prj, err := w.Project(path)
+		require.NoError(t, err)
+		return prj
+	}
+	width := func(path string) int {
+		t.Helper()
+		s, err := project(path).Settings(path)
+		require.NoError(t, err)
+		return s.Format.IndentWidth
+	}
+	lib, other := project("/ws/lib/sub/b.c"), project("/ws/other/c.c")
+	assert.Equal(t, []string{"/ws/lib/base.yml", "/ws/lib/dgdtools.yml", "/ws/x.profile"}, lib.Inputs())
+	require.Equal(t, 2, width("/ws/lib/sub/b.c"))
+
+	// A source file is nothing to it.
+	dropped, changed := w.Invalidate("/ws/lib/a.c")
+	assert.Empty(t, dropped)
+	assert.False(t, changed)
+	assert.Same(t, lib, project("/ws/lib/a.c"))
+
+	// The root config; a file it extends; the profile.
+	m["/ws/lib/dgdtools.yml"] = "extends: base.yml\nprofile: /ws/x.profile\nformat:\n  indent_width: 8\n"
+	dropped, changed = w.Invalidate("/ws/lib/dgdtools.yml")
+	assert.Equal(t, []*Project{lib}, dropped)
+	assert.True(t, changed)
+	assert.Equal(t, 8, width("/ws/lib/sub/b.c"))
+	assert.Same(t, other, project("/ws/other/c.c"), "another project is left alone")
+	for _, input := range []string{"/ws/lib/base.yml", "/ws/x.profile"} {
+		lib = project("/ws/lib/a.c")
+		dropped, _ = w.Invalidate(input)
+		assert.Equal(t, []*Project{lib}, dropped, input)
+		assert.NotSame(t, lib, project("/ws/lib/a.c"), input)
+	}
+
+	// A settings scope appears, then becomes a project of its own.
+	lib = project("/ws/lib/a.c")
+	m["/ws/lib/sub/dgdtools.yml"] = "root: false\nformat:\n  indent_width: 3\n"
+	dropped, _ = w.Invalidate("/ws/lib/sub/dgdtools.yml")
+	assert.Equal(t, []*Project{lib}, dropped)
+	assert.Equal(t, 3, width("/ws/lib/sub/b.c"))
+	assert.Equal(t, "/ws/lib/dgdtools.yml", project("/ws/lib/sub/b.c").ConfigPath)
+	m["/ws/lib/sub/dgdtools.yml"] = "format:\n  indent_width: 5\n"
+	w.Invalidate("/ws/lib/sub/dgdtools.yml")
+	assert.Equal(t, 5, width("/ws/lib/sub/b.c"))
+	assert.Equal(t, "/ws/lib/sub/dgdtools.yml", project("/ws/lib/sub/b.c").ConfigPath)
+	assert.Equal(t, 8, width("/ws/lib/a.c"))
+
+	// An .editorconfig is read again; no project is another one for it.
+	s, err := other.Settings("/ws/other/c.c")
+	require.NoError(t, err)
+	require.Equal(t, LineEndingsLF, s.Format.LineEndings)
+	m["/ws/.editorconfig"] = "[*]\nend_of_line = crlf\n"
+	dropped, changed = w.Invalidate("/ws/.editorconfig")
+	assert.Empty(t, dropped)
+	assert.True(t, changed)
+	s, err = other.Settings("/ws/other/c.c")
+	require.NoError(t, err)
+	assert.Equal(t, LineEndingsCRLF, s.Format.LineEndings)
+
+	// A project that could not be resolved is tried again.
+	m["/ws/other/dgdtools.yml"] = "no_such_key: 1\n"
+	w.Invalidate("/ws/other/dgdtools.yml")
+	_, err = w.Project("/ws/other/c.c")
+	require.Error(t, err)
+	m["/ws/other/dgdtools.yml"] = ""
+	w.Invalidate("/ws/other/dgdtools.yml")
+	project("/ws/other/c.c")
+
+	// A directory that holds a project's config goes away.
+	gone := project("/ws/other/c.c")
+	delete(m, "/ws/other/dgdtools.yml")
+	delete(m, "/ws/other/c.c")
+	dropped, _ = w.Invalidate("/ws/other")
+	assert.Equal(t, []*Project{gone}, dropped)
+}
+
+// Without a config to say which directory a lib path is of, it is the
+// working directory's, in whatever order the paths come.
+func TestLibPathOption(t *testing.T) {
+	m := vfs.Mem{"/home/ann/a.c": "", "/home/ann/sub/b.c": ""}
+	opt := DiscoverOptions{LibPath: "/players/ann", WorkDir: "/home/ann"}
+	for _, paths := range [][]string{{"a.c", "sub/b.c"}, {"sub/b.c", "a.c"}, nil} {
+		prj, err := Discover(m, paths, opt)
+		require.NoError(t, err)
+		assert.Equal(t, "/home/ann", prj.CheckoutDir, "%v", paths)
+		assert.Equal(t, "/players/ann", prj.CheckoutLib)
+	}
+	w := NewWorkspace(m, opt)
+	prj, err := w.Project("/home/ann/sub/b.c")
+	require.NoError(t, err)
+	assert.Equal(t, "/home/ann", prj.CheckoutDir)
+	// A config's own lib_path is that of its root.
+	m["/home/ann/sub/dgdtools.yml"] = "lib_path: /players/ann/sub\n"
+	prj, err = Discover(m, []string{"sub/b.c"}, DiscoverOptions{WorkDir: "/home/ann"})
+	require.NoError(t, err)
+	assert.Equal(t, "/home/ann/sub", prj.CheckoutDir)
 }
 
 func TestEditorConfig(t *testing.T) {

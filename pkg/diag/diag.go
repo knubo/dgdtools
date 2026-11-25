@@ -167,6 +167,9 @@ const (
 	// NoteUnplacedCheckout: a partial checkout whose place in the lib is
 	// not known; references between its own files are not checked.
 	NoteUnplacedCheckout NoteKind = "unplaced-checkout"
+	// NoteNestedProject: a directory below the project has a root config
+	// of its own and is another project; its files were passed over.
+	NoteNestedProject NoteKind = "nested-project"
 )
 
 // String renders the diagnostic on one line, compiler style.

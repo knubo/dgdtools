@@ -105,6 +105,9 @@ type Config struct {
 	// file; both are empty for a project without one.
 	Dir  string `yaml:"-"`
 	Path string `yaml:"-"`
+	// Files are the files the config was read from: Path and, before it,
+	// the files it extends.
+	Files []string `yaml:"-"`
 }
 
 // StringList decodes from either a scalar or a sequence.
@@ -335,6 +338,7 @@ func loadInto(fs vfs.FS, path string, c *Config, seen map[string]bool) error {
 	if c.ProfileBuild.DriverConfig == "" {
 		c.ProfileBuild.DriverConfig = drv
 	}
+	c.Files = append(c.Files, key)
 	return nil
 }
 

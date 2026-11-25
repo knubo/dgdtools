@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/mmcdole/dgdtools/internal/par"
+	"github.com/mmcdole/dgdtools/pkg/diag"
 	"github.com/mmcdole/dgdtools/pkg/lexer"
 	"github.com/mmcdole/dgdtools/pkg/pp"
 	"github.com/mmcdole/dgdtools/pkg/syntax"
@@ -22,12 +23,13 @@ import (
 // Invalidate calls. It reads files on first need and remembers what it
 // read; an answer, once given, does not change. A Snapshot is safe for
 // concurrent use and stays usable after the index has moved on, though
-// questions that need the whole lib (UsersOf) are then answered
-// "unknown".
+// questions that need the whole lib (who inherits a file) are then
+// answered "unknown".
 type Snapshot struct {
 	*lib
 	ix  *Index
 	gen uint64
+	ext *extent
 
 	headers *memo[*header]
 	units   *memo[*Unit]
@@ -42,9 +44,9 @@ type Snapshot struct {
 	failed map[string]string
 }
 
-func newSnapshot(ix *Index, gen uint64) *Snapshot {
+func newSnapshot(ix *Index, gen uint64, ext *extent) *Snapshot {
 	return &Snapshot{
-		lib: ix.lib, ix: ix, gen: gen,
+		lib: ix.lib, ix: ix, gen: gen, ext: ext,
 		headers: newMemo[*header](), units: newMemo[*Unit](),
 		base: &lazy[*baseState]{}, auto: &lazy[*autoState]{},
 		chains: &table[*Chain]{}, isFile: &table[bool]{}, failed: map[string]string{},
@@ -53,6 +55,24 @@ func newSnapshot(ix *Index, gen uint64) *Snapshot {
 
 // Generation returns the snapshot's generation number.
 func (s *Snapshot) Generation() uint64 { return s.gen }
+
+// Index returns the index the snapshot is a generation of.
+func (s *Snapshot) Index() *Index { return s.ix }
+
+// Current reports whether the snapshot is still the index's current
+// generation: nothing has been invalidated since.
+func (s *Snapshot) Current() bool {
+	s.ix.mu.RLock()
+	defer s.ix.mu.RUnlock()
+	return s.ix.cur == s
+}
+
+// Complete reports whether the whole lib is on disk and has everything
+// the configuration says it has.
+func (s *Snapshot) Complete() bool { return s.ext.complete }
+
+// Notes are the remarks about the lib as a whole.
+func (s *Snapshot) Notes() []diag.Note { return slices.Clone(s.ext.notes) }
 
 // InternalError says that the analysis of a file crashed: a bug in the
 // tools, not in the file.
@@ -116,9 +136,17 @@ func (s *Snapshot) locate(libFile string) (p string, absent []string) {
 
 // ObjectFile returns where the source of the object at libPath is read
 // from: a path on disk or a stub's location; "" when nothing could hold
-// it.
+// it. An object's source is the file of its name with ".c" added,
+// whatever dots the name has. The lib path of a file that is not an
+// object's source (a header linted on its own) is the file's own name,
+// and stands for that file when no object is in the way.
 func (s *Snapshot) ObjectFile(libPath string) string {
-	p, _ := s.locate(withC(libPath))
+	p, _ := s.locate(objectFile(libPath))
+	if path.Ext(libPath) != "" && !s.exists(p) {
+		if own, _ := s.locate(libPath); s.exists(own) {
+			return own
+		}
+	}
 	return p
 }
 
@@ -334,6 +362,7 @@ func (s *Snapshot) baseState() *baseState {
 // analysis is one file read for linting: tokens, tree, and its #define
 // environment.
 type analysis struct {
+	sum  uint64 // textSum of the source
 	tok  *token.File
 	sel  *pp.Selection
 	env  *pp.Env
@@ -353,7 +382,7 @@ func (s *Snapshot) analyze(p string) *analysis {
 	if err != nil {
 		return nil
 	}
-	a := &analysis{tok: lexer.Lex(p, src, s.dialect), base: s.baseState(), inc: newClosure(p)}
+	a := &analysis{sum: textSum(src), tok: lexer.Lex(p, src, s.dialect), base: s.baseState(), inc: newClosure(p)}
 	a.env = pp.NewEnv(s.defined, s.override)
 	a.env.Header = path.Ext(p) != ".c"
 	a.env.Complete = true
@@ -380,6 +409,7 @@ func (s *Snapshot) facts(a *analysis) *Unit {
 		Partial: tree.Partial || a.env.Own().Partial,
 		Deps:    append(slices.Clone(a.inc.deps), a.base.deps...),
 		gen:     s.gen,
+		sum:     a.sum,
 		watch:   append(slices.Clone(a.inc.deps[1:]), a.inc.absent...),
 	}
 	for _, e := range tree.Errors {
@@ -523,18 +553,28 @@ type Parsed struct {
 	Env  *pp.Env
 }
 
+// ErrChanged says a file's text is no longer the text this generation
+// of the index read: it changed, and the index has not been told
+// (Invalidate) or has moved on since.
+var ErrChanged = errors.New("the file changed since it was indexed")
+
 // Parse lexes and parses the file at p for linting and returns its tree
 // together with its facts. The tree is not kept by the index. The facts
 // are built at most once per generation: a file this generation already
-// knows is parsed for its tree only. It fails when the file cannot be
-// read, with the file system's error, and when its analysis crashes,
-// with an *InternalError.
+// knows is parsed for its tree only, and the tree is of the same text as
+// the facts or there is none. It fails when the file cannot be read, with
+// the file system's error; when its text is not what the generation read,
+// with ErrChanged; and when its analysis crashes, with an
+// *InternalError.
 func (s *Snapshot) Parse(p string) (*Parsed, error) {
 	p = s.clean(p)
 	var a *analysis
 	u := s.unit(p, &a)
 	if u != nil && a == nil {
 		s.guard(p, func() { a = s.analyze(p) })
+		if a != nil && a.sum != u.sum {
+			return nil, &fs.PathError{Op: "read", Path: p, Err: ErrChanged}
+		}
 	}
 	if u != nil && a != nil {
 		return &Parsed{Unit: u, Tok: a.tok, Tree: a.tree, Env: a.env}, nil
@@ -548,7 +588,7 @@ func (s *Snapshot) Parse(p string) (*Parsed, error) {
 	if _, err := s.fs.ReadFile(p); err != nil {
 		return nil, err
 	}
-	return nil, &fs.PathError{Op: "read", Path: p, Err: errors.New("the file changed while it was being read")}
+	return nil, &fs.PathError{Op: "read", Path: p, Err: ErrChanged}
 }
 
 // IncludeDeclares reports whether the file an #include resolves to, or
@@ -597,7 +637,8 @@ func (s *Snapshot) Files(ctx context.Context, dir string) ([]string, error) {
 }
 
 // Scanned reports whether the whole-lib scan is complete for this
-// generation: UsersOf then answers without reading anything.
+// generation: who inherits a file is then answered without reading
+// anything.
 func (s *Snapshot) Scanned() bool {
 	s.ix.mu.RLock()
 	defer s.ix.mu.RUnlock()
@@ -630,12 +671,12 @@ func (s *Snapshot) Scan(ctx context.Context) bool {
 		return false
 	}
 
-	ix.mu.RLock()
-	current, walked := ix.cur == s, ix.walked
-	ix.mu.RUnlock()
-	if !current {
+	if !s.Current() {
 		return false
 	}
+	ix.mu.RLock()
+	walked := ix.walked
+	ix.mu.RUnlock()
 	if !walked {
 		if _, err := s.Files(ctx, root); err != nil {
 			return false
@@ -645,6 +686,12 @@ func (s *Snapshot) Scan(ctx context.Context) bool {
 	ix.mu.RLock()
 	todo := slices.Collect(maps.Keys(ix.todo))
 	ix.mu.RUnlock()
-	par.Each(ctx, todo, func(p string) { s.UnitAt(p) })
+	// A scan the index has moved on from indexes nothing more: nobody
+	// will ask this generation who inherits what.
+	par.Each(ctx, todo, func(p string) {
+		if s.Current() {
+			s.UnitAt(p)
+		}
+	})
 	return s.Scanned()
 }

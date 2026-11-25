@@ -207,7 +207,7 @@ type jsonNote struct {
 
 type jsonError struct {
 	Path    string `json:"path"`
-	Kind    string `json:"kind"` // unreadable | internal
+	Kind    string `json:"kind"` // unreadable | internal | stale
 	Message string `json:"message"`
 }
 
