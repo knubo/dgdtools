@@ -68,9 +68,14 @@ from the start.
   `[d` on `#include`, `inherit` and `#define` lines, a path beginning
   with `/` looked up from the directories above the file; `%` between
   `#if`, `#else` and `#endif` with matchit.
-- **Indent:** C indenting set to what `dgdtools format` writes.
-  `shiftwidth` and `expandtab` are yours (or your `.editorconfig`'s);
-  the formatter's default is four spaces.
+- **Indent:** C indenting set to what `dgdtools format` writes, with
+  the lines of an array or mapping literal one level in from the line
+  that opens it, however deeply literals nest. Three shapes still come
+  out otherwise, and the formatter settles them: a block after a case
+  label on the same line, an element of a literal continued over
+  several lines, and the statement after a goto label. `shiftwidth` and
+  `expandtab` are yours (or your `.editorconfig`'s); the formatter's
+  default is four spaces.
 
 Variables (`b:` is asked before `g:`, so a mudlib can differ):
 
@@ -106,10 +111,11 @@ vim.lsp.config('dgdtools', {
 })
 ```
 
-A `cmd` set this way before the plugin loads (in `init.lua`) is the
-command the plugin looks for, so a `dgdtools` that is not on `PATH` is
-started too. To start the server yourself, or not at all, set this in
-`init.lua` (for lazy.nvim, before `require('lazy').setup`):
+The plugin decides when the first LPC file opens, so a `cmd` set this
+way by then (in `init.lua`, or in a plugin manager's `config` function)
+is the command it looks for, and a `dgdtools` that is not on `PATH` is
+started too. To start the server yourself, or not at all, set this
+before the first LPC file opens:
 
 ```lua
 vim.g.dgdtools_lsp = false

@@ -52,6 +52,23 @@
 #               ^^ dgdlpcMapping
 #                 ^^^^^^^^^^^^ dgdlpcMapping dgdlpcString
 #                             ^ dgdlpcMapping
+>        "up": ([
+#        ^^^^ dgdlpcMapping dgdlpcString
+#            ^^ dgdlpcMapping
+#              ^^ dgdlpcMapping dgdlpcMapping dgdlpcMappingDelim
+>            "dest": "/room/attic",
+#            ^^^^^^ dgdlpcMapping dgdlpcMapping dgdlpcString
+#                  ^^ dgdlpcMapping dgdlpcMapping
+#                    ^^^^^^^^^^^^^ dgdlpcMapping dgdlpcMapping dgdlpcString
+#                                 ^ dgdlpcMapping dgdlpcMapping
+>            "key": DOOR_KEY,
+#            ^^^^^ dgdlpcMapping dgdlpcMapping dgdlpcString
+#                 ^^ dgdlpcMapping dgdlpcMapping
+#                   ^^^^^^^^ dgdlpcMapping dgdlpcMapping dgdlpcMacro
+#                           ^ dgdlpcMapping dgdlpcMapping
+>        ]),
+#        ^^ dgdlpcMapping dgdlpcMappingDelim
+#          ^ dgdlpcMapping
 >    ]);
 #    ^^ dgdlpcMappingDelim
 >    counts = ({
@@ -86,6 +103,44 @@
 #                  ^ dgdlpcMapping
 >    ]));
 #    ^^ dgdlpcMappingDelim
+>    set_items(({
+#    ^^^^^^^^^ dgdlpcFunction
+#              ^^ dgdlpcArray dgdlpcArrayDelim
+>        ([
+#        ^^ dgdlpcArray dgdlpcMapping dgdlpcMappingDelim
+>            "name": "door",
+#            ^^^^^^ dgdlpcArray dgdlpcMapping dgdlpcString
+#                  ^^ dgdlpcArray dgdlpcMapping
+#                    ^^^^^^ dgdlpcArray dgdlpcMapping dgdlpcString
+#                          ^ dgdlpcArray dgdlpcMapping
+>            "ids": ({
+#            ^^^^^ dgdlpcArray dgdlpcMapping dgdlpcString
+#                 ^^ dgdlpcArray dgdlpcMapping
+#                   ^^ dgdlpcArray dgdlpcMapping dgdlpcArray dgdlpcArrayDelim
+>                "door",
+#                ^^^^^^ dgdlpcArray dgdlpcMapping dgdlpcArray dgdlpcString
+#                      ^ dgdlpcArray dgdlpcMapping dgdlpcArray
+>                "brass door",
+#                ^^^^^^^^^^^^ dgdlpcArray dgdlpcMapping dgdlpcArray dgdlpcString
+#                            ^ dgdlpcArray dgdlpcMapping dgdlpcArray
+>            }),
+#            ^^ dgdlpcArray dgdlpcMapping dgdlpcArrayDelim
+#              ^ dgdlpcArray dgdlpcMapping
+>        ]),
+#        ^^ dgdlpcArray dgdlpcMappingDelim
+#          ^ dgdlpcArray
+>    }));
+#    ^^ dgdlpcArrayDelim
+>    set_smells(({ "dust", "old wood",
+#    ^^^^^^^^^^ dgdlpcFunction
+#               ^^ dgdlpcArray dgdlpcArrayDelim
+#                  ^^^^^^ dgdlpcArray dgdlpcString
+#                        ^^ dgdlpcArray
+#                          ^^^^^^^^^^ dgdlpcArray dgdlpcString
+#                                    ^ dgdlpcArray
+>        "brass polish" }));
+#        ^^^^^^^^^^^^^^ dgdlpcArray dgdlpcString
+#                       ^^ dgdlpcArrayDelim
 >    set_short("a sample room");
 #    ^^^^^^^^^ dgdlpcFunction
 #              ^^^^^^^^^^^^^^^ dgdlpcString

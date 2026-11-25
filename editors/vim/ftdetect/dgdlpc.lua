@@ -5,8 +5,14 @@ if vim.filetype and vim.filetype.add then
   vim.filetype.add({
     pattern = {
       ['.*%.[ch]'] = {
-        function(path)
-          if vim.fn['dgdlpc#Detect'](path) == 1 then
+        function(path, bufnr)
+          -- A buffer named by a URL reaches here as a path under the
+          -- working directory: its own name says what it is.
+          local name = bufnr and vim.api.nvim_buf_get_name(bufnr) or ''
+          if name:match('^%a[%w+.-]*://') == nil then
+            name = path
+          end
+          if vim.fn['dgdlpc#Detect'](name) == 1 then
             return 'dgdlpc'
           end
         end,

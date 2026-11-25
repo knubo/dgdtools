@@ -133,13 +133,19 @@ try
     execute 'edit' fnameescape(s:dir . '/' . s:file)
     call add(s:log, 'filetype ' . s:file . ' ' . &filetype)
   endfor
+  " A buffer named by a URL is not decided by the working directory,
+  " which here is in a lib.
+  execute 'cd' fnameescape(s:dir . '/lib/std')
+  execute 'edit' fnameescape('fugitive:///elsewhere/.git//0/x.c')
+  call add(s:log, 'url ' . &filetype)
+  execute 'cd' fnameescape(s:dir)
 
   execute 'edit' fnameescape(s:dir . '/lib/std/object.c')
   call add(s:log, 'syntax ' . get(b:, 'current_syntax', ''))
   call add(s:log, 'commentstring ' . &commentstring)
   call add(s:log, 'comments ' . &comments)
   call add(s:log, 'matchpairs ' . &matchpairs)
-  call add(s:log, 'cindent ' . &cindent)
+  call add(s:log, 'indentexpr ' . &indentexpr)
   call add(s:log, 'gf ' . dgdlpc#IncludeExpr('/include/local.h'))
   call add(s:log, 'gf ' . dgdlpc#IncludeExpr('/std/tokens'))
   call add(s:log, 'gf ' . dgdlpc#IncludeExpr('/no/such'))
@@ -355,7 +361,8 @@ func TestVimRuntime(t *testing.T) {
 			assert.Equal(t, []string{"dgdlpc"}, facts["syntax"])
 			assert.Equal(t, []string{"/* %s */"}, facts["commentstring"])
 			assert.Equal(t, []string{"(:),{:},[:]"}, facts["matchpairs"])
-			assert.Equal(t, []string{"1"}, facts["cindent"])
+			assert.Equal(t, []string{"dgdlpc#Indent()"}, facts["indentexpr"])
+			assert.Equal(t, []string{"c"}, facts["url"], "a buffer named by a URL")
 			if c := facts["comments"]; assert.Len(t, c, 2) {
 				assert.Contains(t, c[0], "://", "with dialect.slash_slash")
 				assert.NotContains(t, c[1], "://", "without it")

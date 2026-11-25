@@ -19,6 +19,10 @@ create()
     exits = ([
         "north": "/room/hall",
         "south": "/room/yard",
+        "up": ([
+            "dest": "/room/attic",
+            "key": DOOR_KEY,
+        ]),
     ]);
     counts = ({
         1,
@@ -31,6 +35,17 @@ create()
     }), ([
         "north": 1,
     ]));
+    set_items(({
+        ([
+            "name": "door",
+            "ids": ({
+                "door",
+                "brass door",
+            }),
+        ]),
+    }));
+    set_smells(({ "dust", "old wood",
+        "brass polish" }));
     set_short("a sample room");
     set_long("A room with two exits, " +
         "described over two lines.\n");

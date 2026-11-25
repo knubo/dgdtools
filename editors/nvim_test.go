@@ -91,6 +91,9 @@ type nvimStart struct {
 	onPath bool
 	// Commands run before the plugins are loaded (--cmd).
 	cmds []string
+	// Files of the tree given on the command line, opened as Neovim
+	// starts, before the session runs.
+	args []string
 }
 
 // noEditor skips a test that needs an editor this machine does not have,
@@ -142,6 +145,9 @@ func nvimRunAs(t *testing.T, files map[string]string, session string, start nvim
 	}
 	for _, c := range start.cmds {
 		args = append(args, "--cmd", c)
+	}
+	for _, a := range start.args {
+		args = append(args, filepath.Join(dir, filepath.FromSlash(a)))
 	}
 	cmd := exec.Command(nvim, append(args, "-S", filepath.Join(dir, "session.lua"))...)
 	cmd.Env = env
@@ -958,6 +964,9 @@ func TestNeovimRefactor(t *testing.T) {
 const nvimPlugin = `
 local dir, out = vim.env.DGDLPC_DIR, {}
 local ok, err = pcall(function()
+  if vim.env.DGDLPC_LATE == '1' then
+    vim.lsp.config('dgdtools', { cmd = { vim.env.DGDLPC_BIN, 'lsp' } })
+  end
   vim.cmd('edit ' .. vim.fn.fnameescape(dir .. '/lib/obj/a.c'))
   out.filetype = vim.bo.filetype
   vim.wait(vim.env.DGDLPC_WAIT == '1' and 20000 or 1000, function()
@@ -975,21 +984,26 @@ vim.cmd('qall!')
 
 // TestNeovimPlugin starts Neovim with editors/vim as a plugin manager
 // installs it: plugin/dgdtools.lua enables the server when its command
-// can be run, the one on PATH or the one configured, and not when
-// g:dgdtools_lsp is false (or 0, as a vimrc says it).
+// can be run, the one on PATH or the one configured, also after plugins
+// have loaded, and not when g:dgdtools_lsp is false (or 0, as a vimrc
+// says it). The file is opened by the session, and also on the command
+// line, where its filetype is set before Neovim has started.
 func TestNeovimPlugin(t *testing.T) {
 	files := map[string]string{"lib/dgdtools.yml": "root: .\n", "lib/obj/a.c": "void create() {}\n"}
 	configured := "lua vim.lsp.config('dgdtools', { cmd = { vim.env.DGDLPC_BIN, 'lsp' } })"
 	for _, c := range []struct {
 		name    string
 		start   nvimStart
+		late    bool
 		started bool
 	}{
-		{"on PATH", nvimStart{onPath: true}, true},
-		{"configured", nvimStart{cmds: []string{configured}}, true},
-		{"not found", nvimStart{}, false},
-		{"opted out", nvimStart{onPath: true, cmds: []string{"lua vim.g.dgdtools_lsp = false"}}, false},
-		{"opted out in a vimrc", nvimStart{onPath: true, cmds: []string{"let g:dgdtools_lsp = 0"}}, false},
+		{"on PATH", nvimStart{onPath: true}, false, true},
+		{"on PATH, a file on the command line", nvimStart{onPath: true, args: []string{"lib/obj/a.c"}}, false, true},
+		{"configured", nvimStart{cmds: []string{configured}}, false, true},
+		{"configured after plugins load", nvimStart{}, true, true},
+		{"not found", nvimStart{}, false, false},
+		{"opted out", nvimStart{onPath: true, cmds: []string{"lua vim.g.dgdtools_lsp = false"}}, false, false},
+		{"opted out in a vimrc", nvimStart{onPath: true, cmds: []string{"let g:dgdtools_lsp = 0"}}, false, false},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			c.start.plugins = true
@@ -998,6 +1012,11 @@ func TestNeovimPlugin(t *testing.T) {
 				wait = "1"
 			}
 			t.Setenv("DGDLPC_WAIT", wait)
+			late := "0"
+			if c.late {
+				late = "1"
+			}
+			t.Setenv("DGDLPC_LATE", late)
 			_, data, _ := nvimRunAs(t, files, nvimPlugin, c.start)
 			var got struct {
 				Error, Filetype, Errmsg string
