@@ -57,8 +57,12 @@ func wants(only []string, kind string) bool {
 
 // codeAction answers textDocument/codeAction with what can be done about
 // the findings in the range: each fix a finding carries (a safe one is
-// the preferred action), the comments that suppress it (lint.Suppress),
-// and, for the document as a whole, every safe fix at once.
+// the preferred action), the path of the file a missing #include or
+// object path may have meant (lint.Document.PathFixes), the comments
+// that suppress it (lint.Suppress); at the start of the range, the
+// prototype of a function called before the file defines it
+// (Document.Prototype); and, for the document as a whole, every safe fix
+// at once.
 func (s *server) codeAction(ctx context.Context, p *CodeActionParams) ([]CodeAction, error) {
 	uri := p.TextDocument.URI
 	d, version, sess, err := s.linted(ctx, uri)
@@ -94,7 +98,7 @@ func (s *server) codeAction(ctx context.Context, p *CodeActionParams) ([]CodeAct
 				continue
 			}
 			about := []Diagnostic{c.diagnostic(f)}
-			for _, fix := range f.Fixes {
+			for _, fix := range append(slices.Clone(f.Fixes), d.PathFixes(ctx, *f)...) {
 				actions = append(actions, CodeAction{Title: fix.Title, Kind: KindQuickFix, Diagnostics: about,
 					IsPreferred: fix.Applicability == diag.Safe, Edit: edit(fix.Edits)})
 			}
@@ -105,6 +109,11 @@ func (s *server) codeAction(ctx context.Context, p *CodeActionParams) ([]CodeAct
 					actions = append(actions, CodeAction{Title: fix.Title, Kind: KindQuickFix, Diagnostics: about, Edit: edit(fix.Edits)})
 				}
 			}
+		}
+	}
+	if wants(p.Context.Only, KindRefactorRewrite) {
+		if fix := d.Prototype(start); fix != nil {
+			actions = append(actions, CodeAction{Title: fix.Title, Kind: KindRefactorRewrite, Edit: edit(fix.Edits)})
 		}
 	}
 	if wants(p.Context.Only, KindFixAll) {

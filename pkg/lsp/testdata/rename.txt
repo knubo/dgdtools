@@ -53,7 +53,7 @@ exit
 <   "capabilities": {
 <     "positionEncoding": "utf-16",
 <     "textDocumentSync": {"openClose": true, "change": 2},
-<     "codeActionProvider": {"codeActionKinds": ["quickfix", "source.fixAll.dgdtools"]},
+<     "codeActionProvider": {"codeActionKinds": ["quickfix", "refactor.rewrite", "source.fixAll.dgdtools"]},
 <     "completionProvider": {"triggerCharacters": [">", ":", "\"", "/", "<"], "resolveProvider": true},
 <     "definitionProvider": true,
 <     "referencesProvider": true,

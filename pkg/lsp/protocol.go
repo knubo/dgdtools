@@ -350,8 +350,9 @@ type PublishDiagnosticsParams struct {
 
 // The kinds of code action the server has.
 const (
-	KindQuickFix = "quickfix"
-	KindFixAll   = "source.fixAll.dgdtools"
+	KindQuickFix        = "quickfix"
+	KindRefactorRewrite = "refactor.rewrite"
+	KindFixAll          = "source.fixAll.dgdtools"
 )
 
 type CodeActionParams struct {

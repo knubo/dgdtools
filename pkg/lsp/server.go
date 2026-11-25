@@ -663,7 +663,7 @@ func (s *server) initialize(params json.RawMessage) (any, error) {
 		res.Capabilities.RenameProvider = &RenameOptions{PrepareProvider: true}
 	}
 	if c.TextDocument.CodeAction.CodeActionLiteralSupport != nil {
-		res.Capabilities.CodeActionProvider = &CodeActionOptions{CodeActionKinds: []string{KindQuickFix, KindFixAll}}
+		res.Capabilities.CodeActionProvider = &CodeActionOptions{CodeActionKinds: []string{KindQuickFix, KindRefactorRewrite, KindFixAll}}
 	}
 	res.Capabilities.Workspace.WorkspaceFolders.Supported = true
 	res.Capabilities.Workspace.WorkspaceFolders.ChangeNotifications = true

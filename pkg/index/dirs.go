@@ -2,7 +2,9 @@ package index
 
 import (
 	"cmp"
+	"context"
 	"io/fs"
+	"maps"
 	"path"
 	"path/filepath"
 	"slices"
@@ -156,4 +158,49 @@ func byName(a, b DirEntry) int {
 		return -1
 	}
 	return 1
+}
+
+// FilesNamed returns the lib files ("/std/room.c") whose base name is
+// name: under the lib directories dirs, on disk and among a profile's
+// stubs, and among every file the snapshot has read (the whole-lib
+// scan's, the headers they include). Sorted, each once; what was found
+// when ctx ends.
+func (s *Snapshot) FilesNamed(ctx context.Context, name string, dirs []string) []string {
+	found := map[string]bool{}
+	add := func(p string) {
+		if lf := s.LibFile(p); lf != "" {
+			found[lf] = true
+		}
+	}
+	for p, u := range s.units.complete() {
+		if u != nil && filepath.Base(p) == name {
+			add(p)
+		}
+	}
+	for _, dir := range dirs {
+		dir = path.Clean("/" + dir)
+		if root, ok := s.diskPath(dir); ok && s.fs.IsDir(root) {
+			s.fs.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
+				switch {
+				case ctx.Err() != nil:
+					return fs.SkipAll
+				case err != nil || d == nil:
+					return nil
+				case d.IsDir() && strings.HasPrefix(d.Name(), ".") && filepath.Clean(p) != filepath.Clean(root):
+					return fs.SkipDir
+				case !d.IsDir() && d.Name() == name:
+					add(p)
+				}
+				return nil
+			})
+		}
+		prefix := strings.TrimSuffix(dir, "/") + "/"
+		stubs := s.lay.StubFiles
+		for i := sort.SearchStrings(stubs, prefix); i < len(stubs) && strings.HasPrefix(stubs[i], prefix); i++ {
+			if path.Base(stubs[i]) == name {
+				found[stubs[i]] = true
+			}
+		}
+	}
+	return slices.Sorted(maps.Keys(found))
 }
