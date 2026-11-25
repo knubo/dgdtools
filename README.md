@@ -227,8 +227,10 @@ else is decided:
   own stays there, `int f() {` stays on one line, and a definition
   written on one line stays one line (`string query_code() { return code; }`);
   only the spacing in them is normalized.
-- Control-flow braces are cuddled (`if (x) {`, `} else {`) when the
-  source uses Allman layout; one-line brace blocks keep their own lines.
+- Braces and `else` stay on the line they are on: `if (x) {` and
+  `if (x)` with `{` on the next line both come out as written, only
+  indented. The formatter never joins or splits a line, except to drop
+  blank lines beyond two in a row.
 - Statements are indented by their nesting, with or without braces: the
   body of a braceless `if`, `else`, `for`, `while` or `do` is one level
   in. A line that continues a statement is one level in from it.

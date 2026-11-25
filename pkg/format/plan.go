@@ -26,7 +26,6 @@ const (
 	literal   // a brace of ({ }) or a bracket of ([ ])
 	block     // a brace of a block statement or function body
 	caseLabel // 'case' or 'default' in the block of its switch
-	cuddle    // '{' or 'else' that joins the line before it when it stands alone
 )
 
 // info is the plan for one token.
@@ -46,8 +45,6 @@ type plan struct {
 	// lays out each branch from the state the conditional began with.
 	conds map[int]condMark
 }
-
-func (pl *plan) has(i int, fl flag) bool { return pl.info[i].flags&fl != 0 }
 
 // condMark says what a conditional directive does to the code around it.
 type condMark struct {
@@ -324,15 +321,14 @@ func (b *builder) switchCase(s *syntax.CaseStmt, level int) {
 }
 
 // body plans the statement a control statement at level governs. A block
-// stands at the level of its statement and its brace joins the statement's
-// line. Any other statement is one level in when it has a line of its
+// stands at the level of its statement, its brace on whichever line the
+// author put it. Any other statement is one level in when it has a line of its
 // own, and part of the statement's line when it follows on it.
 func (b *builder) body(s syntax.Stmt, level int) {
 	switch s := s.(type) {
 	case nil:
 	case *syntax.BlockStmt:
 		b.block(s, level, false)
-		b.mark(s.First, cuddle)
 	default:
 		if first, _ := s.Span(); b.startsLine(first) {
 			level++
@@ -376,9 +372,6 @@ func (b *builder) stmt(s syntax.Stmt, level int) {
 			break
 		}
 		b.markKind(s.ElseTok, token.KwElse, head)
-		if _, braced := s.Then.(*syntax.BlockStmt); braced {
-			b.markKind(s.ElseTok, token.KwElse, cuddle)
-		}
 		if elif, ok := s.Else.(*syntax.IfStmt); ok && !b.startsLine(elif.First) {
 			b.stmt(elif, level) // else if: a chain, not a nesting
 		} else {
@@ -396,7 +389,6 @@ func (b *builder) stmt(s syntax.Stmt, level int) {
 	case *syntax.SwitchStmt:
 		if blk, ok := s.Body.(*syntax.BlockStmt); ok {
 			b.block(blk, level, true)
-			b.mark(blk.First, cuddle)
 		}
 	case *syntax.CatchStmt:
 		b.body(s.Body, level)

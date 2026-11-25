@@ -314,16 +314,6 @@ func (p *printer) below(i, level int) ([]byte, bool) {
 	return nil, false
 }
 
-// gapComments reports whether the gap contains any comment.
-func gapComments(gap []token.Token) bool {
-	for _, g := range gap {
-		if g.Kind == token.LineComment || g.Kind == token.BlockComment {
-			return true
-		}
-	}
-	return false
-}
-
 func gapNewlines(gap []token.Token) int {
 	n := 0
 	for _, g := range gap {
@@ -335,8 +325,8 @@ func gapNewlines(gap []token.Token) int {
 }
 
 // layout writes the trivia of a gap, or of the part of one that a skip
-// marker leaves to the formatter, in the one style: cuddling,
-// blank-line capping, spacing normalization, comments kept.
+// marker leaves to the formatter, in the one style: the line breaks
+// kept, blank-line capping, spacing normalization, comments kept.
 // resumed says the part follows a comment already written (the marker
 // that turned the formatter back on) or rows of the gap that are kept,
 // and so must not be joined to what is before it; tail says it reaches
@@ -347,15 +337,6 @@ func (p *printer) layout(gap []token.Token, next int, resumed, tail bool) {
 		p.finish(gap)
 		return
 	}
-	hasComments := resumed || gapComments(gap)
-
-	// Cuddle control-flow braces and else.
-	if !hasComments && gapNewlines(gap) > 0 && p.shouldCuddle(next) {
-		p.buf.WriteByte(' ')
-		return
-	}
-
-	// General path.
 	pending := 0                // newlines seen but not yet written
 	var pendingNl []token.Token // their tokens, for byte preservation
 	var lastSpace []byte        // space run immediately before a comment
@@ -477,58 +458,6 @@ func (p *printer) runsOn() bool {
 	text := p.f.Text(p.f.Tokens[p.prev])
 	again := lexer.Lex(p.f.Path, append(bytes.Clone(text), '\n'), p.f.Dialect)
 	return again.Tokens[0].Len() != len(text)
-}
-
-// shouldCuddle reports whether the token at next, currently on its own
-// line, should be joined to the previous line: the '{' of a control
-// statement's block, and 'else' after the '}' of the block before it.
-//
-// Cuddling only fires on Allman-style layout: a '{' whose block content
-// starts on the next line, and an 'else' after a '}' alone on its line.
-// One-line brace blocks (`{ msg(); }`) keep their own lines; joining them
-// would cascade an if/else-if ladder into one enormous line. And it only
-// fires where the tree says what the token is: in code the parser did not
-// understand, every line stays a line.
-func (p *printer) shouldCuddle(next int) bool {
-	if !p.plan.has(next, cuddle) {
-		return false
-	}
-	switch p.f.Tokens[next].Kind {
-	case token.LBrace:
-		return p.prevKind != token.Directive && p.newlineAfter(next)
-	case token.KwElse:
-		return p.prevKind == token.RBrace && p.newlineBefore(p.prev)
-	}
-	return false
-}
-
-// newlineAfter reports whether a newline separates the token at idx from
-// the next significant token. The end of the file is one: the formatter
-// ends the last line.
-func (p *printer) newlineAfter(idx int) bool {
-	for i := idx + 1; i < len(p.f.Tokens); i++ {
-		switch k := p.f.Tokens[i].Kind; {
-		case k == token.Newline, k == token.EOF:
-			return true
-		case !k.IsTrivia():
-			return false
-		}
-	}
-	return false
-}
-
-// newlineBefore reports whether a newline separates the token at idx from
-// the previous significant token (i.e. it starts its source line).
-func (p *printer) newlineBefore(idx int) bool {
-	for i := idx - 1; i >= 0; i-- {
-		switch k := p.f.Tokens[i].Kind; {
-		case k == token.Newline:
-			return true
-		case !k.IsTrivia():
-			return false
-		}
-	}
-	return true
 }
 
 func (p *printer) writeNewline(orig []byte) {

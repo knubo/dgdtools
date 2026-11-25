@@ -29,9 +29,9 @@
 // touched, and Lines formats only part of a file.
 //
 // Style: only spacing and indentation are chosen; the author's line
-// breaks are kept, function headers and one-line definitions included,
-// except that control-flow braces written Allman-style are cuddled and
-// runs of blank lines are capped. Statements are indented by their
+// breaks are kept, function headers, one-line definitions and braces
+// and elses on lines of their own included; only runs of blank lines are
+// capped. Statements are indented by their
 // nesting, with or without braces; case labels sit at the switch
 // statement's level; a line that continues a statement is indented one
 // level further. Horizontal spacing between tokens is normalized
@@ -169,8 +169,7 @@ func Format(f *token.File, o Options) ([]byte, error) {
 // its indentation, the line break before it and the spacing inside it,
 // and the comments and blank lines directly above it when they are
 // selected too. Nothing on a line that is not selected changes, not even
-// its line break, so a brace is cuddled to the line above only when that
-// is selected as well. A selected line is indented from the lines around it: an
+// its line break. A selected line is indented from the lines around it: an
 // unselected line that begins a statement says how deep its nesting
 // level is indented in this file, and a selected line follows that. In a
 // file that is already formatted the result is what Format gives.

@@ -57,10 +57,22 @@ the reflowing formatters do not have:
 
 ### 2.2 No line wrapping
 
-Lines are never broken for length, and the author's line breaks are
-kept, as in gofmt, function headers included (2.3). The formatter moves
-a line break only to cuddle a control statement's `{` and an `else`
-written Allman-style, and to cap runs of blank lines.
+Lines are never broken for length and never joined: the author's line
+breaks are kept, as in gofmt, function headers included (2.3), and so
+are braces and `else`s on lines of their own (`if (x)` with its `{` on
+the next line stays that way, and so does `}` with `else` under it;
+K&R, Allman and GNU layouts all come out as written, indented by the
+one rule). The only line breaks the formatter removes are those of
+blank lines beyond two in a row and at the end of a file.
+
+Joining a lone `{` or `else` onto the line above was the last place the
+formatter moved a line, and it was taken out for the same reason as the
+header layout: it is a style of new code, not a layout everyone agrees
+on, and on this corpus it was most of what was left of the edits that
+change lines. Over a 5,205-file sample lib, 607 files had a non-blank
+line joined to another; over the 180,850-file VikingMUD lib, 21,200
+did. Now none does in either: every line edit left removes blank lines
+(in 1,507 files of the sample, 58,025 of the lib).
 
 Why not wrap:
 
@@ -220,8 +232,7 @@ lines):
 - the end of the file is formatted when all of it is selected.
 
 Nothing on a line outside the selection changes, so the edits of a range
-lie inside it, as LSP asks. In particular a `{` or `else` that the
-style cuddles moves up only when the line above is selected too.
+lie inside it, as LSP asks.
 `TestLinesEveryRange`, `FuzzFormat` and `TestCorpusLines` hold the edits
 of ranges to their lines.
 
@@ -309,14 +320,15 @@ alone, in a run over many files and in an editor session alike.
 
 ## 4. Measured
 
-VikingMUD lib, the mud's own configuration (110,994 `.c`/`.h` files in
-scope after excludes):
+VikingMUD lib, the mud's own configuration (110,993 `.c`/`.h` files in
+scope after excludes), braces kept on their lines:
 
 | | |
 |---|---|
-| reformatted | 107,728 |
-| already formatted | 2,501 |
-| refused: does not tokenize | 765 |
+| reformatted | 104,487 |
+| already formatted | 5,742 |
+| refused: does not tokenize | 764 |
 | gate failures | 0 |
 | changed by a second pass | 0 |
-| wall time, `format --check lib` | 6 s (12 CPUs) |
+| a non-blank line joined or split | 0 files |
+| wall time, `format --check lib` | 8 s (12 CPUs) |

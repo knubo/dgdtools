@@ -60,24 +60,24 @@ func TestOneLinersPreserved(t *testing.T) {
 	assert.Equal(t, in, fmtSrc(t, in, Options{}))
 }
 
-func TestControlFlowCuddling(t *testing.T) {
-	in := "void\nf()\n{\n    if (x)\n    {\n        y = 1;\n    }\n    else\n    {\n        y = 2;\n    }\n}\n"
-	want := "void\nf()\n{\n    if (x) {\n        y = 1;\n    } else {\n        y = 2;\n    }\n}\n"
-	assert.Equal(t, want, fmtSrc(t, in, Options{}))
-}
-
-func TestNoCuddleCascade(t *testing.T) {
-	// An if/else-if ladder written with one-line brace blocks on their own
-	// lines must keep that layout. Cuddling used to chain-join the whole
-	// ladder (") {" then "} else" then ...) into one enormous line —
-	// found on a real corpus file that gained a 529-column line.
-	in := "void\nf()\n{\n    if (a)\n    { m1(); }\n    else if (b)\n    { m2(); }\n    else\n    { m3(); }\n}\n"
-	assert.Equal(t, in, fmtSrc(t, in, Options{}))
-
-	// The '}' of a multi-line block is alone on its line: else still
-	// cuddles there, and a following one-line block still keeps its line.
-	in = "void\nf()\n{\n    if (a) {\n        m1();\n    }\n    else if (b)\n    { m2(); }\n}\n"
-	want := "void\nf()\n{\n    if (a) {\n        m1();\n    } else if (b)\n    { m2(); }\n}\n"
+func TestBracesStayOnTheirLines(t *testing.T) {
+	// A brace or an else keeps the line it is on, Allman, GNU or K&R;
+	// only its indentation changes: a block's braces stand at the level
+	// of the statement that owns it.
+	for _, in := range []string{
+		"void\nf()\n{\n    if (x)\n    {\n        y = 1;\n    }\n    else\n    {\n        y = 2;\n    }\n}\n",
+		"void\nf()\n{\n    if (x) {\n        y = 1;\n    } else {\n        y = 2;\n    }\n}\n",
+		"void\nf()\n{\n    if (x) {\n        y = 1;\n    }\n    else {\n        y = 2;\n    }\n}\n",
+		"void\nf()\n{\n    while (x)\n    {\n        x--;\n    }\n    switch (x)\n    {\n    case 1:\n        break;\n    }\n}\n",
+		// One-line brace blocks on their own lines.
+		"void\nf()\n{\n    if (a)\n    { m1(); }\n    else if (b)\n    { m2(); }\n    else\n    { m3(); }\n}\n",
+		"void\nf()\n{\n    if (a) {\n        m1();\n    }\n    else if (b)\n    { m2(); }\n}\n",
+	} {
+		assert.Equal(t, in, fmtSrc(t, in, Options{}))
+	}
+	// GNU's half-indented braces come to the statement's level.
+	in := "void\nf()\n{\n  if (x)\n    {\n      y = 1;\n    }\n  else\n    {\n      y = 2;\n    }\n}\n"
+	want := "void\nf()\n{\n    if (x)\n    {\n        y = 1;\n    }\n    else\n    {\n        y = 2;\n    }\n}\n"
 	assert.Equal(t, want, fmtSrc(t, in, Options{}))
 }
 
@@ -345,7 +345,7 @@ func TestErrorRegions(t *testing.T) {
 	// around it is laid out as usual.
 	in := body("if (a)\nb();\nforeach (x in y)\n{\nif (x)\n{\nc( x;\n}\n}\nif (d)\n{\ne();\n}\nelse\nf();\n")
 	want := body("    if (a)\n        b();\n    foreach(x in y)\n    {\n        if (x)\n        {\n            c(x;\n        }\n    }\n" +
-		"    if (d) {\n        e();\n    } else\n        f();\n")
+		"    if (d)\n    {\n        e();\n    }\n    else\n        f();\n")
 	assert.Equal(t, want, fmtSrc(t, in, Options{}))
 	assert.Equal(t, want, fmtSrc(t, want, Options{}))
 
@@ -427,7 +427,7 @@ func TestOddTokensStayWhatTheyAre(t *testing.T) {
 		"#/*\n":          "#/*\n",
 		"#endif":         "#endif\n",
 		// The end of the file ends a line, before it is written to.
-		"A(){for(;;)\n{": "A() { for (;;) {\n",
+		"A(){for(;;)\n{": "A() { for (;;)\n    {\n",
 		// A line break keeps its bytes, the last one too, unless it is a
 		// carriage return alone.
 		"\r\n\r\n0\n\n":      "\r\n\r\n0\n",

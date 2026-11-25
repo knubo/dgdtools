@@ -106,11 +106,10 @@ func TestLines(t *testing.T) {
 	// line that opens it.
 	want = strings.Replace(legacy, "    foo( i );\n    bar(i)   ;", "      foo(i);\n      bar(i);", 1)
 	assert.Equal(t, want, fmtLines(t, legacy, Options{}, LineRange{4, 5}))
-	// Several ranges; a brace joins the line above it when both are
-	// selected, and not when that line is not: it would change.
+	// Several ranges; a brace on a line of its own keeps it, selected
+	// or not.
 	want = strings.Replace(legacy, "  for (i=0;i<3;i++) {", "  for (i = 0; i < 3; i++) {", 1)
 	assert.Equal(t, want, fmtLines(t, legacy, Options{}, LineRange{3, 3}, LineRange{8, 8}))
-	want = strings.Replace(want, "  if (x)\n  {", "  if (x) {", 1)
 	assert.Equal(t, want, fmtLines(t, legacy, Options{}, LineRange{3, 3}, LineRange{7, 8}))
 	// The last line, and the end of the file when it is selected too.
 	want = strings.Replace(legacy, "int   query()   { return 1; }", "int query() { return 1; }", 1)
