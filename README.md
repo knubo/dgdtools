@@ -555,6 +555,11 @@ formatter), [config.md](docs/design/config.md) (configuration and the
 command line) and [lsp.md](docs/design/lsp.md) (the language server and
 the rename command planned on top).
 
+Syntax highlighting for VS Code and for Vim and Neovim is in
+[`editors/`](editors/README.md), under the language name `dgdlpc`. A
+`.c` file is LPC there only inside a lib: nothing claims the extension
+on a machine that has C sources too.
+
 ## License note
 
 The DGD dialect facts implemented here (keywords, operators, literal and

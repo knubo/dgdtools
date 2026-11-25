@@ -1,7 +1,9 @@
 # `dgdtools lsp`: implementation plan
 
-Status: plan only. Nothing here is implemented; the command reserves
-the names `lsp` and `rename`. It builds on the library described in
+Status: a plan, of which the first step of section 12 is built: the
+editor-side grammars of section 10.1, under `editors/`. Nothing of the
+server is implemented; the command reserves the names `lsp` and
+`rename`. It builds on the library described in
 [architecture.md](architecture.md) (sections 6 and 10),
 [config.md](config.md) and [formatter.md](formatter.md): `pkg/lint`
 (`Linter.Lint`, `Invalidate`, `Scan`, `Generation`), `pkg/vfs`
@@ -425,53 +427,106 @@ arrive late or not at all.
 
 ### 10.1 Layer 1: editor-side grammars
 
-Everything an editor needs lives in this repository under `editors/`.
-The grammar files are generated from or checked against one shared word
-list (`editors/common/dgdlpc.json`: keywords, type keywords, specifiers,
-operators, directive names, taken from `pkg/token`), and are tested
-against the same sample files (`editors/common/samples/*.c`, with the
-scopes expected of them).
+Built. Everything an editor needs lives in this repository under
+`editors/`, with a README for whoever installs it. The grammars are
+checked against one shared word list (`editors/common/dgdlpc.json`:
+keywords, type keywords, specifiers, the words a dialect switch
+reserves, operators, directive names) and against the same sample files
+(`editors/common/samples/`, each with a snapshot per grammar of what the
+grammar makes of it). The word list is not written by hand:
+`go test ./editors -update` writes it from `pkg/token` (the keyword
+table and the kinds), `pkg/lexer` (which words a dialect switch
+reserves) and `pkg/pp` (`pp.Directives`), and the test fails when the
+file is stale or a grammar's lists differ from it.
 
 ```
 editors/
-  README.md              LSP configuration for Vim (vim-lsp, ALE, coc.nvim),
-                         Helix and Zed (LSP only until there is a
+  README.md              installing the VS Code extension from the folder
+                         and the Vim files; what Helix and Zed get (the
+                         language server only, until there is a
                          tree-sitter grammar)
-  common/                the shared word list, sample files for grammar tests
-  vscode/                the extension: TextMate grammar + LSP client (section 11)
+  common/
+    dgdlpc.json          the shared word list
+    samples/             sample files and their snapshots (*.tm.snap,
+                         *.vim.snap)
+  vscode/                the extension: TextMate grammar now, LSP client
+                         later (section 11)
+    package.json
     syntaxes/dgdlpc.tmLanguage.json
     language-configuration.json
   vim/                   standard runtime layout, installable by any plugin
                          manager in Vim and Neovim
     ftdetect/dgdlpc.vim    workspace-scoped detection (dgdtools.yml upward)
+    ftdetect/dgdlpc.lua    the same rule for Neovim, asked before its own
+    autoload/dgdlpc.vim    the functions the others call
     syntax/dgdlpc.vim
     ftplugin/dgdlpc.vim
     indent/dgdlpc.vim
-  nvim/lsp/dgdtools.lua  Neovim 0.11+ `vim.lsp.config` entry (candidate for
-                         nvim-lspconfig once stable)
+  *_test.go              the tests of all of it (package editors)
 ```
+
+Still to come, with the server: `editors/nvim/lsp/dgdtools.lua`, the
+Neovim 0.11+ `vim.lsp.config` entry (section 11).
 
 **TextMate grammar** (VS Code; also usable by other editors such as
 Sublime and by GitHub's Linguist if submitted), scope name
-`source.dgdlpc`. It covers: comments (`/* */`,
-and `//` as a separate rule the extension enables from
-`dialect.slash_slash`, default on); preprocessor directives with their
-own name set (`#include <…>`/`"…"`, `#define NAME(params)` with the macro
-name scoped, `#if/#ifdef/#else/#endif`), continuation lines; strings and
+`source.dgdlpc`. It covers: comments (`/* */` and `//`); preprocessor
+directives with their own name set (`#include <…>`/`"…"`,
+`#define NAME(params)` with the macro name and its parameters scoped,
+`#if/#ifdef/#else/#endif` with `defined`), to the end of the logical
+line, continuation lines and comments that run on included; strings and
 character literals with DGD's escapes (`\ooo`, `\xHH`, any other
 character); numbers (decimal, hex, floats, and `1..2` *not* as a float);
 DGD keywords, exactly the driver's reserved set (`nil`, `atomic`,
 `rlimits`, `catch`, `nomask`, `varargs`, `operator`, `inherit`, `new`,
-`goto`, `try`; `function` only when `dialect.closures`); type keywords;
-the `({ … })` and `([ … ])` literal brackets as their own punctuation
-scopes so themes and bracket matching treat them as pairs; `::`, `->`,
-`<-`, `..`, `...`; function names at definition (`name(` at column 0 or
-after a type) and at call sites, by pattern. It deliberately does **not**
-try to tell macros from identifiers beyond the ALL_CAPS convention
-(scoped `constant.other`), and does not list kfuns: both are layer 2's
-job, where they are known rather than guessed. Tests:
-`vscode-tmgrammar-test` snapshots over the shared samples. **2 days**
-including tests.
+`goto`, `try`); type keywords; the `({ … })` and `([ … ])` literal
+brackets as their own punctuation scopes; `::`, `->`, `<-`, `..`, `...`
+and every other operator the lexer has; function names at definition
+(`name(` at column 0, alone or after its type) and at call sites, the
+label of an inherited object (`label::`, `inherit label "…"`), by
+pattern. It deliberately does **not** try to tell macros from
+identifiers beyond the ALL_CAPS convention (scoped `constant.other`),
+and does not list kfuns: both are layer 2's job, where they are known
+rather than guessed.
+
+What a grammar, one fixed file for every lib, cannot take from the
+project's dialect:
+
+- **`//` is always a comment.** It is a rule of its own
+  (`comment-line`), but nothing an extension does can switch a rule of a
+  contributed grammar on or off, so it is on, which is the default of
+  `dialect.slash_slash` and is harmless where the dialect has it off:
+  there `//` outside a string is a syntax error, which the linter
+  reports, and no valid file has one to be miscoloured.
+- **`function` is never a keyword.** Without `dialect.closures`, the
+  default and the stock driver, it is a plain name that a lib is free to
+  give a variable or a parameter, and colouring it would be wrong there.
+  In a lib with closures the grammar leaves the word alone, and layer 2
+  makes up for it (10.2).
+
+`'])'` is ambiguous to anything that reads tokens one at a time: it
+closes a mapping, and it ends `f(a[i])`. The grammar opens a mapping at
+`([` and a subscript at `[` and lets each close its own, so `])` is a
+mapping's only where one is open. The language configuration cannot do
+that: its `brackets` are matched by text, so it lists `({ })` (no other
+construct ends in `})`) and leaves `([ ])` to the `(`…`)` and `[`…`]`
+pairs it is made of, which nest correctly; as a pair of its own it would
+unbalance every `f(a[i])`.
+
+Tests: `go test ./editors`, which runs the grammar itself rather than
+`vscode-tmgrammar-test`, so that nothing but Go is needed. A small
+interpreter of the grammar format (match and begin/end rules, captures,
+includes) tokenizes the samples; what it scopes is compared byte for
+byte with the tokens of `pkg/lexer` (same classes, same token
+boundaries, a directive ending where the lexer's does), with the word
+list, and with the snapshots. The price is that the grammar keeps to the
+regular expression syntax Go and Oniguruma read alike (no `\d \w \s`,
+no `$`, no lookbehind, no backreferences), plus `(?=…)` at the end of a
+top-level alternative, which the test emulates exactly; the test rejects
+a pattern outside it. That subset turned out to be enough. What it does
+not buy is a run under Oniguruma itself: the first time the grammar is
+changed with VS Code at hand, the snapshots should be compared once with
+`vscode-tmgrammar-test`'s.
 
 **Vim.** Vim and Neovim ship `syntax/lpc.vim` (447 lines, last changed
 2016). It targets MudOS/FluffOS LPC: it highlights `foreach`, `class`,
@@ -488,14 +543,30 @@ Decision: ship a separate, small `syntax/dgdlpc.vim` (filetype `dgdlpc`)
 rather than patch the stock file. A DGD mode inside `lpc.vim` would have
 to subtract most of what the file is, the upstream maintainer has been
 inactive since 2016, and a separate filetype lets `ftdetect` be precise:
-set `dgdlpc` for `*.c`/`*.h` only when a `dgdtools.yml` is found upward
-from the file (never globally), with `g:dgdlpc_slash_slash` and
-`g:dgdlpc_closures` mirroring the dialect. `ftplugin` sets
-`commentstring`, `comments`, `matchpairs` and `include`/`define` patterns
-so `gf` and `[i` work without the server; `indent` is `cindent` with the
-options that give the formatter's indentation while typing. The syntax
-file is generated from the shared word list. **1.5 days** including a
-scripted test (`vim -es` dumping `synIDattr` for the sample files).
+set `dgdlpc` for `*.c`/`*.h` only when a `dgdtools.yml` or
+`.dgdtools.yml` is found upward from the file, or the file lies under a
+directory of `g:dgdlpc_roots` (never globally), with
+`g:dgdlpc_slash_slash` and `g:dgdlpc_closures` (and their `b:` forms)
+mirroring the dialect; they are set by hand, the runtime files do not
+read the configuration. In Vim the rule runs after Vim's own and
+replaces its answer, so a lib's file is `c` for a moment and anything
+hooked to `FileType c` sees it; in Neovim the rule is registered with
+`vim.filetype.add` ahead of the built-in detection, so a C language
+server is never started on an LPC file. `ftplugin` sets `commentstring`,
+`comments`, `matchpairs` and `include`/`define` patterns so `gf` and
+`[i` work without the server (a path that begins with `/` is looked for
+under each directory above the file, which finds it without knowing
+where the lib begins); `indent` is `cindent` with the options that give
+the formatter's indentation while typing. Three shapes come out
+differently and are left to the formatter: a block after a case label on
+the same line, `({ })` inside `([ ])` over several lines (where the
+formatter's own layout is its brace count, not the nesting), and the
+statement after a `goto` label. The syntax file's word lists are checked
+against the shared word list. Tests, when a `vim` or `nvim` is on `PATH`
+(both, when both are): detection, the options, the syntax groups of the
+samples against the lexer's tokens and the snapshots, and the indent
+script against `pkg/format` on a sample that is a fixed point of the
+formatter.
 
 **tree-sitter grammar** (highlighting in Neovim, Helix and Zed, which use
 tree-sitter rather than TextMate or Vim syntax; in Neovim also folds and
@@ -522,7 +593,9 @@ enough in Neovim.
 Semantic tokens add only what analysis knows; they never restate what
 the grammar already colours (no tokens for keywords, strings, comments or
 operators), which keeps payloads small and avoids flicker when the server
-is slower than the grammar.
+is slower than the grammar. One exception follows from 10.1: in a lib
+with `dialect.closures`, `function` is a keyword the grammar cannot
+colour, and the server sends it (`keyword`).
 
 **Legend** (standard types and modifiers wherever one fits, so themes
 work unconfigured):
@@ -602,6 +675,12 @@ servers under one id is worse than a new word.
   `dgdtools-profile:` documents. Binary acquisition: use `dgdtools.path` or
   PATH first; otherwise download the release asset for the platform
   (GoReleaser already builds them) with a checksum, after asking.
+  There so far: the manifest, which contributes the language (with no
+  file names), the grammar, the language configuration and the encoding
+  default of section 6, and names the activation events. It has no code,
+  so until the client exists a lib says which files are LPC itself, with
+  `files.associations` in its workspace settings; that setting is what
+  the command will write.
 - **Vim and Neovim:** the `editors/vim` runtime files from 10.1 (install
   as a plugin directory) set the filetype. For Neovim 0.11 and later,
   `editors/nvim/lsp/dgdtools.lua` is the `vim.lsp.config` entry (`cmd =
@@ -624,7 +703,8 @@ servers under one id is worse than a new word.
 
 1. **Grammars first** (3.5 days, no server needed, useful on day one and
    independent of everything else): the shared word list, the TextMate
-   grammar and the Vim runtime files, with their tests.
+   grammar and the Vim runtime files, with their tests. **Done**
+   (10.1).
 2. Library prerequisites for step 1 (`diag.ByteCol`, `PositionMapper`),
    `pkg/lsp` skeleton, transcript test harness. Ship steps 1 to 3 behind
    `dgdtools lsp` and test with Neovim (no extension needed) (9 days).
@@ -694,7 +774,7 @@ grammars alone can ship in the first.
   byte.
 - Client side: the VS Code extension gets one integration test
   (`@vscode/test-electron`) that opens the fixture lib and waits for a
-  known diagnostic; grammar tests with `vscode-tmgrammar-test`.
+  known diagnostic. The grammars are tested from Go (10.1).
 
 ## 14. Decisions
 
@@ -730,6 +810,9 @@ Each with the alternative it was chosen over.
   definition in the profile resolving to nothing.
 - **Editor support lives in this repository**, under `editors/` (10.1),
   so a grammar, a client and the server they talk to are one commit.
+- **The grammars are tested by `go test`**, by running them, not by a
+  Node tool: the repository needs nothing but Go to keep them right, at
+  the price of a regular expression syntax both engines share (10.1).
 - **One rename engine for the editor and the command line; no
   deprecation machinery** (section 9).
 

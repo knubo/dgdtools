@@ -113,7 +113,7 @@
       ]
     },
     "keywords": {
-      "comment": "The driver's reserved words, checked against editors/common/dgdlpc.json. 'function' is not here: it is reserved only with dialect.closures, and a plain identifier (a common parameter name) without.",
+      "comment": "The driver's reserved words, checked against editors/common/dgdlpc.json. 'function' is not here: it is reserved only with dialect.closures, and without it a plain identifier, free to be a variable's or a parameter's name.",
       "patterns": [
         {
           "comment": "inherit LABEL \"/path\" or inherit LABEL PATH_MACRO: a name with a path after it is the label.",
