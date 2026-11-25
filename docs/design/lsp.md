@@ -2185,7 +2185,7 @@ grammars alone can ship in the first.
   `TestTokenLegend`; the transcript `tokens.txt` (full, range, delta,
   the refresh after a parent changed), and the capability in the others
   (`references.txt` waits for the first diagnostics now, which orders
-  the log). In `format`: nothing. In `editors`: `TestNeovimTokens`, the
+  the log). In `editors`: `TestNeovimTokens`, the
   `nvim` on `PATH` showing the tokens of a file and asking for a delta
   after an edit; `TestVSCodeClient` holds `semanticTokenScopes` and
   `semanticTokenModifiers` to the legend. On the corpus:
