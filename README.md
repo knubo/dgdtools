@@ -590,7 +590,10 @@ finds the references of a name: every call of a function in the mudlib
 (direct, `::`, `->` and callbacks on objects it can tell), every use of
 a variable, a macro or a local, every `inherit` of an object and
 `#include` of a header, and highlights a name's places in the file, a
-variable read or written. Where
+variable read or written. It colours what a grammar cannot tell
+(semantic tokens): which names are macros, and of which kind, which
+functions are the object's own, inherited, the auto object's or the
+driver's, which variables are global, local or parameters. Where
 the tools cannot know (a call on an
 object held in a variable) they say so, or nothing, and never guess. It
 reads the same `dgdtools.yml` as the commands, so the editor and the

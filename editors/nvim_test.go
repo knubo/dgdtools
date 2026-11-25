@@ -671,3 +671,85 @@ func TestNeovimReferences(t *testing.T) {
 	}, got.Marks)
 	assert.NotContains(t, log, "level=ERROR")
 }
+
+// nvimTokens has the Neovim on PATH show the semantic tokens of a file,
+// before and after an edit (a delta), and writes down what it has at
+// some names.
+const nvimTokens = `
+local dir, out = vim.env.DGDLPC_DIR, { before = {}, after = {} }
+local ok, err = pcall(function()
+  vim.opt.runtimepath:prepend(vim.env.DGDLPC_NVIM)
+  vim.opt.runtimepath:prepend(vim.env.DGDLPC_VIM)
+  vim.cmd('filetype plugin indent on')
+  vim.lsp.config('dgdtools', { cmd = { vim.env.DGDLPC_BIN, 'lsp', '--log', dir .. '/lsp.log' } })
+  vim.lsp.enable('dgdtools')
+  vim.cmd('edit ' .. vim.fn.fnameescape(dir .. '/lib/obj/a.c'))
+  local function wait(what, cond)
+    assert(vim.wait(20000, cond, 20), 'waited in vain for ' .. what)
+  end
+  local function at(text)
+    for i, line in ipairs(vim.api.nvim_buf_get_lines(0, 0, -1, false)) do
+      local found = line:find(text, 1, true)
+      if found then
+        local list = {}
+        for _, tk in ipairs(vim.lsp.semantic_tokens.get_at_pos(0, i - 1, found - 1) or {}) do
+          local mods = {}
+          for m in pairs(tk.modifiers) do table.insert(mods, m) end
+          table.sort(mods)
+          table.insert(list, tk.type .. (#mods > 0 and (' ' .. table.concat(mods, ',')) or ''))
+        end
+        return text .. ': ' .. table.concat(list, ' ')
+      end
+    end
+    return text .. ': no such text'
+  end
+  wait('the tokens', function() return at('set_weight(1') ~= 'set_weight(1: ' end)
+  local caps = vim.lsp.get_clients({ bufnr = 0 })[1].server_capabilities
+  out.delta = caps.semanticTokensProvider.full.delta
+  for _, text in ipairs({ 'BASE', 'set_weight(1', 'count;', 'count = ', 'heavy', 'grams' }) do
+    table.insert(out.before, at(text))
+  end
+  -- An edit: count becomes a global's name; the client asks for a delta.
+  vim.api.nvim_buf_set_lines(0, 3, 4, false, { '' })
+  wait('the tokens after the edit', function() return at('count = ') == 'count = : ' end)
+  table.insert(out.after, at('count = '))
+  table.insert(out.after, at('set_weight(1'))
+end)
+if not ok then out.error = tostring(err) end
+vim.fn.writefile({ vim.json.encode(out) }, dir .. '/result.json')
+vim.cmd('qall!')
+`
+
+// TestNeovimTokens has the Neovim on PATH highlight a file with the
+// server's semantic tokens, which its built-in client asks for by
+// itself (0.11 and later), in full and then as a delta after an edit.
+func TestNeovimTokens(t *testing.T) {
+	files := map[string]string{
+		"lib/dgdtools.yml":  "include_dirs: [/include]\n",
+		"lib/include/std.h": "#define BASE \"/std/base\"\n",
+		"lib/std/base.c":    "/* grøt */ void set_weight(int grams) {}\n",
+		"lib/obj/a.c": "#include <std.h>\ninherit BASE;\n" +
+			"static int heavy(int grams) {\n    int count;\n    /* først \U0001F600 */ set_weight(1); count = grams;\n    return count;\n}\n",
+	}
+	_, data, log := nvimRun(t, files, nvimTokens)
+	var got struct {
+		Error         string
+		Delta         bool
+		Before, After []string
+	}
+	require.NoError(t, json.Unmarshal(data, &got), "%s", data)
+	require.Empty(t, got.Error, "the server's log:\n%s", log)
+	assert.True(t, got.Delta)
+	assert.Equal(t, []string{
+		"BASE: macro",
+		"set_weight(1: function inherited",
+		"count;: variable declaration,local",
+		"count = : variable local",
+		"heavy: function definition,static",
+		"grams: parameter declaration",
+	}, got.Before)
+	// The local is gone: the name is nothing the tools know.
+	assert.Equal(t, []string{"count = : ", "set_weight(1: function inherited"}, got.After)
+	assert.Contains(t, log, "method=textDocument/semanticTokens/full/delta")
+	assert.NotContains(t, log, "level=ERROR")
+}

@@ -2,10 +2,10 @@
 
 Status: a plan, of which the first three steps of section 12 are built:
 the editor-side grammars of section 10.1, under `editors/`; the server
-itself for steps 1 to 8 of section 8 (live diagnostics, code actions,
+itself for steps 1 to 9 of section 8 (live diagnostics, code actions,
 formatting, go to definition, hover and signature help, the outline of a
 document and the search for a name in the lib, completion, references
-and highlights), as
+and highlights, semantic tokens), as
 `dgdtools lsp` and `pkg/lsp`; and the
 VS Code client of
 section 11, in `editors/vscode`, which has been built and checked but
@@ -93,6 +93,7 @@ is absolute.
 | `completion.go` | `textDocument/completion` and `completionItem/resolve`: `lint.Document.Complete`'s items as the protocol's, and the comment above a declaration when an item is asked for |
 | `symbols.go` | `textDocument/documentSymbol` and `workspace/symbol`: `lint.Document.Symbols`' outline and `index.Snapshot.FindSymbols`' matches as the protocol's symbols |
 | `references.go` | `textDocument/references` and `textDocument/documentHighlight`: `lint.Document.References`' places as locations, with a note in the log where the answer is not all there is; `Document.Highlights`' as highlights, read and written |
+| `tokens.go` | `textDocument/semanticTokens/full`, `full/delta` and `range`: `lint.Document.Tokens` encoded in the legend (`TokenLegend`), the last answer kept for a delta, and `workspace/semanticTokens/refresh` when a change elsewhere changed a document's tokens |
 | `content.go` | `workspace/textDocumentContent`: the text of a profile's stub |
 | `position.go` | `PositionMapper`, URIs and paths |
 | `protocol.go` | the protocol's types, as far as used (some 60) |
@@ -109,11 +110,13 @@ incremental changes), `codeActionProvider` (`quickfix`,
 `documentSymbolProvider`,
 `workspaceSymbolProvider`,
 `documentFormattingProvider`, `documentRangeFormattingProvider`,
+`semanticTokensProvider` (the legend of section 8, "As built, step 9";
+`full` with `delta`, and `range`),
 `workspace.workspaceFolders` (with change notifications),
 `workspace.textDocumentContent` for the scheme `dgdtools-profile`. Asked
 of the client when it can: `workspace/configuration`,
 `client/registerCapability` for `workspace/didChangeWatchedFiles`,
-`window/workDoneProgress/create`.
+`window/workDoneProgress/create`, `workspace/semanticTokens/refresh`.
 
 What the library got for it, since both are a script's or a command's as
 much as the server's: `config.DiscoverOptions.Folders` (section 3) and
@@ -134,7 +137,9 @@ names other files' declarations at, kept with its unit (`index.Use`,
 them (`resolve.Resolver.References`, `Highlights`, `Lookup`,
 `resolve.Extractor`), the lookups in a chain without flattening it
 (`index.Snapshot.ChainFunc`, `ChainUnseen`) and one walk for the paths
-of all the names of a file (`syntax.PathsAt`) ("As built, step 8").
+of all the names of a file (`syntax.PathsAt`) ("As built, step 8"); for
+step 9 the semantic tokens of a file (`resolve.Resolver.Tokens`,
+`lint.Document.Tokens`) ("As built, step 9").
 
 Where what is built is not what the sections below planned, the section
 says so in a paragraph that begins **As built**. In short:
@@ -449,7 +454,7 @@ knows the code base.
 | 6 **built** | `documentSymbol`, `workspace/symbol` | `syntax.File.Decls`; units' symbol tables (whole-lib scan, cached) | fuzzy matcher | 2 |
 | 7 **built** | `completion`: functions callable here (own chain, auto object, kfuns), `->` members for a known receiver, macros in view, `#include` and inherit paths, locals | chain + view + profile | local scopes (block-level symbol tables in `pkg/syntax`); tolerant parse at the cursor (the parser already recovers; completion context comes from tokens left of the cursor) | 5 |
 | 8 **built** | `references` (and `documentHighlight`) | new: a reverse index of call sites and macro uses per name, built with the whole-lib scan and invalidated per file | reverse index in `pkg/index`; in a partial checkout results are labelled as "in this checkout" | 4 |
-| 9 | `semanticTokens` (section 10.2): what a grammar cannot know. Ships in two parts: 9a macros by class, declarations, inherit labels, calls resolved through the chain (no scopes needed); 9b parameters/locals and unresolved names | tree + view + chain | 9b needs scopes (from 7) | 9a: 2, 9b: 2 |
+| 9 **built** | `semanticTokens` (section 10.2): what a grammar cannot know. Ships in two parts: 9a macros by class, declarations, inherit labels, calls resolved through the chain (no scopes needed); 9b parameters/locals and unresolved names | tree + view + chain | 9b needs scopes (from 7) | 9a: 2, 9b: 2 |
 | 10 | `prepareRename` and `rename` for the symbols one file decides (section 9): locals and parameters, private functions and variables, macros a `.c` file defines for itself | `pkg/rename` (new) over the tree, the scopes and the file's `pp.Env` | scopes (from 7); `syntax.PathAt` (from 4) | 3 |
 | 11 | Rename across files, in the editor and as `dgdtools rename SYMBOL NEW` (section 9): functions, object globals, header macros; every occurrence classified certain, possible or excluded; edits previewed with change annotations, or written as a patch | `pkg/rename` over the reverse index, who inherits a file (a `Query` on the snapshot), `Chain`, `LookupCallable`, `calls.Extract` | the reverse index (from 8); the whole-lib scan; step 10 | 9 |
 | 12 | Refactorings as code actions (section 9.6): add the missing prototype, fix an `#include` path; renaming a file updates the `inherit` and `#include` lines that name it (`workspace/willRenameFiles`) | `ResolveInclude`, `ObjectPath`, the include and inherit edges `Invalidate` already follows | the reverse index (from 8) for the file rename | 3 |
@@ -1034,6 +1039,105 @@ occurrences in code that does not parse and in strings that are no
 callback (text, not Uses), the names built at run time (calls whose
 function is not a constant), and the collision checks of 9.4.
 
+**As built, step 9.** The tokens are the library's, `pkg/resolve`
+(`Resolver.Tokens`, kept with the document as `lint.Document.Tokens`),
+and `pkg/lsp/tokens.go` their protocol. 9a and 9b were built together,
+since the scopes of step 7 were there.
+
+```go
+for _, tk := range doc.Tokens() {   // []resolve.SemanticToken, in the order of the file, none overlapping
+    tk.Start, tk.End                // the bytes of the name, on one line
+    tk.Type                         // resolve.TokenFunction, ...: TokenTypes[tk.Type] is the protocol's name
+    tk.Mods.Names()                 // ["definition", "static"]: TokenModNames, a bit each
+}
+```
+
+**The legend.** Standard types only, so that a theme colours them
+unconfigured; the standard modifiers where one fits, and three of
+dgdtools' own:
+
+| Token | Type | Modifiers |
+|---|---|---|
+| inherit label, where declared and in `label::fn()` | `namespace` | `declaration` where declared |
+| macro that the parser takes for a type (`status`) | `type` | `macro` |
+| macro that it takes for specifiers, or an empty one (`public`) | `modifier` | `macro` |
+| any other macro: an expression, a statement, a string, in code and in `#if`, `#ifdef`, `#undef` and other macros' bodies; and the name at its `#define` | `macro` | `declaration` at the `#define` |
+| function at its prototype / its definition | `function` | `declaration` / `definition`; `static` |
+| call of the object's own function (`fn()`, `&fn()`) | `function` | |
+| call of an inherited one (`fn()`, `::fn()`, `label::fn()`) | `function` | `inherited`; `static` |
+| call of the auto object's function, or of a kfun | `function` | `defaultLibrary`; `static` |
+| `->fn` (and `call_other`'s receiver known or not) | `method` | as a call, by what the receiver's lookup finds; `defaultLibrary` for the auto object's; none for an unknown receiver |
+| global variable | `variable` | `declaration` where declared; `inherited`; `static` |
+| local variable, a `catch` variable among them | `variable` | `local`; `declaration` |
+| parameter | `parameter` | `declaration` |
+| `function` where the lib has closures | `keyword` | |
+
+A token says what At says at its offset, and nothing where At knows
+nothing of a declaration: a call of a function no file declares and no
+kfun is (or a kfun the auto object may hide, as hover has it), a name
+no variable of the file is, a private function of a parent, code that
+is not compiled, a statement that did not parse and the names it may
+declare after it. "Unresolved" is not a token: a finding says that, and
+a name the tools know nothing of keeps the grammar's colour. Nor are
+strings tokens (an `inherit` path, a callback's name in `call_out("fn")`,
+an object path: the grammar has them as strings), nor comments,
+numbers, operators and keywords but `function`. The custom modifiers
+`private` and `controlFlow` of section 10.2's plan are not built (a
+private function of the file is one of its own; a statement macro is a
+macro), nor `deprecated` (nothing in the library knows it). Of several
+declarations a name may have, a modifier is given when all have it.
+
+**One walk.** `Tokens` is `uses` of step 8 with tokens for every name
+of the compiled code: `syntax.PathsAt` once, `classify` each name, and
+a `Lookup` for each name and form once (memoized in the walk); the
+directives' words as in step 8. On the VikingMUD lib (108,115 files,
+`TestCorpusTokens`): 5,972,708 tokens, 7 µs at the median for a file
+once it is linted, 91 µs at the 95th percentile, 6 ms the slowest.
+
+**The server.** Tokens are made in the lint that publishes the
+diagnostics, for a client that says it reads them
+(`textDocument.semanticTokens`), so a request finds them made (a
+`sync.Once` on the document); a request whose document is not linted
+in its current version lints it, as hover does, and the scheduled lint
+that follows takes that lint as its own when it is of the same version,
+the same session and the same scan, with no questions left for the scan
+(`reuse`): an editor asks for tokens at once after each change, and the
+document is not linted twice for it. `full` answers the encoded tokens
+and an id, and keeps them with the document; `full/delta` from that id
+answers one edit, what lies between the tokens both arrays begin with
+and those both end with, whole tokens of five integers (a delta from
+any other id answers all of them); `range` answers the tokens that
+begin in the range, the first line counted from the top, and keeps
+nothing. When the lint of a document after a change to another file (a
+header's macros, a parent's functions) makes other tokens than the
+client has for the same version, the client is asked to ask again
+(`workspace/semanticTokens/refresh`, one at a time, to a client that
+says it can be). The 20,000-line budget of 10.2 is not built: the
+slowest file of the VikingMUD lib takes milliseconds. Through the
+server (`TestCorpusSession`, 2,003 files of that lib): 118,875 tokens,
+every one within its line; a `full` request answered in 60 µs at the
+median, 330 µs at the 95th percentile, 8 ms at most; heap at the end
+635 MB (709 MB in the run of step 8).
+
+**Editors.** VS Code maps the types and modifiers to the grammar's
+scopes for a theme with no rules for semantic tokens
+(`semanticTokenScopes`: `entity.name.namespace.dgdlpc`,
+`storage.type.dgdlpc` for a type macro and `function`,
+`storage.modifier.dgdlpc`, `entity.name.function.preprocessor.dgdlpc`
+for a macro, `entity.name.function.call.dgdlpc`,
+`entity.name.function.definition.dgdlpc` where declared or defined,
+`support.function.dgdlpc` for `defaultLibrary`,
+`entity.name.function.member.dgdlpc` for a method,
+`variable.other.dgdlpc`, `variable.other.local.dgdlpc`,
+`variable.parameter.dgdlpc`), and declares the three custom modifiers
+(`semanticTokenModifiers`). Neovim's client asks for the tokens by
+itself and links the standard types to its groups; editors/README.md
+has links for the modifiers. The tokens claim nothing the grammars
+claim otherwise: a macro is the grammars' macro, a type macro and
+`function` their type, a label their label, and where a grammar colours
+by pattern (a name before `(`, an upper-case name as a macro in Vim)
+the token says what the name is, and nothing where nobody knows.
+
 Steps 1 to 3 (9 days) are the "useful every day" milestone: live
 diagnostics, fixes, formatting. Steps 4 to 6 (9 days) make it a
 navigation tool. Steps 7 to 9 (13 days) need two pieces of library work
@@ -1451,6 +1555,15 @@ expensive input, the whole-lib scan, is never needed for tokens.
 Budget: a file over 20,000 lines answers `full` with a `range`-sized
 window and logs it.
 
+**As built** (section 8, "As built, step 9"): the legend has standard
+types only, and three custom modifiers (`inherited`, `local`,
+`macro`); a specifier-class or empty macro is `modifier`, a statement
+macro a `macro` with no modifier, `->name` a `method` whatever the
+receiver, and nothing is `unresolved`. Tokens are computed with the
+diagnostics and kept with the document; the refresh is sent when a
+lint after a change elsewhere makes other tokens; there is no budget
+for big files.
+
 **Split.** 9a (macros by class, declarations, inherit labels, calls
 resolved through the chain, kfuns once the table exists) needs nothing
 beyond today's library and is worth shipping right after hover, because
@@ -1787,10 +1900,11 @@ network.
    and publishes it nowhere until the owner says where.
 4. `syntax.PathAt`; steps 4 to 6 (9 days); then semantic tokens 9a (2
    days), which needs only what hover needs. **Steps 4 to 6 are done**
-   (section 8), and the kfun table of the next item with them.
+   (section 8), and the kfun table of the next item with them; 9a was
+   built with 9b (section 8, "As built, step 9").
 5. Scopes and kfun table in the library (also unlock linter rules:
    undeclared variable, undefined function, argument counts); step 7 and
-   semantic tokens 9b (7 days); then step 10, rename within a file (3
+   semantic tokens 9b (7 days), **both done**; then step 10, rename within a file (3
    days), which needs the scopes and nothing else.
 6. Reverse index; step 8 (4 days). **Done** (section 8, "As built,
    step 8").
@@ -2056,6 +2170,29 @@ grammars alone can ship in the first.
   references (`vim.lsp.buf.references`) and highlighting a local read
   and written (`vim.lsp.buf.document_highlight`). On the corpus,
   `TestCorpusReferences` (above, "As built, step 8").
+- **As built, semantic tokens (step 9).** In `pkg/resolve`:
+  `TestTokens` and `TestTokensOfEachKind` (every row of the legend, and
+  what has no token: strings, registrars, private functions of a
+  parent, code not compiled, `function` without closures),
+  `TestTokensAreAt` (at every offset of every file of two libs, the
+  token is what At says there, and none where At knows of no
+  declaration; every token At's). In `pkg/lsp`: `TestTokensAreTheLibrarys`
+  (the tokens of every file of a lib through the server, decoded by the
+  test from the text, are `Document.Tokens`, in both encodings; every
+  range of lines is the tokens that begin in it), `TestTokensDelta` (200
+  random edits in each encoding: the delta applied to what the client
+  has is what `full` answers; a delta from an old id is all of them),
+  `TestTokenLegend`; the transcript `tokens.txt` (full, range, delta,
+  the refresh after a parent changed), and the capability in the others
+  (`references.txt` waits for the first diagnostics now, which orders
+  the log). In `format`: nothing. In `editors`: `TestNeovimTokens`, the
+  `nvim` on `PATH` showing the tokens of a file and asking for a delta
+  after an edit; `TestVSCodeClient` holds `semanticTokenScopes` and
+  `semanticTokenModifiers` to the legend. On the corpus:
+  `TestCorpusTokens` (`pkg/resolve`: every file of the lib, each token
+  in order and on its line, one file in 20 held to At at every offset)
+  and `TestCorpusSession` (the tokens of every file it opens, through
+  the server, each within its line).
 - **Edit fuzzing** (`go test -fuzz`): start from a corpus file, apply a
   random sequence of range edits through incremental sync while applying
   the same edits to a plain string; after each step the server's buffer

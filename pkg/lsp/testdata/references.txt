@@ -29,6 +29,8 @@ int heavy() { return query_weight() > 10; }
 -- script --
 initialize lib
 open lib/obj/a.c
+# Once it is linted, the log has said what project it is of.
+diagnostics lib/obj/a.c
 
 # A function, with and without its declaration; and from the
 # declaration, in a file that is not open.
@@ -77,6 +79,24 @@ highlight lib/obj/a.c 3:1
 <     "workspaceSymbolProvider": true,
 <     "documentFormattingProvider": true,
 <     "documentRangeFormattingProvider": true,
+<     "semanticTokensProvider": {
+<       "legend": {
+<         "tokenTypes": [
+<           "namespace",
+<           "type",
+<           "parameter",
+<           "variable",
+<           "function",
+<           "method",
+<           "macro",
+<           "keyword",
+<           "modifier"
+<         ],
+<         "tokenModifiers": ["declaration", "definition", "static", "defaultLibrary", "inherited", "local", "macro"]
+<       },
+<       "range": true,
+<       "full": {"delta": true}
+<     },
 <     "workspace": {
 <       "workspaceFolders": {"supported": true, "changeNotifications": true},
 <       "textDocumentContent": {"schemes": ["dgdtools-profile"]}
@@ -85,6 +105,9 @@ highlight lib/obj/a.c 3:1
 <   "serverInfo": {"name": "dgdtools", "version": "test"}
 < }
 > open lib/obj/a.c
+# Once it is linted, the log has said what project it is of.
+> diagnostics lib/obj/a.c
+< {"uri": "file://$ROOT/lib/obj/a.c", "version": 1, "diagnostics": []}
 # A function, with and without its declaration; and from the
 # declaration, in a file that is not open.
 > references lib/obj/a.c 5:10
@@ -114,6 +137,7 @@ highlight lib/obj/a.c 3:1
 <   }
 < ]
 > received window/logMessage
+< {"message": "project $ROOT/lib/dgdtools.yml: mudlib $ROOT/lib", "type": 3}
 < {
 <   "message": "references to function query_weight: 2; 1 calls of query_weight on objects that cannot be told (in 1 files) may call it too and are not listed",
 <   "type": 3
@@ -122,7 +146,6 @@ highlight lib/obj/a.c 3:1
 <   "message": "references to function query_weight: 3; 1 calls of query_weight on objects that cannot be told (in 1 files) may call it too and are not listed",
 <   "type": 3
 < }
-< {"message": "project $ROOT/lib/dgdtools.yml: mudlib $ROOT/lib", "type": 3}
 # A global variable of an inherited object.
 > references lib/obj/a.c 7:5 decl
 < [

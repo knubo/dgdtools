@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -45,6 +46,11 @@ var update = flag.Bool("update", false, "rewrite the transcripts in testdata")
 //	complete FILE L:C [CHAR]     textDocument/completion, asked for by
 //	                             typing CHAR when there is one
 //	resolve N                    completionItem/resolve of the Nth item
+//	tokens FILE [L:C-L:C]        textDocument/semanticTokens/full (range),
+//	                             decoded: a token a line
+//	delta FILE [ID]              textDocument/semanticTokens/full/delta
+//	                             from the last tokens of the file (or
+//	                             those of ID), the edits made to them
 //	symbols FILE                 textDocument/documentSymbol
 //	find QUERY                   workspace/symbol
 //	text FILE                    the editor's text
@@ -113,6 +119,12 @@ func archive(data string) (head string, out []section) {
 	return head, out
 }
 
+// sent are semantic tokens and their id.
+type sent struct {
+	id   string
+	data []uint32
+}
+
 // player plays a script against a server.
 type player struct {
 	t    *testing.T
@@ -126,7 +138,10 @@ type player struct {
 	// items are those of the last completion, as they came.
 	items    []json.RawMessage
 	settings map[string]json.RawMessage
-	seen     map[string]int
+	// tokens are the last semantic tokens of each file, as the client
+	// has them.
+	tokens map[string]sent
+	seen   map[string]int
 }
 
 func (p *player) path(rel string) string { return filepath.Join(p.root, filepath.FromSlash(rel)) }
@@ -368,6 +383,57 @@ func (p *player) play(script string) string {
 				break
 			}
 			p.show(result)
+		case "tokens", "delta":
+			doc := lsp.TextDocumentIdentifier{URI: lsptest.URI(p.path(arg[0]))}
+			method, params := "textDocument/semanticTokens/full", any(lsp.SemanticTokensParams{TextDocument: doc})
+			switch {
+			case cmd == "delta":
+				prev := p.tokens[arg[0]].id
+				if len(arg) > 1 {
+					prev = arg[1]
+				}
+				method, params = "textDocument/semanticTokens/full/delta", lsp.SemanticTokensDeltaParams{TextDocument: doc, PreviousResultID: prev}
+			case len(arg) > 1:
+				method, params = "textDocument/semanticTokens/range", lsp.SemanticTokensRangeParams{TextDocument: doc, Range: p.span(arg[1])}
+			}
+			var result json.RawMessage
+			if err := c.Call(method, params, &result); err != nil {
+				p.show(err.Error())
+				break
+			}
+			var got struct {
+				ResultID string                    `json:"resultId"`
+				Data     *[]uint32                 `json:"data"`
+				Edits    *[]lsp.SemanticTokensEdit `json:"edits"`
+			}
+			require.NoError(t, json.Unmarshal(result, &got))
+			var data []uint32
+			switch {
+			case got.Data != nil:
+				data = *got.Data
+				if got.ResultID != "" {
+					p.out.WriteString("< all, as " + got.ResultID + "\n")
+				}
+			case got.Edits != nil:
+				// The edits made to the tokens the client has.
+				data = slices.Clone(p.tokens[arg[0]].data)
+				for i := len(*got.Edits) - 1; i >= 0; i-- {
+					e := (*got.Edits)[i]
+					p.out.WriteString(fmt.Sprintf("< edit at %d: %d deleted, %d inserted\n", e.Start, e.DeleteCount, len(e.Data)))
+					data = slices.Replace(data, e.Start, e.Start+e.DeleteCount, e.Data...)
+				}
+				p.out.WriteString("< as " + got.ResultID + "\n")
+			default:
+				p.show(result) // null
+				continue
+			}
+			if got.ResultID != "" {
+				if p.tokens == nil {
+					p.tokens = map[string]sent{}
+				}
+				p.tokens[arg[0]] = sent{got.ResultID, data}
+			}
+			p.out.WriteString(lsptest.DecodeTokens(c.Doc(p.path(arg[0])).Text, data, c.Encoding))
 		case "symbols", "find":
 			method, params := "workspace/symbol", any(lsp.WorkspaceSymbolParams{Query: rest})
 			if cmd == "symbols" {

@@ -79,24 +79,49 @@ func (s *server) lint(doc *document, t *ticket) {
 	defer cancel()
 	doc.ticket, doc.running, doc.cancel = nil, t, cancel
 	sess, version, scanned := s.session, doc.version, doc.scanned
+	// A request may have linted the document already, as it is now and
+	// as this lint would (a client asks for semantic tokens at once
+	// after a change): that lint is this one's, unless it left questions
+	// for the scan.
+	reuse := doc.linted
+	if reuse != nil && (doc.lintedVersion != version || doc.lintedIn != sess || doc.lintedBy != scanned ||
+		reuse.NeedsScan || !sess.Current(reuse)) {
+		reuse = nil
+	}
 	s.mu.Unlock()
 
 	start := time.Now()
-	d, l, err := lintWith(ctx, sess, doc.path, scanned)
+	var (
+		d   *lint.Document
+		l   *lint.Linter
+		err error
+	)
+	if reuse != nil {
+		d = reuse
+		l, err = sess.Linter(doc.path)
+	} else {
+		d, l, err = lintWith(ctx, sess, doc.path, scanned)
+	}
 	var (
 		found  []Diagnostic
+		tokens []uint32
 		prj    *config.Project
 		inputs []string
 	)
 	if err == nil {
 		found = s.diagnostics(sess, d)
+		if s.caps.tokens {
+			// Made here, beside the diagnostics, so that a request for
+			// them finds them made.
+			tokens = EncodeTokens(NewPositionMapper(d.File.Src, s.caps.encoding()), d.Tokens())
+		}
 		prj = l.Project()
 		inputs = prj.Inputs()
 		if b := l.BaselinePath(); b != "" {
 			inputs = append(inputs, b)
 		}
 	}
-	s.log.Debug("lint", "path", doc.path, "version", version, "took", time.Since(start), "err", err)
+	s.log.Debug("lint", "path", doc.path, "version", version, "took", time.Since(start), "reused", reuse != nil, "err", err)
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -130,8 +155,11 @@ func (s *server) lint(doc *document, t *ticket) {
 	for _, e := range d.Errors {
 		s.logMessage(MessageError, e.Error())
 	}
-	doc.linted, doc.lintedVersion, doc.lintedIn, doc.inputs = d, version, sess, inputs
+	doc.linted, doc.lintedVersion, doc.lintedIn, doc.lintedBy, doc.inputs = d, version, sess, scanned, inputs
 	s.publish(doc, version, found)
+	if tokens != nil {
+		s.tokensChanged(doc, version, tokens)
+	}
 	s.announce(prj, d)
 	s.rewatch()
 	switch {

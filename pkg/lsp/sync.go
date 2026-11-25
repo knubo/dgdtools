@@ -47,6 +47,7 @@ type document struct {
 	linted        *lint.Document
 	lintedVersion int
 	lintedIn      *session.Session
+	lintedBy      *lint.Linter // the document's scanned when it was linted
 	inputs        []string
 	// scanned is the linter the document was linted by with the scan of
 	// the whole lib complete, and rescanned the generation of the lib a
@@ -57,6 +58,8 @@ type document struct {
 	// shown whether that was anything.
 	published []byte
 	shown     bool
+	// tokens are the semantic tokens last sent in full or as a delta.
+	tokens *sentTokens
 }
 
 // ticket is one scheduled lint.

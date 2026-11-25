@@ -1,0 +1,202 @@
+Semantic tokens: what analysis knows of the names of a document and a
+grammar cannot. Macros by the class the parser gives them, functions
+where declared and where called (the file's own, inherited, the auto
+object's or the driver's), global and local variables, parameters,
+inherit labels, and `function` where the lib has closures. A name
+nothing is known of has none, nor have strings, comments and keywords.
+All of a document, a range of it, and a delta from the last answer; and
+the client is asked to ask again when a change to another file changes
+a document's tokens.
+
+-- lib/dgdtools.yml --
+include_dirs: [/include]
+auto_objects: [/sys/auto]
+dialect: {closures: true}
+-- lib/include/std.h --
+#define BASE "/std/base"
+#define status int
+#define LIMIT 10
+-- lib/sys/auto.c --
+void tell(string s) {}
+-- lib/std/base.c --
+int weight;
+int query_weight() { return weight; }
+-- lib/obj/a.c --
+#include <std.h>
+inherit base BASE;
+
+static status heavy(int n) {
+    function f;
+    int w;
+    w = query_weight() + base::query_weight();
+    tell("é" + w); f = &heavy();
+    ob->query_weight(); nobody();
+    return w > LIMIT;
+}
+-- script --
+initialize lib
+open lib/obj/a.c
+tokens lib/obj/a.c
+
+# The lines of a range, the first one's line counted from the top.
+tokens lib/obj/a.c 6:0-8:0
+
+# A delta: a name that is no longer known, then no change at all.
+change lib/obj/a.c 6:8-6:20 "unknown_fn"
+delta lib/obj/a.c
+delta lib/obj/a.c
+
+# A delta from an answer that is not the last: all of them.
+delta lib/obj/a.c 1
+
+# The inherited function is gone: the client is asked to ask again.
+write lib/std/base.c "int weight;\n"
+watched changed lib/std/base.c
+received workspace/semanticTokens/refresh
+tokens lib/obj/a.c 6:0-7:0
+-- transcript --
+> initialize lib
+< {
+<   "capabilities": {
+<     "positionEncoding": "utf-16",
+<     "textDocumentSync": {"openClose": true, "change": 2},
+<     "codeActionProvider": {"codeActionKinds": ["quickfix", "source.fixAll.dgdtools"]},
+<     "completionProvider": {"triggerCharacters": [">", ":", "\"", "/", "<"], "resolveProvider": true},
+<     "definitionProvider": true,
+<     "referencesProvider": true,
+<     "documentHighlightProvider": true,
+<     "hoverProvider": true,
+<     "signatureHelpProvider": {"triggerCharacters": ["(", ","], "retriggerCharacters": [")"]},
+<     "documentSymbolProvider": true,
+<     "workspaceSymbolProvider": true,
+<     "documentFormattingProvider": true,
+<     "documentRangeFormattingProvider": true,
+<     "semanticTokensProvider": {
+<       "legend": {
+<         "tokenTypes": [
+<           "namespace",
+<           "type",
+<           "parameter",
+<           "variable",
+<           "function",
+<           "method",
+<           "macro",
+<           "keyword",
+<           "modifier"
+<         ],
+<         "tokenModifiers": ["declaration", "definition", "static", "defaultLibrary", "inherited", "local", "macro"]
+<       },
+<       "range": true,
+<       "full": {"delta": true}
+<     },
+<     "workspace": {
+<       "workspaceFolders": {"supported": true, "changeNotifications": true},
+<       "textDocumentContent": {"schemes": ["dgdtools-profile"]}
+<     }
+<   },
+<   "serverInfo": {"name": "dgdtools", "version": "test"}
+< }
+> open lib/obj/a.c
+> tokens lib/obj/a.c
+< all, as 1
+< 1:8 "base" namespace declaration
+< 1:13 "BASE" macro
+< 3:7 "status" type macro
+< 3:14 "heavy" function definition,static
+< 3:24 "n" parameter declaration
+< 4:4 "function" keyword
+< 4:13 "f" variable declaration,local
+< 5:8 "w" variable declaration,local
+< 6:4 "w" variable local
+< 6:8 "query_weight" function inherited
+< 6:25 "base" namespace
+< 6:31 "query_weight" function inherited
+< 7:4 "tell" function defaultLibrary
+< 7:15 "w" variable local
+< 7:19 "f" variable local
+< 7:24 "heavy" function static
+< 8:8 "query_weight" method
+< 9:11 "w" variable local
+< 9:15 "LIMIT" macro
+# The lines of a range, the first one's line counted from the top.
+> tokens lib/obj/a.c 6:0-8:0
+< 6:4 "w" variable local
+< 6:8 "query_weight" function inherited
+< 6:25 "base" namespace
+< 6:31 "query_weight" function inherited
+< 7:4 "tell" function defaultLibrary
+< 7:15 "w" variable local
+< 7:19 "f" variable local
+< 7:24 "heavy" function static
+# A delta: a name that is no longer known, then no change at all.
+> change lib/obj/a.c 6:8-6:20 "unknown_fn"
+> delta lib/obj/a.c
+< edit at 45: 10 deleted, 5 inserted
+< as 2
+< 1:8 "base" namespace declaration
+< 1:13 "BASE" macro
+< 3:7 "status" type macro
+< 3:14 "heavy" function definition,static
+< 3:24 "n" parameter declaration
+< 4:4 "function" keyword
+< 4:13 "f" variable declaration,local
+< 5:8 "w" variable declaration,local
+< 6:4 "w" variable local
+< 6:23 "base" namespace
+< 6:29 "query_weight" function inherited
+< 7:4 "tell" function defaultLibrary
+< 7:15 "w" variable local
+< 7:19 "f" variable local
+< 7:24 "heavy" function static
+< 8:8 "query_weight" method
+< 9:11 "w" variable local
+< 9:15 "LIMIT" macro
+> delta lib/obj/a.c
+< as 3
+< 1:8 "base" namespace declaration
+< 1:13 "BASE" macro
+< 3:7 "status" type macro
+< 3:14 "heavy" function definition,static
+< 3:24 "n" parameter declaration
+< 4:4 "function" keyword
+< 4:13 "f" variable declaration,local
+< 5:8 "w" variable declaration,local
+< 6:4 "w" variable local
+< 6:23 "base" namespace
+< 6:29 "query_weight" function inherited
+< 7:4 "tell" function defaultLibrary
+< 7:15 "w" variable local
+< 7:19 "f" variable local
+< 7:24 "heavy" function static
+< 8:8 "query_weight" method
+< 9:11 "w" variable local
+< 9:15 "LIMIT" macro
+# A delta from an answer that is not the last: all of them.
+> delta lib/obj/a.c 1
+< all, as 4
+< 1:8 "base" namespace declaration
+< 1:13 "BASE" macro
+< 3:7 "status" type macro
+< 3:14 "heavy" function definition,static
+< 3:24 "n" parameter declaration
+< 4:4 "function" keyword
+< 4:13 "f" variable declaration,local
+< 5:8 "w" variable declaration,local
+< 6:4 "w" variable local
+< 6:23 "base" namespace
+< 6:29 "query_weight" function inherited
+< 7:4 "tell" function defaultLibrary
+< 7:15 "w" variable local
+< 7:19 "f" variable local
+< 7:24 "heavy" function static
+< 8:8 "query_weight" method
+< 9:11 "w" variable local
+< 9:15 "LIMIT" macro
+# The inherited function is gone: the client is asked to ask again.
+> write lib/std/base.c "int weight;\n"
+> watched changed lib/std/base.c
+> received workspace/semanticTokens/refresh
+< null
+> tokens lib/obj/a.c 6:0-7:0
+< 6:4 "w" variable local
+< 6:23 "base" namespace

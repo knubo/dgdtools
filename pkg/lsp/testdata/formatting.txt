@@ -70,6 +70,24 @@ exit
 <     "workspaceSymbolProvider": true,
 <     "documentFormattingProvider": true,
 <     "documentRangeFormattingProvider": true,
+<     "semanticTokensProvider": {
+<       "legend": {
+<         "tokenTypes": [
+<           "namespace",
+<           "type",
+<           "parameter",
+<           "variable",
+<           "function",
+<           "method",
+<           "macro",
+<           "keyword",
+<           "modifier"
+<         ],
+<         "tokenModifiers": ["declaration", "definition", "static", "defaultLibrary", "inherited", "local", "macro"]
+<       },
+<       "range": true,
+<       "full": {"delta": true}
+<     },
 <     "workspace": {
 <       "workspaceFolders": {"supported": true, "changeNotifications": true},
 <       "textDocumentContent": {"schemes": ["dgdtools-profile"]}

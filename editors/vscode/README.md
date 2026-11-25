@@ -40,6 +40,15 @@ the linter and formatter for it:
   profile that the search covered your folder only.
 - **Highlights** of the name under the cursor, a variable marked where
   it is read and where it is written.
+- **Semantic highlighting** over the grammar's: macros (one that stands
+  for a type as a type), functions where declared and defined, and in a
+  call the object's own, inherited, the auto object's or the driver's,
+  `->fn` as a method, global and local variables and parameters,
+  inherit labels, and `function` where the mudlib has closures. A theme
+  with no rules for semantic tokens colours them by the grammar's
+  scopes (`support.function` for a kfun, `storage.type` for a type
+  macro); the modifiers `inherited`, `local` and `macro` can be named in
+  `editor.semanticTokenColorCustomizations`.
 
 Where the tools cannot know (a call on an object held in a variable)
 they say nothing rather than guess.

@@ -202,6 +202,11 @@ type server struct {
 	// those waiting for it to be nothing.
 	work int
 	idle []chan struct{}
+	// resultID numbers the semantic tokens sent; refreshing says the
+	// client is being asked to ask for them again, and refreshAgain that
+	// it is to be asked once more when it has answered.
+	resultID                 uint64
+	refreshing, refreshAgain bool
 }
 
 // capabilities are the client's, as far as the server acts on them.
@@ -221,6 +226,9 @@ type capabilities struct {
 	// What a signature may carry: its documentation as Markdown, its
 	// parameters as offsets in the label, its own active parameter.
 	signatureMarkdown, labelOffsets, signatureActive bool
+	// Semantic tokens: the client asks for them, and can be told to
+	// ask again.
+	tokens, tokensRefresh bool
 }
 
 // encoding names the position encoding in use.
@@ -424,6 +432,24 @@ func (s *server) request(ctx context.Context, method string, params json.RawMess
 			return nil, err
 		}
 		result, err = s.workspaceSymbol(ctx, &p)
+	case "textDocument/semanticTokens/full":
+		var p SemanticTokensParams
+		if err := unmarshal(params, &p); err != nil {
+			return nil, err
+		}
+		result, err = s.semanticTokens(ctx, &p)
+	case "textDocument/semanticTokens/full/delta":
+		var p SemanticTokensDeltaParams
+		if err := unmarshal(params, &p); err != nil {
+			return nil, err
+		}
+		result, err = s.semanticTokensDelta(ctx, &p)
+	case "textDocument/semanticTokens/range":
+		var p SemanticTokensRangeParams
+		if err := unmarshal(params, &p); err != nil {
+			return nil, err
+		}
+		result, err = s.semanticTokensRange(ctx, &p)
 	case "textDocument/formatting":
 		var p DocumentFormattingParams
 		if err := unmarshal(params, &p); err != nil {
@@ -560,6 +586,8 @@ func (s *server) initialize(params json.RawMessage) (any, error) {
 	s.caps.signatureMarkdown = slices.Contains(si.DocumentationFormat, Markdown)
 	s.caps.labelOffsets = si.ParameterInformation.LabelOffsetSupport
 	s.caps.signatureActive = si.ActiveParameterSupport
+	s.caps.tokens = c.TextDocument.SemanticTokens != nil
+	s.caps.tokensRefresh = c.Workspace.SemanticTokens.RefreshSupport
 	// A column is a byte offset wherever the client can count that way;
 	// UTF-16 is what every client can.
 	for _, e := range c.General.PositionEncodings {
@@ -604,6 +632,8 @@ func (s *server) initialize(params json.RawMessage) (any, error) {
 	res.Capabilities.WorkspaceSymbolProvider = true
 	res.Capabilities.DocumentFormattingProvider = true
 	res.Capabilities.DocumentRangeFormattingProvider = true
+	res.Capabilities.SemanticTokensProvider = &SemanticTokensOptions{Legend: TokenLegend, Range: true}
+	res.Capabilities.SemanticTokensProvider.Full.Delta = true
 	if c.TextDocument.CodeAction.CodeActionLiteralSupport != nil {
 		res.Capabilities.CodeActionProvider = &CodeActionOptions{CodeActionKinds: []string{KindQuickFix, KindFixAll}}
 	}

@@ -103,8 +103,8 @@ func TestCorpusSession(t *testing.T) {
 		Log: slog.New(slog.NewTextHandler(&log, &slog.HandlerOptions{Level: slog.LevelWarn}))})
 	c.Initialize(lsptest.Capabilities{}, root)
 
-	var first, edited []time.Duration
-	latin1, findings := 0, 0
+	var first, edited, tokensTook []time.Duration
+	latin1, findings, tokens, badTokens := 0, 0, 0, 0
 	began := time.Now()
 	for i, path := range sample {
 		data, err := os.ReadFile(path)
@@ -133,6 +133,22 @@ func TestCorpusSession(t *testing.T) {
 		for _, d := range c.Diagnostics(path).Diagnostics {
 			require.True(t, d.Range.End.Line < end.Line || d.Range.End == end || d.Range.End.Line == end.Line && d.Range.End.Character <= end.Character,
 				"%s: %+v ends after the text (%+v)", path, d.Range, end)
+		}
+
+		// The semantic tokens, each on its line and of the text it
+		// says, made by the lint that published the diagnostics.
+		start = time.Now()
+		res := semanticTokens(t, c, "textDocument/semanticTokens/full", lsp.SemanticTokensParams{TextDocument: lsp.TextDocumentIdentifier{URI: lsptest.URI(path)}})
+		tokensTook = append(tokensTook, time.Since(start))
+		require.NotNil(t, res.Data, path)
+		for _, tk := range lsptest.Tokens(text, *res.Data, c.Encoding) {
+			if strings.ContainsAny(tk.Text, "\r\n") || utf16Len(tk.Text) != tk.Length {
+				badTokens++
+				if badTokens <= 10 {
+					t.Errorf("%s:%d:%d: token %q of length %d is not within its line", path, tk.Line, tk.Character, tk.Text, tk.Length)
+				}
+			}
+			tokens++
 		}
 
 		// A character in, at the start of some line, and out again.
@@ -222,10 +238,24 @@ func TestCorpusSession(t *testing.T) {
 	t.Logf("%d of %d files (%d not UTF-8), %d findings, %v", len(first), len(files), latin1, findings, time.Since(began).Round(time.Millisecond))
 	t.Logf("open to diagnostics: p50 %v p95 %v max %v; edit to diagnostics: p50 %v p95 %v max %v (each includes 1 ms of waiting for more changes)",
 		pct(first, 50), pct(first, 95), first[len(first)-1].Round(time.Millisecond), pct(edited, 50), pct(edited, 95), edited[len(edited)-1].Round(time.Millisecond))
+	t.Logf("semantic tokens: %d in %d files, %d not within their line; full request p50 %v p95 %v max %v",
+		tokens, len(tokensTook), badTokens, pct(tokensTook, 50), pct(tokensTook, 95), tokensTook[len(tokensTook)-1].Round(time.Microsecond))
 	t.Logf("heap in use at the end: %d MB", mem.HeapAlloc>>20)
 	assert.NotContains(t, log.String(), "msg=panic")
 	assert.NoError(t, c.Shutdown())
 	if s := log.String(); s != "" {
 		t.Logf("the server's log (%d lines), its start:\n%.2000s", strings.Count(s, "\n"), s)
 	}
+}
+
+// utf16Len is the length of s in UTF-16 code units.
+func utf16Len(s string) int {
+	n := 0
+	for _, r := range s {
+		n++
+		if r >= 0x10000 {
+			n++
+		}
+	}
+	return n
 }

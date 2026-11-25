@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"gopkg.in/yaml.v3"
 
+	"github.com/mmcdole/dgdtools/pkg/lsp"
 	"github.com/mmcdole/dgdtools/pkg/profile"
 )
 
@@ -51,7 +52,14 @@ func TestVSCodeClient(t *testing.T) {
 			Configuration struct {
 				Properties map[string]setting `json:"properties"`
 			} `json:"configuration"`
-			SemanticTokenScopes []any `json:"semanticTokenScopes"`
+			SemanticTokenScopes []struct {
+				Language string              `json:"language"`
+				Scopes   map[string][]string `json:"scopes"`
+			} `json:"semanticTokenScopes"`
+			SemanticTokenModifiers []struct {
+				ID          string `json:"id"`
+				Description string `json:"description"`
+			} `json:"semanticTokenModifiers"`
 		} `json:"contributes"`
 		Scripts         map[string]string `json:"scripts"`
 		Dependencies    map[string]string `json:"dependencies"`
@@ -142,8 +150,31 @@ func TestVSCodeClient(t *testing.T) {
 	assert.Contains(t, server, "const args = ['lsp'];")
 	assert.Contains(t, server, "args.push('--log', log);")
 
-	// Semantic token scopes come with the server's semantic tokens.
-	assert.Empty(t, pkg.Contributes.SemanticTokenScopes)
+	// Semantic tokens: the scopes a theme without rules for them colours
+	// them by are for the server's types and modifiers (its legend),
+	// scopes of the grammar's where it has one; the modifiers that are
+	// not the protocol's are declared, so that a theme can name them.
+	require.Len(t, pkg.Contributes.SemanticTokenScopes, 1)
+	scopes := pkg.Contributes.SemanticTokenScopes[0]
+	assert.Equal(t, "dgdlpc", scopes.Language)
+	for _, typ := range lsp.TokenLegend.TokenTypes {
+		assert.Contains(t, scopes.Scopes, typ, "every type has a scope")
+	}
+	for sel, list := range scopes.Scopes {
+		parts := strings.Split(sel, ".")
+		assert.Contains(t, lsp.TokenLegend.TokenTypes, parts[0], sel)
+		for _, m := range parts[1:] {
+			assert.Contains(t, lsp.TokenLegend.TokenModifiers, m, sel)
+		}
+		require.Len(t, list, 1, sel)
+		assert.True(t, strings.HasSuffix(list[0], ".dgdlpc"), sel)
+	}
+	var custom []string
+	for _, m := range pkg.Contributes.SemanticTokenModifiers {
+		custom = append(custom, m.ID)
+		assert.NotEmpty(t, m.Description, m.ID)
+	}
+	assert.Equal(t, lsp.TokenLegend.TokenModifiers[4:], custom, "the modifiers after the protocol's four")
 	// Publishable under the owner's publisher (docs/design/lsp.md, section 14).
 	assert.False(t, pkg.Private)
 	assert.Equal(t, "mmcdole", pkg.Publisher)

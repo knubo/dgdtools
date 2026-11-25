@@ -17,9 +17,10 @@ There are two layers ([lsp.md](../docs/design/lsp.md), section 10). The
 first is highlighting that works with no server, offline, on a file that
 does not parse: it knows the tokens of the language, exactly as the
 tool's own lexer reads them. The second is the language server,
-`dgdtools lsp`, which knows what a grammar cannot: today it gives an
-editor the linter's findings as you type, their fixes, and the
-formatter ([below](#the-language-server)).
+`dgdtools lsp`, which knows what a grammar cannot: the linter's
+findings as you type, their fixes, the formatter, where a name is
+declared and what it is, and the colours of what only analysis knows
+(semantic tokens) over the grammar's ([below](#the-language-server)).
 
 ## A `.c` file is LPC only where you say so
 
@@ -282,6 +283,18 @@ and what it formats is what `dgdtools format` writes. What it does:
 - **Highlights** of the name under the cursor in the file, a variable,
   a local or a parameter marked where it is read and where it is
   written (declared, assigned, incremented).
+- **Semantic tokens**: the colours of what only analysis knows, over
+  the grammar's. A macro as a macro, one that stands for a type
+  (`status`) as a type and one that stands for specifiers or for
+  nothing (`public`) as a specifier; a function where it is declared
+  and defined, and in a call whether it is the object's own, inherited
+  (`inherited`), the auto object's or the driver's (`defaultLibrary`);
+  `->fn` as a method; global variables, locals (`local`) and
+  parameters; inherit labels; `function` where the mudlib has closures
+  (`dialect.closures`), which no grammar can tell. A name the tools know
+  nothing of keeps the grammar's colour: nothing is guessed. The types
+  are the protocol's own, so a theme colours them unconfigured; the
+  modifiers `inherited`, `local` and `macro` are dgdtools'.
 
 It keeps a log when asked to: `dgdtools lsp --log /tmp/dgdtools-lsp.log`,
 and with `--trace` every message in both directions. It never writes to
@@ -314,8 +327,22 @@ a selection; `CTRL-]` goes to a definition, `K` shows the hover, and
 `CTRL-X CTRL-O` completes (the server sets `omnifunc`); `gO`
 lists the outline, and `:lua vim.lsp.buf.workspace_symbol()` asks for a
 name to find in the mudlib; `grr` lists the references, and
-`:lua vim.lsp.buf.document_highlight()` highlights the name. To
-format on save:
+`:lua vim.lsp.buf.document_highlight()` highlights the name. The
+semantic tokens are shown by themselves (`:Inspect` on a name shows
+them); the standard types are linked to colours already
+(`@lsp.type.macro` to `@constant.macro`, `@lsp.type.parameter` to
+`@variable.parameter` and so on), and the modifiers can be given their
+own:
+
+```lua
+vim.api.nvim_set_hl(0, '@lsp.typemod.function.defaultLibrary.dgdlpc', { link = '@function.builtin' })
+vim.api.nvim_set_hl(0, '@lsp.typemod.method.defaultLibrary.dgdlpc', { link = '@function.builtin' })
+vim.api.nvim_set_hl(0, '@lsp.typemod.function.inherited.dgdlpc', { link = '@function.call' })
+vim.api.nvim_set_hl(0, '@lsp.typemod.type.macro.dgdlpc', { link = 'Type' })
+vim.api.nvim_set_hl(0, '@lsp.typemod.modifier.macro.dgdlpc', { link = 'StorageClass' })
+```
+
+To format on save:
 
 ```lua
 vim.api.nvim_create_autocmd('BufWritePre', {
@@ -356,7 +383,9 @@ server's fix, and has the file formatted. `TestNeovimDefinition` goes
 to definitions the same way, `TestNeovimHover` reads what `K` and
 `CTRL-S` show, `TestNeovimSymbols` lists the outline and searches
 the mudlib, `TestNeovimCompletion` completes with `CTRL-X CTRL-O`, and
-`TestNeovimReferences` lists references and highlights a local.
+`TestNeovimReferences` lists references and highlights a local, and
+`TestNeovimTokens` reads the semantic tokens Neovim shows, before and
+after an edit.
 
 ### Vim
 

@@ -62,6 +62,69 @@
         "path": "./syntaxes/dgdlpc.tmLanguage.json"
       }
     ],
+    "semanticTokenModifiers": [
+      {
+        "id": "inherited",
+        "description": "A function or a global variable the object inherits."
+      },
+      {
+        "id": "local",
+        "description": "A local variable of a function."
+      },
+      {
+        "id": "macro",
+        "description": "A macro that stands for a type or for specifiers."
+      }
+    ],
+    "semanticTokenScopes": [
+      {
+        "language": "dgdlpc",
+        "scopes": {
+          "namespace": [
+            "entity.name.namespace.dgdlpc"
+          ],
+          "type": [
+            "storage.type.dgdlpc"
+          ],
+          "modifier": [
+            "storage.modifier.dgdlpc"
+          ],
+          "keyword": [
+            "storage.type.dgdlpc"
+          ],
+          "macro": [
+            "entity.name.function.preprocessor.dgdlpc"
+          ],
+          "function": [
+            "entity.name.function.call.dgdlpc"
+          ],
+          "function.declaration": [
+            "entity.name.function.definition.dgdlpc"
+          ],
+          "function.definition": [
+            "entity.name.function.definition.dgdlpc"
+          ],
+          "function.defaultLibrary": [
+            "support.function.dgdlpc"
+          ],
+          "method": [
+            "entity.name.function.member.dgdlpc"
+          ],
+          "method.defaultLibrary": [
+            "support.function.dgdlpc"
+          ],
+          "variable": [
+            "variable.other.dgdlpc"
+          ],
+          "variable.local": [
+            "variable.other.local.dgdlpc"
+          ],
+          "parameter": [
+            "variable.parameter.dgdlpc"
+          ]
+        }
+      }
+    ],
     "configurationDefaults": {
       "[dgdlpc]": {
         "files.autoGuessEncoding": true,

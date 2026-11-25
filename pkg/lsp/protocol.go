@@ -69,6 +69,9 @@ type InitializeParams struct {
 			WorkspaceEdit struct {
 				DocumentChanges bool `json:"documentChanges"`
 			} `json:"workspaceEdit"`
+			SemanticTokens struct {
+				RefreshSupport bool `json:"refreshSupport"`
+			} `json:"semanticTokens"`
 		} `json:"workspace"`
 		TextDocument struct {
 			PublishDiagnostics struct {
@@ -94,7 +97,8 @@ type InitializeParams struct {
 			DocumentSymbol struct {
 				HierarchicalDocumentSymbolSupport bool `json:"hierarchicalDocumentSymbolSupport"`
 			} `json:"documentSymbol"`
-			SignatureHelp struct {
+			SemanticTokens *struct{} `json:"semanticTokens"`
+			SignatureHelp  struct {
 				SignatureInformation struct {
 					DocumentationFormat  []string `json:"documentationFormat"`
 					ParameterInformation struct {
@@ -139,6 +143,7 @@ type ServerCapabilities struct {
 	WorkspaceSymbolProvider         bool                    `json:"workspaceSymbolProvider"`
 	DocumentFormattingProvider      bool                    `json:"documentFormattingProvider"`
 	DocumentRangeFormattingProvider bool                    `json:"documentRangeFormattingProvider"`
+	SemanticTokensProvider          *SemanticTokensOptions  `json:"semanticTokensProvider,omitempty"`
 	Workspace                       struct {
 		WorkspaceFolders struct {
 			Supported           bool `json:"supported"`
@@ -601,3 +606,53 @@ const (
 // left to do, which is when every open document's published diagnostics
 // are those of its text and the lib as they are now. No editor needs it.
 const MethodIdle = "dgdtools/idle"
+
+// SemanticTokensOptions say what the server answers of semantic tokens:
+// the legend its tokens are written in, a range of a document, and the
+// whole document, as a delta of what was sent before too.
+type SemanticTokensOptions struct {
+	Legend SemanticTokensLegend `json:"legend"`
+	Range  bool                 `json:"range"`
+	Full   struct {
+		Delta bool `json:"delta"`
+	} `json:"full"`
+}
+
+type SemanticTokensLegend struct {
+	TokenTypes     []string `json:"tokenTypes"`
+	TokenModifiers []string `json:"tokenModifiers"`
+}
+
+type SemanticTokensParams struct {
+	TextDocument TextDocumentIdentifier `json:"textDocument"`
+}
+
+type SemanticTokensDeltaParams struct {
+	TextDocument     TextDocumentIdentifier `json:"textDocument"`
+	PreviousResultID string                 `json:"previousResultId"`
+}
+
+type SemanticTokensRangeParams struct {
+	TextDocument TextDocumentIdentifier `json:"textDocument"`
+	Range        Range                  `json:"range"`
+}
+
+// SemanticTokens are the tokens of a document, or of a range of it: five
+// integers each (SemanticTokenData).
+type SemanticTokens struct {
+	ResultID string   `json:"resultId,omitempty"`
+	Data     []uint32 `json:"data"`
+}
+
+// SemanticTokensDelta is how the tokens of a document differ from those
+// of an earlier answer.
+type SemanticTokensDelta struct {
+	ResultID string               `json:"resultId,omitempty"`
+	Edits    []SemanticTokensEdit `json:"edits"`
+}
+
+type SemanticTokensEdit struct {
+	Start       int      `json:"start"`
+	DeleteCount int      `json:"deleteCount"`
+	Data        []uint32 `json:"data,omitempty"`
+}

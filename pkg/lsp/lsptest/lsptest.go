@@ -12,6 +12,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/url"
@@ -149,7 +150,7 @@ func (c *Client) handle(_ context.Context, _ *jsonrpc2.Conn, req *jsonrpc2.Reque
 			}
 			delete(c.watchers, r.ID)
 		}
-	case "window/workDoneProgress/create":
+	case "window/workDoneProgress/create", "workspace/semanticTokens/refresh":
 	default:
 		if !req.Notif {
 			return nil, &jsonrpc2.Error{Code: jsonrpc2.CodeMethodNotFound, Message: "no method " + req.Method}
@@ -198,7 +199,8 @@ type Capabilities struct {
 	// tags or rule links on diagnostics, edits without versions,
 	// definitions as locations and not as links, hovers and signatures
 	// as plain text, a signature's parameters by their text, an outline
-	// without its hierarchy, completions without snippets.
+	// without its hierarchy, completions without snippets, no semantic
+	// tokens.
 	Plain bool
 	// Options are the initializationOptions.
 	Options any
@@ -232,6 +234,13 @@ func (c *Client) Initialize(caps Capabilities, folders ...string) json.RawMessag
 		td["publishDiagnostics"].(map[string]any)["tagSupport"] = map[string]any{"valueSet": []int{1, 2}}
 		td["hover"] = map[string]any{"contentFormat": []string{lsp.Markdown, lsp.PlainText}}
 		td["documentSymbol"] = map[string]any{"hierarchicalDocumentSymbolSupport": true}
+		td["semanticTokens"] = map[string]any{
+			"requests":       map[string]any{"range": true, "full": map[string]any{"delta": true}},
+			"tokenTypes":     lsp.TokenLegend.TokenTypes,
+			"tokenModifiers": lsp.TokenLegend.TokenModifiers,
+			"formats":        []string{"relative"},
+		}
+		params["capabilities"].(map[string]any)["workspace"].(map[string]any)["semanticTokens"] = map[string]any{"refreshSupport": true}
 		td["completion"] = map[string]any{"completionItem": map[string]any{
 			"snippetSupport": true, "documentationFormat": []string{lsp.Markdown, lsp.PlainText}}}
 		td["signatureHelp"] = map[string]any{"contextSupport": true, "signatureInformation": map[string]any{
@@ -516,4 +525,72 @@ func OffsetOf(text string, p lsp.Position, encoding string) int {
 		i += size
 	}
 	return i
+}
+
+// Token is a semantic token as a client reads it from the protocol's
+// integers.
+type Token struct {
+	Line, Character, Length int
+	// Text is what the token covers in the document's text.
+	Text string
+	Type string
+	Mods []string
+}
+
+// Tokens decodes the data of semantic tokens of the text, with the
+// server's legend (lsp.TokenLegend). A token that does not fit its line
+// is a test's failure, which Text shows: it runs past the line.
+func Tokens(text string, data []uint32, encoding string) []Token {
+	var out []Token
+	line, col := 0, 0
+	for i := 0; i+5 <= len(data); i += 5 {
+		dl, dc := int(data[i]), int(data[i+1])
+		if dl > 0 {
+			line, col = line+dl, dc
+		} else {
+			col += dc
+		}
+		tk := Token{Line: line, Character: col, Length: int(data[i+2])}
+		if t := int(data[i+3]); t < len(lsp.TokenLegend.TokenTypes) {
+			tk.Type = lsp.TokenLegend.TokenTypes[t]
+		} else {
+			tk.Type = fmt.Sprint("type ", t)
+		}
+		for b, name := range lsp.TokenLegend.TokenModifiers {
+			if data[i+4]&(1<<b) != 0 {
+				tk.Mods = append(tk.Mods, name)
+			}
+		}
+		start := OffsetOf(text, lsp.Position{Line: line, Character: col}, encoding)
+		end := OffsetOf(text, lsp.Position{Line: line, Character: col + tk.Length}, encoding)
+		if end-start < tk.Length && encoding == lsp.UTF8 || end == start {
+			end = min(len(text), start+tk.Length) // past the line: show it
+		}
+		tk.Text = text[start:end]
+		out = append(out, tk)
+	}
+	return out
+}
+
+// DecodeTokens writes the semantic tokens of the text a line each, for a
+// transcript: `< LINE:COL "text" type mod,mod`, 0-based as sent.
+func DecodeTokens(text string, data []uint32, encoding string) string {
+	var b strings.Builder
+	for _, tk := range Tokens(text, data, encoding) {
+		fmt.Fprintf(&b, "< %d:%d %q %s", tk.Line, tk.Character, tk.Text, tk.Type)
+		if len(tk.Mods) > 0 {
+			b.WriteString(" " + strings.Join(tk.Mods, ","))
+		}
+		b.WriteString("\n")
+	}
+	if b.Len() == 0 {
+		return "< no tokens\n"
+	}
+	return b.String()
+}
+
+// Lines returns how many lines the text has, as the protocol counts
+// them: one more than its line breaks.
+func Lines(text string) int {
+	return strings.Count(text, "\n") + strings.Count(text, "\r") - strings.Count(text, "\r\n") + 1
 }

@@ -43,7 +43,7 @@ func (s *server) linted(ctx context.Context, uri string) (*lint.Document, int, *
 	case !sess.Current(d):
 		return nil, 0, nil, errContentModified
 	}
-	doc.linted, doc.lintedVersion, doc.lintedIn = d, version, sess
+	doc.linted, doc.lintedVersion, doc.lintedIn, doc.lintedBy = d, version, sess, scanned
 	return d, version, sess, nil
 }
 
