@@ -524,7 +524,7 @@ in JSON and are what an editor applies. `adjacent-strings` carries one
 safety gate comparable to the formatter's token equality.
 
 **Performance/caching:** a whole-lib run is parallel over files and
-takes 7 s for 108,116 files with the default rules, and 11 to 12 s with
+takes 7 to 8 s for 108,116 files with the default rules, and 12 to 13 s with
 every rule on and half a million findings written as JSON (12 CPUs). A
 persistent on-disk cache would save little and adds invalidation risk,
 so there is none. The in-process index is lazy and invalidatable, which
@@ -740,8 +740,9 @@ Properties the core guarantees (each has a test in `pkg/lint` or
   text changed under the lint (above).
 
 Measured on the 108,116-file lib (`TestCorpusEdit`, 689 single-file
-edits after a whole-lib run): `Invalidate` 1.7 ms median (3.2 ms at the
-95th percentile; 131 ms for a file 89,500 others depend on), linting the
+edits after a whole-lib run): `Invalidate` 1.5 to 2 ms median (3 to 4 ms
+at the 95th percentile; 130 to 200 ms for a file 89,500 others depend
+on), linting the
 edited file 0.1 ms median, completing the scan again under 1 ms, one
 file read per edit, and findings identical to the whole-lib run's.
 
@@ -935,7 +936,7 @@ only make sense when `#include`d elsewhere show as failing; its
 ### 9.2 Syntax-group precision and recall (whole lib, all rules on)
 
 The whole lib linted with the driver's configuration and every rule on:
-108,116 files, 672,295 findings. "Flagged" = files with at least one
+108,116 files, 672,294 findings. "Flagged" = files with at least one
 finding of the rule.
 
 | Rule | Findings | Files flagged | Oracle: does not compile | Oracle: compiles (false positive) |
@@ -991,11 +992,11 @@ by `TestCorpusLint`.
 
 | Rule | Findings |
 |---|---|
-| callable-not-found | 3,245 |
+| callable-not-found | 3,252 |
 | static-crossobj | 73 |
 | undefined-prototype | 913 |
-| target-object-missing | 7,183 |
-| callback-arity | 2,500 |
+| target-object-missing | 7,170 |
+| callback-arity | 2,506 |
 | lifecycle-chain | 646 |
 | assignment-in-condition | 280 |
 | no-effect-statement | 174 |
@@ -1003,7 +1004,7 @@ by `TestCorpusLint`.
 | unreachable-code | 3,542 |
 | raw-inherit-path | 609 |
 | missing-visibility | 336,210 |
-| unformatted | 106,806 |
+| unformatted | 106,805 |
 | static-autosave-var | 68 |
 | unresolved-inherit | 2,859 |
 
@@ -1175,10 +1176,11 @@ closure of what all of those include and inherit. `omit` always wins.
 Inference finds files, not directories, so only a `share` glob that takes
 a whole directory makes it `covered`.
 
-Measured on VikingMUD (the ten trees of 10.6, 9,123 whole-lib findings;
-N is `share_min_owners`, the core globs are `std`, `obj`, `room`,
-`secure` and `dgd`; no selection adds a false finding to the two of
-10.6):
+Measured on VikingMUD (the ten trees of 10.6; N is `share_min_owners`,
+the core globs are `std`, `obj`, `room`, `secure` and `dgd`; no selection
+adds a false finding to the two of 10.6; the rows above the last were
+measured when the ten trees had 9,123 whole-lib findings, one fewer than
+now):
 
 | Selection | Size | Stubs | Identical | Lost |
 |---|---|---|---|---|
@@ -1186,7 +1188,7 @@ N is `share_min_owners`, the core globs are `std`, `obj`, `room`,
 | inference only, N=2 / 3 / 5 | 255,958 / 159,079 / 102,671 B | 2,046 / 927 / 452 | 8,989 / 8,979 / 8,966 | 134 / 144 / 157 |
 | N=2 + core globs | 262,208 B | 2,252 | 9,062 | 61 |
 | N=3 + core globs | 166,867 B | 1,165 | 9,053 | 70 |
-| **N=5 + core globs** | 113,567 B | 723 | 9,041 | 82 |
+| **N=5 + core globs** | 113,567 B | 723 | 9,042 | 82 |
 
 Inference alone is worse than the core list: without covered directories
 "`/std/nosuch` does not exist" cannot be proven, and core files with few
@@ -1258,7 +1260,7 @@ and says so in the message ("nor in this checkout; inheritors elsewhere
 in the lib cannot be seen"). The strictly safe alternative, treating
 every such miss as unknown, would silence the single most useful runtime
 check for a wizard (`add_action("do_x")` with no `do_x`). Measured cost:
-1 false finding in 9,095 (below).
+1 false finding in 9,096 (below).
 
 ### 10.6 Measured: ten real trees, profile only vs. whole lib
 
@@ -1268,9 +1270,9 @@ it, and compares with linting the same tree in place.
 
 | | findings |
 |---|---|
-| whole lib, the ten trees | 9,123 |
-| profile only | 9,095 |
-| identical | 9,041 (99.1% of whole-lib) |
+| whole lib, the ten trees | 9,124 |
+| profile only | 9,096 |
+| identical | 9,042 (99.1% of whole-lib) |
 | lost (whole-lib only) | 82 |
 | extra: syntax errors behind an include that can no longer be proven missing | 52 |
 | extra: other | 2 |

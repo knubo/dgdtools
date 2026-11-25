@@ -26,6 +26,7 @@ package session
 import (
 	"context"
 	"maps"
+	"path/filepath"
 	"slices"
 	"sync"
 
@@ -98,6 +99,10 @@ func (s *Session) DiskChanged(paths ...string) Affected {
 // apply makes one change: set changes the texts, and paths are what
 // changed.
 func (s *Session) apply(paths []string, set func()) Affected {
+	paths = slices.Clone(paths)
+	for i, p := range paths {
+		paths[i] = filepath.Clean(p)
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	set()

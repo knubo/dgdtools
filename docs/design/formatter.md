@@ -278,17 +278,21 @@ cannot disagree.
 ## 3. The library surface
 
 ```go
-opts := format.OptionsFor(project.Config, settings.Format)   // settings: project.Settings(path)
-
-out, err := format.Format(file, opts)                 // the whole file
-out, err := format.Lines(file, opts, ranges)          // only these lines ([]format.LineRange)
-edits := format.Edits(file, out)                      // []diag.TextEdit, one per changed gap
+out, err := format.Source(project, path, text, nil)      // a file's text, by that file's settings
+out, err := format.Source(project, path, text, ranges)   // only these lines ([]format.LineRange)
+edits := format.Edits(file, out)                         // []diag.TextEdit, one per changed gap
 ```
 
-`file` is a `*token.File` (`lexer.Lex`), so a server formats the buffer
-it already lexed. A result depends on the file's bytes and the options
-only: no other file is read, and the same bytes give the same result in
-an editor buffer, in a partial checkout and in the whole lib.
+`Source` is all a front end does to format a text: the file's settings
+(`project.Settings(path)`), the project's dialect and macro conventions,
+the lexer, the engine, the gate. It is what `dgdtools format` calls and
+what an editor's formatting request will call. Underneath are
+`format.Format(file, options)` and `format.Lines(file, options, ranges)`
+over a `*token.File` and `format.OptionsFor(config, settings.Format)`,
+which is what the `unformatted` rule uses on the file it has already
+lexed. A result depends on the file's bytes and the options only: no
+other file is read, and the same bytes give the same result in an editor
+buffer, in a partial checkout and in the whole lib.
 
 Errors are values (`ErrIllegal`, `ErrGateFailure`, `ErrNotIdempotent`,
 `ErrInternal`): a file that cannot be formatted is reported and left
@@ -301,9 +305,9 @@ scope after excludes):
 
 | | |
 |---|---|
-| reformatted | 107,730 |
-| already formatted | 2,499 |
+| reformatted | 107,728 |
+| already formatted | 2,501 |
 | refused: does not tokenize | 765 |
 | gate failures | 0 |
 | changed by a second pass | 0 |
-| wall time, `format --check lib` | 5.5 s (12 CPUs) |
+| wall time, `format --check lib` | 6 s (12 CPUs) |
