@@ -34,7 +34,7 @@ func (p *parser) finish() {
 			errs = append(errs, &Error{
 				Kind: ErrLex, Msg: le.Msg, Tok: i, Related: -1,
 				RegionFirst: i, RegionLast: i,
-				Tainted: p.file.Sel.Guessed(i) || p.inMacroArgs(i) || p.lineSplice(i),
+				Tainted: p.file.Sel.Guessed(i) || p.inMacroArgs(i),
 			})
 		}
 	}
@@ -155,15 +155,6 @@ func (p *parser) tainted(e *Error, declared map[string]bool) bool {
 	}
 	k := p.toks[cur].Kind
 	return k == token.Ident || k.IsSpecifier() || k.IsType()
-}
-
-// lineSplice reports whether the illegal token is a backslash at the end
-// of a line: a line continuation, which the preprocessor removes.
-func (p *parser) lineSplice(tok int) bool {
-	if p.text(tok) != "\\" || tok+1 >= len(p.toks) {
-		return false
-	}
-	return p.toks[tok+1].Kind == token.Newline
 }
 
 // inMacroArgs reports whether tok lies inside the argument list of a

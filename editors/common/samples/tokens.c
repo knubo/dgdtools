@@ -94,6 +94,8 @@ keywords(int n, string function)
     }
 out:
     NAME = MAX_COUNT + __DGD__ + _x + X + T1;
+    n = count + \
+        1;
 }
 
 static int

@@ -113,7 +113,7 @@ func TestFormatStdin(t *testing.T) {
 	code, out, errs = dgdtools(t, "int x = \"unterminated;\n", "format", "--stdin-filename", "bad.c")
 	assert.Equal(t, 2, code)
 	assert.Empty(t, out)
-	assert.Contains(t, errs, "bad.c: file contains unlexable content")
+	assert.Contains(t, errs, "bad.c:1:9: file contains unlexable content")
 
 	code, _, errs = dgdtools(t, messy, "format", "-", "sub")
 	assert.Equal(t, 2, code)
@@ -410,7 +410,7 @@ func TestFormatErrors(t *testing.T) {
 	code, out, errs := dgdtools(t, "", "format", filepath.Join(dir, "bad.c"), filepath.Join(dir, "ok.c"), filepath.Join(dir, "missing.c"))
 	assert.Equal(t, 2, code)
 	assert.Empty(t, out)
-	assert.Contains(t, errs, "bad.c: file contains unlexable content")
+	assert.Contains(t, errs, "bad.c:1:9: file contains unlexable content")
 	assert.Contains(t, errs, "missing.c: no such file or directory")
 	assert.Contains(t, errs, "1 file reformatted, 0 files unchanged, 1 file could not be formatted")
 	assert.Equal(t, formatted, read(t, filepath.Join(dir, "ok.c")))

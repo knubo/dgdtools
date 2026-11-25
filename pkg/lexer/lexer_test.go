@@ -1,6 +1,7 @@
 package lexer
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -243,6 +244,23 @@ func TestLineEndings(t *testing.T) {
 			assert.Equal(t, token.Pos{Line: 3, Col: 1}, f.Pos(f.Tokens[i].Off))
 		}
 	}
+}
+
+// A backslash at the end of a line is a splice outside a directive too:
+// DGD removes it with the line break before it reads tokens.
+func TestSplice(t *testing.T) {
+	f := Lex("t.c", []byte("x = 1 +\\\n2;\ny \\\r\n;\n#define A 1 \\\n + 2\n"), Default)
+	require.NoError(t, f.CheckRoundTrip())
+	assert.False(t, f.HasIllegal())
+	var splices []string
+	for _, tok := range f.Tokens {
+		if tok.Kind == token.Splice {
+			splices = append(splices, string(f.Text(tok)))
+		}
+	}
+	assert.Equal(t, []string{"\\\n", "\\\r\n"}, splices, "the directive keeps its own")
+	assert.True(t, token.Splice.IsTrivia())
+	assert.Equal(t, token.Pos{Line: 2, Col: 1}, f.Pos(f.Tokens[slices.IndexFunc(f.Tokens, func(t token.Token) bool { return t.Kind == token.IntLit && string(f.Text(t)) == "2" })].Off))
 }
 
 func TestInheritForms(t *testing.T) {

@@ -317,6 +317,13 @@ buffer, in a partial checkout and in the whole lib.
 Errors are values (`ErrIllegal`, `ErrGateFailure`, `ErrNotIdempotent`,
 `ErrInternal`): a file that cannot be formatted is reported and left
 alone, in a run over many files and in an editor session alike.
+`ErrIllegal` comes with the line and column of the first token that does
+not lex, and what is wrong with it.
+
+A backslash at the end of a line outside a directive is a line splice,
+which DGD removes before it reads tokens; the lexer makes it trivia. The
+formatter leaves the gap that holds one as it is written (but for the
+line endings): where the two lines break and how the second begins.
 
 ## 4. Measured
 

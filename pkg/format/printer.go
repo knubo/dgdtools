@@ -91,6 +91,10 @@ func (p *printer) run() {
 // any gap that lies in a region the formatter is told to ignore, are
 // copied as they are; the rest is laid out.
 func (p *printer) gap(gap []token.Token, next int) {
+	if hasSplice(gap) {
+		p.spliced(gap, next)
+		return
+	}
 	if !p.sel.has(p.ord) {
 		for _, g := range gap {
 			p.toggle(g)
@@ -312,6 +316,39 @@ func (p *printer) below(i, level int) ([]byte, bool) {
 		}
 	}
 	return nil, false
+}
+
+// spliced writes a gap that holds a line splice. DGD joins the two lines;
+// where they break, and how the second begins, is left as it was written,
+// but for the line endings of a gap that is formatted in full.
+func (p *printer) spliced(gap []token.Token, next int) {
+	off := p.off
+	for _, g := range gap {
+		p.toggle(g)
+	}
+	if head, tail := p.sel.kept(p.ord); off || p.off || !p.sel.has(p.ord) || head > 0 || tail > 0 {
+		p.raw(gap)
+		return
+	}
+	for _, g := range gap {
+		switch text := p.f.Text(g); g.Kind {
+		case token.Newline:
+			p.writeNewline(text)
+		case token.Splice:
+			p.buf.WriteByte('\\')
+			p.writeNewline(text[1:])
+		default:
+			p.buf.Write(text)
+		}
+	}
+	if p.f.Tokens[next].Kind == token.EOF && !endsLine(p.buf.Bytes()) {
+		p.writeNewline(nil)
+	}
+}
+
+// hasSplice reports whether a gap holds a line splice.
+func hasSplice(gap []token.Token) bool {
+	return slices.ContainsFunc(gap, func(g token.Token) bool { return g.Kind == token.Splice })
 }
 
 func gapNewlines(gap []token.Token) int {

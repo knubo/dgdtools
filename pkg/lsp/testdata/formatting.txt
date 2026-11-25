@@ -228,7 +228,7 @@ exit
 > received window/logMessage
 < {"message": "project $ROOT/lib/dgdtools.yml: mudlib $ROOT/lib", "type": 3}
 < {
-<   "message": "not formatted: $ROOT/lib/obj/bad.c: file contains unlexable content; refusing to format",
+<   "message": "not formatted: $ROOT/lib/obj/bad.c:1:18: file contains unlexable content; refusing to format (unterminated character constant)",
 <   "type": 3
 < }
 # A document that is not open, and one that is no file.

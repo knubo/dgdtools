@@ -180,8 +180,10 @@ func Lines(f *token.File, o Options, lines []LineRange) ([]byte, error) {
 // gated runs the engine and returns its output only when it is provably
 // a formatting of f: the same significant tokens, and a fixed point.
 func gated(f *token.File, o Options, sel *selection) (out []byte, err error) {
-	if f.HasIllegal() {
-		return nil, fmt.Errorf("%s: %w", f.Path, ErrIllegal)
+	if len(f.Errs) > 0 {
+		e := f.Errs[0]
+		pos := f.Pos(e.Off)
+		return nil, fmt.Errorf("%s:%d:%d: %w (%s)", f.Path, pos.Line, pos.Col, ErrIllegal, e.Msg)
 	}
 	defer func() {
 		if r := recover(); r != nil {

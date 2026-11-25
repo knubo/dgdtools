@@ -62,7 +62,7 @@ func (lx *lexer) run() {
 func (lx *lexer) emit(k token.Kind, start int) {
 	lx.f.Tokens = append(lx.f.Tokens, token.Token{Kind: k, Off: uint32(start), End: uint32(lx.pos)})
 	switch k {
-	case token.Space, token.LineComment, token.BlockComment, token.EOF:
+	case token.Space, token.Splice, token.LineComment, token.BlockComment, token.EOF:
 		// no effect on line-start state
 	case token.Newline:
 		lx.atLineStart = true
@@ -130,6 +130,13 @@ func (lx *lexer) scanToken() {
 	case c == '\n' || c == '\r':
 		lx.newline()
 		lx.emit(token.Newline, start)
+
+	case c == '\\' && (lx.peek(1) == '\n' || lx.peek(1) == '\r'):
+		// A line splice: DGD removes a backslash and the line break after
+		// it wherever they are, before it reads tokens.
+		lx.pos++
+		lx.newline()
+		lx.emit(token.Splice, start)
 
 	case c == '/':
 		lx.scanSlash(start)

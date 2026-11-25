@@ -24,6 +24,7 @@ const (
 	// Trivia.
 	Space        // run of spaces, tabs, \v, \f
 	Newline      // exactly one line terminator: \n, \r\n, or bare \r
+	Splice       // a backslash and the line terminator after it, which DGD removes
 	LineComment  // // to end of line (dialect-gated)
 	BlockComment // /* ... */, possibly spanning lines
 
@@ -124,7 +125,7 @@ const (
 
 var kindNames = [...]string{
 	Illegal: "Illegal", EOF: "EOF", Directive: "Directive",
-	Space: "Space", Newline: "Newline",
+	Space: "Space", Newline: "Newline", Splice: "Splice",
 	LineComment: "LineComment", BlockComment: "BlockComment",
 	Ident: "Ident", IntLit: "IntLit", FloatLit: "FloatLit",
 	StringLit: "StringLit", CharLit: "CharLit",

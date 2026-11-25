@@ -204,9 +204,22 @@ func TestBlockCommentIndentation(t *testing.T) {
 }
 
 func TestRefusesIllegal(t *testing.T) {
-	f := lexer.Lex("t.c", []byte("\"unterminated\nint x;\n"), lexer.Default)
+	f := lexer.Lex("t.c", []byte("int x;\n  \"unterminated\nint y;\n"), lexer.Default)
 	_, err := Format(f, Options{})
 	assert.ErrorIs(t, err, ErrIllegal)
+	assert.ErrorContains(t, err, "t.c:2:3: ", "where the first illegal token is")
+	assert.ErrorContains(t, err, "(unterminated string literal)")
+}
+
+// A line splice outside a directive is DGD's too: the two lines are left
+// as they are written, and the rest is formatted.
+func TestSpliceIsKept(t *testing.T) {
+	in := "void f() {\n\tx = 1 +\\\n2;\n  y = a  \\\n    +   b;\n}\n"
+	want := "void f() {\n    x = 1 +\\\n2;\n    y = a  \\\n    + b;\n}\n"
+	assert.Equal(t, want, fmtSrc(t, in, Options{}))
+	assert.Equal(t, want, fmtSrc(t, want, Options{}))
+	crlf := strings.ReplaceAll(want, "\n", "\r\n")
+	assert.Equal(t, crlf, fmtSrc(t, want, Options{LineEndings: CRLF}))
 }
 
 func TestIdempotence(t *testing.T) {

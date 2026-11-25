@@ -1564,5 +1564,3 @@ Not built, in rough priority order:
 9. **Profiles:** recognizing a checkout by evidence in its files when
    its path says nothing; fetching or updating profiles is deliberately
    out of scope (no network access in the tool).
-10. Backslash-newline outside strings is tolerated (not reported) but not
-   modelled by the lexer.

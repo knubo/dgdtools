@@ -319,6 +319,9 @@
 #           ^^^^^^^^^ dgdlpcMacro
 #                       ^^^^^^^ dgdlpcMacro
 #                                          ^^ dgdlpcMacro
+>    n = count + \
+>        1;
+#        ^ dgdlpcNumber
 >}
 >
 >static int

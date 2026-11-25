@@ -619,6 +619,12 @@
 #                                        ^ keyword.operator.arithmetic.dgdlpc
 #                                          ^^ constant.other.caps.dgdlpc
 #                                            ^ punctuation.terminator.statement.dgdlpc
+>    n = count + \
+#      ^ keyword.operator.assignment.dgdlpc
+#              ^ keyword.operator.arithmetic.dgdlpc
+>        1;
+#        ^ constant.numeric.integer.decimal.dgdlpc
+#         ^ punctuation.terminator.statement.dgdlpc
 >}
 #^ punctuation.section.block.end.dgdlpc
 >
