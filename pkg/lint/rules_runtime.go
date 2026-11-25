@@ -64,7 +64,11 @@ var ruleStaticCrossObj = &Rule{
 	Code: "R002", Name: "static-crossobj", Group: GroupRuntime,
 	Doc: "call_other to an unreachable function: private always, static from another object",
 	Explain: "call_other cannot reach private functions at all, and reaches static " +
-		"functions only from the same object. The call silently returns nil.",
+		"functions only from the same object. The call silently returns nil. " +
+		"On this_object() a private function is reported only when the name is " +
+		"private in the whole chain and in every object that inherits the file, " +
+		"as private-callback has it: DGD keeps an inherited function that a " +
+		"private one redefines, and this_object() may be an inheritor that has it.",
 	Default: true, Severity: diag.Error, CrossFile: true, CompiledOnly: true,
 	Run: func(p *Pass) {
 		for i, c := range p.calls().Named {
@@ -78,6 +82,14 @@ var ruleStaticCrossObj = &Rule{
 			same := c.Target == calls.TargetSelf || c.TargetPath == p.LibPath
 			var d *diag.Diagnostic
 			switch {
+			case lk.Fn.Private && c.Target == calls.TargetSelf:
+				// this_object() may be an object that inherits the file,
+				// and DGD keeps the inherited function a private one
+				// redefines: private-callback's question.
+				if fn, _, ok := p.Index.PrivateOnly(p.Ctx, c.Func); ok {
+					d = p.Report(c.Start, c.End, "'%s' in %s is private — call_other cannot reach it and returns nil",
+						c.Func, fn.DefinedIn)
+				}
 			case lk.Fn.Private:
 				d = p.Report(c.Start, c.End, "'%s' in %s is private — call_other cannot reach it and returns nil",
 					c.Func, lk.Fn.DefinedIn)

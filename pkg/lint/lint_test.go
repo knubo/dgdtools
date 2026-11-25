@@ -1045,3 +1045,31 @@ func TestExampleConfigsAreValid(t *testing.T) {
 		assert.NoError(t, err, file)
 	}
 }
+
+// A private function called on this_object() by -> or call_other is
+// reported as private-callback has it: not when it redefines an
+// inherited function DGD keeps, nor when an inheritor has it.
+func TestStaticCrossObjOnThisObject(t *testing.T) {
+	files := map[string]string{
+		"std/pub.c":   "void tick() { }\n",
+		"std/redef.c": "inherit \"/std/pub\";\nprivate void tick() { }\nvoid f() { this_object()->tick(); call_other(this_object(), \"tick\"); }\n",
+		"std/base.c":  "private void tick() { }\nvoid f() { this_object()->tick(); }\n",
+		"obj/leaf.c":  "inherit \"/std/base\";\nvoid tick() { }\n",
+		"std/alone.c": "private void tick() { }\nvoid f() { this_object()->tick(); call_other(this_object(), \"tick\"); }\n",
+	}
+	prj, m := memProject(files)
+	lintAt := func(file string) []string {
+		var out []string
+		req := lint.Request{Paths: []string{"/lib/" + file}, Options: lint.Options{Select: []string{"static-crossobj"}}}
+		for _, d := range run(t, prj, m, req).Diagnostics {
+			out = append(out, fmt.Sprintf("%d:%d %s", d.Line, d.Col, d.Message))
+		}
+		return out
+	}
+	assert.Empty(t, lintAt("std/redef.c"), "the inherited public function is what is called")
+	assert.Empty(t, lintAt("std/base.c"), "this_object() may be /obj/leaf, which has it")
+	assert.Equal(t, []string{
+		"2:27 'tick' in /std/alone is private — call_other cannot reach it and returns nil",
+		"2:61 'tick' in /std/alone is private — call_other cannot reach it and returns nil",
+	}, lintAt("std/alone.c"))
+}

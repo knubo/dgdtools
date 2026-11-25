@@ -118,7 +118,7 @@ In DGD a call_other to a function that does not exist silently returns nil. Repo
 
 Call_other to an unreachable function: private always, static from another object.
 
-call_other cannot reach private functions at all, and reaches static functions only from the same object. The call silently returns nil.
+call_other cannot reach private functions at all, and reaches static functions only from the same object. The call silently returns nil. On this_object() a private function is reported only when the name is private in the whole chain and in every object that inherits the file, as private-callback has it: DGD keeps an inherited function that a private one redefines, and this_object() may be an inheritor that has it.
 
 ### undefined-prototype
 
