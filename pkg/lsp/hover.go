@@ -57,7 +57,8 @@ func (s *server) hover(ctx context.Context, p *HoverParams) (any, error) {
 //	the declaration, as code (or "KIND NAME" where there is none)
 //	what is not known (a receiver)
 //	the comment above the declaration
-//	where it is: "auto object, /sys/auto.c:12", "kfun, DGD 1.7.9"
+//	where it is: "auto object, /sys/auto.c:12", "kfun, DGD 1.7.9",
+//	"parameter, /obj/a.c:3"
 func HoverContent(h *resolve.Hover, markdown bool) MarkupContent {
 	var blocks []string
 	for i := range h.Infos {
@@ -74,8 +75,13 @@ func HoverContent(h *resolve.Hover, markdown bool) MarkupContent {
 			parts = append(parts, info.Kind.String()+" "+info.Name)
 		}
 		where := info.Origin.String()
-		if info.Class != "" {
+		switch {
+		case info.Class != "":
 			where = strings.TrimSuffix("macro ("+info.Class+"), "+where, ", ")
+		case info.Kind == resolve.Local:
+			where = strings.TrimSuffix("local variable, "+where, ", ")
+		case info.Kind == resolve.Parameter:
+			where = strings.TrimSuffix("parameter, "+where, ", ")
 		}
 		for _, text := range []string{info.Note, info.Doc, where} {
 			if text != "" && markdown {

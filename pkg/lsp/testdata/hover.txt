@@ -2,7 +2,8 @@ Hover and signature help, for a client that shows Markdown and reads a
 parameter as offsets in the signature's label: a function with the
 comment above it, the auto object's, a kfun of the driver's and one the
 project declares, a variable, a macro, a header, an object, a label, a
-call whose receiver nobody knows; then the arguments of calls.
+parameter, a call whose receiver nobody knows; then the arguments of
+calls.
 
 -- lib/dgdtools.yml --
 include_dirs: [/include]
@@ -52,6 +53,8 @@ hover lib/obj/a.c 3:56
 hover lib/obj/a.c 0:12
 hover lib/obj/a.c 1:10
 hover lib/obj/a.c 4:124
+# a parameter, where it is used
+hover lib/obj/a.c 4:70
 # a call whose receiver is not known; nothing at all
 hover lib/obj/a.c 4:75
 hover lib/obj/a.c 4:0
@@ -80,6 +83,7 @@ exit
 <     "positionEncoding": "utf-16",
 <     "textDocumentSync": {"openClose": true, "change": 2},
 <     "codeActionProvider": {"codeActionKinds": ["quickfix", "source.fixAll.dgdtools"]},
+<     "completionProvider": {"triggerCharacters": [">", ":", "\"", "/", "<"], "resolveProvider": true},
 <     "definitionProvider": true,
 <     "hoverProvider": true,
 <     "signatureHelpProvider": {"triggerCharacters": ["(", ","], "retriggerCharacters": [")"]},
@@ -168,6 +172,12 @@ exit
 < {
 <   "contents": {"kind": "markdown", "value": "```dgdlpc\ninherit side \"/std/side\";\n```\n\n/std/side.c"},
 <   "range": {"start": {"line": 4, "character": 121}, "end": {"line": 4, "character": 125}}
+< }
+# a parameter, where it is used
+> hover lib/obj/a.c 4:70
+< {
+<   "contents": {"kind": "markdown", "value": "```dgdlpc\nobject ob\n```\n\nparameter, /obj/a.c:5"},
+<   "range": {"start": {"line": 4, "character": 69}, "end": {"line": 4, "character": 71}}
 < }
 # a call whose receiver is not known; nothing at all
 > hover lib/obj/a.c 4:75

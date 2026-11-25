@@ -17,6 +17,24 @@ the linter and formatter for it:
   (`source.fixAll.dgdtools`).
 - **Formatting** of a file or a selection, as `dgdtools format` writes
   it: one style, and only whitespace changes.
+- **Go to definition**: from an `#include` to the header, from an
+  `inherit` to the object, from a call to the function (`::fn`,
+  `label::fn`, `->fn` on `this_object()` or a path, string callbacks),
+  from a macro to its `#define`, from a variable or a parameter to its
+  declaration.
+- **Hover**: the declaration, the comment above it and where it is, for
+  the lib's functions, variables and macros and the driver's kfuns.
+- **Signature help** in the arguments of a call, while the line is half
+  written.
+- **Symbols**: the outline of a file, and *Go to Symbol in Workspace*
+  for a function, a variable or a header's macro anywhere in the lib.
+- **Completion**: the locals in scope, the object's variables and
+  functions, macros, kfuns and keywords; after `::` and `->` the
+  functions that can be called there; `#include` and `inherit` paths;
+  the function's name in `call_out("...")`.
+
+Where the tools cannot know (a call on an object held in a variable)
+they say nothing rather than guess.
 
 The language is called `dgdlpc`, *DGD LPC* in the language picker. The
 editor shows what the command line prints: both read the lib's

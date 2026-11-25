@@ -1043,7 +1043,7 @@ func (p *parser) stmt() Stmt {
 		if p.kind() == token.Ellipsis {
 			p.next()
 		} else {
-			p.ident()
+			s.Exc = p.ident()
 		}
 		p.expectClose(token.RParen, lp)
 		if p.kind() != token.LBrace {

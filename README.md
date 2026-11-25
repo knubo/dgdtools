@@ -575,10 +575,14 @@ the files that are open, the findings of `dgdtools lint` as they are
 typed, the fixes and `dgdtools-ignore` comments for them, and `dgdtools
 format` for a file or a selection. It also answers what a name is: go
 to definition (the header of an `#include`, the object of an `inherit`,
-the function of a call, a macro's `#define`, a global variable), a
+the function of a call, a macro's `#define`, a variable or parameter), a
 hover with the declaration, the comment above it and where it is, and
 signature help in the arguments of a call, for the lib's functions and
-for the driver's kfuns alike. It lists the outline of a file (inherits,
+for the driver's kfuns alike. It completes what can be written where
+you type: the locals in scope, the object's variables and functions,
+macros, kfuns and keywords; after `::` and `->` the functions that can
+be called there; the paths of an `#include` and an `inherit`; the name
+in a `call_out("...")`. It lists the outline of a file (inherits,
 functions, variables, macros) and finds a function, a variable or a
 header's macro anywhere in the lib by a few letters of its name. Where
 the tools cannot know (a call on an

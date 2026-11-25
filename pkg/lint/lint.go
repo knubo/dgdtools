@@ -387,6 +387,26 @@ func (d *Document) Symbols() []resolve.Symbol {
 	return d.resolver.Symbols()
 }
 
+// Complete says what can be written at byte offset off of the document
+// (the document's resolve.Resolver's Complete); nil where that is
+// nothing the tools can say.
+func (d *Document) Complete(off uint32) *resolve.Completion {
+	if d.resolver == nil {
+		return nil
+	}
+	return d.resolver.Complete(off)
+}
+
+// Comment returns the comment above the declaration at byte offset off
+// of the file at path, which is where an item of a completion says its
+// declaration is (the document's resolve.Resolver's Comment).
+func (d *Document) Comment(path string, off uint32) string {
+	if d.resolver == nil {
+		return ""
+	}
+	return d.resolver.Comment(path, off)
+}
+
 // Linter lints one project. It is safe for concurrent use.
 type Linter struct {
 	project *config.Project

@@ -1,6 +1,7 @@
 package pp
 
 import (
+	"slices"
 	"strings"
 	"sync"
 
@@ -135,6 +136,35 @@ func (e *Env) Definition(name string) *Macro {
 		return found == nil
 	})
 	return found
+}
+
+// Names returns the names that are macros to the file's code, sorted:
+// those a file read defines, but for one the file itself #undefs and
+// leaves undefined, and those the project configures a class for. A
+// name that is only predefined (a name for #ifdef) is not among them.
+func (e *Env) Names() []string {
+	if e == nil {
+		return nil
+	}
+	set := map[string]bool{}
+	for name := range e.classes {
+		set[name] = true
+	}
+	e.tables(func(t *Table) bool {
+		for name := range t.Macros {
+			set[name] = true
+		}
+		return true
+	})
+	names := make([]string, 0, len(set))
+	for name := range set {
+		if def := e.Definition(name); def != nil && def.Undefined {
+			continue
+		}
+		names = append(names, name)
+	}
+	slices.Sort(names)
+	return names
 }
 
 // state reports what name is at the end of the environment as it stands,

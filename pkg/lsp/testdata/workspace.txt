@@ -64,6 +64,7 @@ exit
 <     "positionEncoding": "utf-16",
 <     "textDocumentSync": {"openClose": true, "change": 2},
 <     "codeActionProvider": {"codeActionKinds": ["quickfix", "source.fixAll.dgdtools"]},
+<     "completionProvider": {"triggerCharacters": [">", ":", "\"", "/", "<"], "resolveProvider": true},
 <     "definitionProvider": true,
 <     "hoverProvider": true,
 <     "signatureHelpProvider": {"triggerCharacters": ["(", ","], "retriggerCharacters": [")"]},

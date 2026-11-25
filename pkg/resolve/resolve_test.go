@@ -197,22 +197,22 @@ func TestWholeLib(t *testing.T) {
 		"int cou|nt;":      `variable count "count" decl -> /lib/obj/a.c:6:5 "count"`,
 
 		// Global variables: the file's, an inherited object's, one a
-		// header declares; never a private one of another object, a
-		// local or a parameter.
+		// header declares; never a private one of another object. A
+		// local or a parameter where one is in scope.
 		"cou|nt = base_var":     `variable count "count" -> /lib/obj/a.c:6:5 "count"`,
 		"count = base_v|ar":     `variable base_var "base_var" -> /lib/std/base.c:1:5 "base_var"`,
 		"+ header_v|ar":         `variable header_var "header_var" -> /lib/obj/local.h:3:5 "header_var"`,
-		"base_var + |n":         `nothing`,
-		"int |n;":               `nothing`,
+		"base_var + |n":         `local n "n" -> /lib/obj/a.c:10:9 "n"`,
+		"int |n;":               `local n "n" decl -> /lib/obj/a.c:10:9 "n"`,
 		"sec|ret;":              `nothing`,
-		"return cou|nt":         `nothing`,
-		"int cou|nt, int other": `nothing`,
+		"return cou|nt":         `parameter count "count" -> /lib/obj/a.c:38:18 "count"`,
+		"int cou|nt, int other": `parameter count "count" decl -> /lib/obj/a.c:38:18 "count"`,
 		"count + base_va|r; }":  `variable base_var "base_var" -> /lib/std/base.c:1:5 "base_var"`,
 		// A statement that could not be read may declare what it names.
 		"base_v|ar = 4":          `variable base_var "base_var" -> /lib/std/base.c:1:5 "base_var"`,
 		"cou|nt = 2":             `nothing`,
 		"|status typed":          `macro status "status" -> /lib/include/std.h:5:9 "status"`,
-		"int count, int oth|er)": `nothing`,
+		"int count, int oth|er)": `parameter other "other" decl -> /lib/obj/a.c:38:29 "other"`,
 
 		// Macros: the #define, in the header, the force-included one,
 		// or this file; in a directive too.
@@ -297,6 +297,7 @@ func TestWholeLib(t *testing.T) {
 	for k, name := range map[resolve.Kind]string{
 		resolve.Include: "include", resolve.Object: "object", resolve.Label: "label",
 		resolve.Function: "function", resolve.Variable: "variable", resolve.Macro: "macro", 0: "unknown",
+		resolve.Local: "local", resolve.Parameter: "parameter", resolve.Keyword: "keyword", resolve.Directory: "directory",
 	} {
 		assert.Equal(t, name, k.String())
 	}
@@ -492,8 +493,127 @@ func TestFunctionPointer(t *testing.T) {
 		"&twi|ce()": `function twice "twice" -> /lib/obj/a.c:1:5 "twice"`,
 		"&aut|of()": `function autof "autof" -> /lib/sys/auto.c:1:6 "autof"`,
 		"&no|pe()":  `function nope "nope"`,
-		"(*|g)(1)":  `nothing`,
+		"(*|g)(1)":  `local g "g" -> /lib/obj/a.c:2:21 "g"`,
 	} {
 		assert.Equal(t, want, w.at("/lib/obj/a.c", at), "at %q", at)
+	}
+}
+
+// Parameters and local variables: the one in scope where the name
+// stands, a global where none is.
+func TestLocals(t *testing.T) {
+	fs := wholeLib()
+	fs["/lib/obj/l.c"] = `inherit "/std/base";
+int count;
+string name;
+void proto(int count, string unused);
+int f(int count, string *list) {
+    int i, name;
+    name = count + i;
+    {
+        string count;
+        count = "x" + base_var;
+        { float count; count = 1.0; }
+        count = "y";
+    }
+    count++;
+    if (i) { object name; name->foo(); }
+    try { i = 1; } catch (err) { name = err; }
+    err;
+    return list[i];
+}
+void g() {
+    count = 1;
+    name = "n";
+    { int count; }
+    count = 2;
+    later = 3;
+    int later;
+    later = 4;
+}
+void h(int a) {
+    int x = ;
+    k();
+    x = a;
+    count = 1;
+    { name = "z"; }
+}
+void k() { x; h(1); }
+`
+	w := newWorld(t, fs, "/lib")
+	const l = "/lib/obj/l.c"
+	for at, want := range map[string]string{
+		// Where they are declared.
+		"int f(int cou|nt":       `parameter count "count" decl -> /lib/obj/l.c:5:11 "count"`,
+		"string *li|st":          `parameter list "list" decl -> /lib/obj/l.c:5:26 "list"`,
+		"int |i, name;":          `local i "i" decl -> /lib/obj/l.c:6:9 "i"`,
+		"int i, na|me;":          `local name "name" decl -> /lib/obj/l.c:6:12 "name"`,
+		"string cou|nt;":         `local count "count" decl -> /lib/obj/l.c:9:16 "count"`,
+		"catch (er|r)":           `local err "err" decl -> /lib/obj/l.c:16:27 "err"`,
+		"void proto(int cou|nt,": `parameter count "count" decl -> /lib/obj/l.c:4:16 "count"`,
+		"string unu|sed)":        `parameter unused "unused" decl -> /lib/obj/l.c:4:30 "unused"`,
+		// The parameter before the global, the local before both; a
+		// block's own inside it and no longer after it.
+		"na|me = count + i":   `local name "name" -> /lib/obj/l.c:6:12 "name"`,
+		"name = cou|nt + i":   `parameter count "count" -> /lib/obj/l.c:5:11 "count"`,
+		"count + |i;":         `local i "i" -> /lib/obj/l.c:6:9 "i"`,
+		"cou|nt = \"x\"":      `local count "count" -> /lib/obj/l.c:9:16 "count"`,
+		"\"x\" + base_v|ar":   `variable base_var "base_var" -> /lib/std/base.c:1:5 "base_var"`,
+		"float count; cou|nt": `local count "count" -> /lib/obj/l.c:11:17 "count"`,
+		"cou|nt = \"y\"":      `local count "count" -> /lib/obj/l.c:9:16 "count"`,
+		"cou|nt++":            `parameter count "count" -> /lib/obj/l.c:5:11 "count"`,
+		"object name; na|me":  `local name "name" -> /lib/obj/l.c:15:21 "name"`,
+		"name->fo|o()":        `function foo "foo"`,
+		"{ na|me = err":       `local name "name" -> /lib/obj/l.c:6:12 "name"`,
+		"name = er|r":         `local err "err" -> /lib/obj/l.c:16:27 "err"`,
+		"    er|r;":           `nothing`,
+		"return li|st[i]":     `parameter list "list" -> /lib/obj/l.c:5:26 "list"`,
+		"return list[|i]":     `local i "i" -> /lib/obj/l.c:6:9 "i"`,
+		// Another function: the globals, around a block that has its
+		// own; a local from its declaration on, and nothing before it.
+		"cou|nt = 1;\n    name": `variable count "count" -> /lib/obj/l.c:2:5 "count"`,
+		"na|me = \"n\"":         `variable name "name" -> /lib/obj/l.c:3:8 "name"`,
+		"cou|nt = 2":            `variable count "count" -> /lib/obj/l.c:2:5 "count"`,
+		"lat|er = 3":            `nothing`,
+		"lat|er = 4":            `local later "later" -> /lib/obj/l.c:26:9 "later"`,
+		// A declaration that could not be read: what it names is not
+		// known after it, in its block and in those inside; the rest is.
+		"|x = a":             `nothing`,
+		"x = |a":             `parameter a "a" -> /lib/obj/l.c:29:12 "a"`,
+		"cou|nt = 1;\n    {": `variable count "count" -> /lib/obj/l.c:2:5 "count"`,
+		"{ na|me = \"z\"":    `variable name "name" -> /lib/obj/l.c:3:8 "name"`,
+		"void k() { |x;":     `nothing`,
+	} {
+		assert.Equal(t, want, w.at(l, at), "at %q", at)
+	}
+	// What a reference to one carries: its type, and that the place of a
+	// use and of the declaration are one variable.
+	at, doc := w.offset(l, "name = cou|nt + i")
+	use := doc.Resolve(at)
+	at, _ = w.offset(l, "int f(int cou|nt")
+	decl := doc.Resolve(at)
+	require.NotNil(t, use.Defs[0].Local)
+	assert.Same(t, use.Defs[0].Local, decl.Defs[0].Local)
+	assert.Equal(t, "int", use.Defs[0].Local.Type)
+	assert.True(t, use.Defs[0].Local.Param)
+	ref, _ := w.ref(l, "return li|st[i]")
+	assert.Equal(t, "string *", ref.Defs[0].Local.Type)
+	ref, _ = w.ref(l, "name = er|r")
+	assert.True(t, ref.Defs[0].Local.Catch)
+	ref, _ = w.ref(l, "string unu|sed)")
+	assert.Equal(t, "string", ref.Defs[0].Local.Type)
+
+	// What a hover says of one: its type, and the line it is declared
+	// on.
+	for at, want := range map[string]string{
+		"name = cou|nt + i": "parameter count `int count` @ /obj/l.c:5",
+		"return li|st[i]":   "parameter list `string *list` @ /obj/l.c:5",
+		"count + |i;":       "local i `int i` @ /obj/l.c:6",
+		"name = er|r":       "local err `string err` @ /obj/l.c:16",
+		"string unu|sed)":   "parameter unused `string unused` @ /obj/l.c:4",
+		"float cou|nt;":     "local count `float count` @ /obj/l.c:11",
+		"lat|er = 3":        "nothing",
+	} {
+		assert.Equal(t, want, w.hover(l, at), "at %q", at)
 	}
 }

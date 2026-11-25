@@ -162,6 +162,11 @@ func (s *Snapshot) AutoFunc(name string) (ChainFunc, bool) {
 	return f, ok
 }
 
+// AutoFuncs returns the functions that the configured auto objects give
+// every object, by name. The map is the index's own: it is not to be
+// changed.
+func (s *Snapshot) AutoFuncs() map[string]ChainFunc { return s.autoState().funcs }
+
 // AutoUnseen reports whether a configured auto object, or an object it
 // inherits, is not known at all (Chain.Unseen): it may give every object
 // functions that AutoFunc does not have, and a function of the driver's

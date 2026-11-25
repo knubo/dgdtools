@@ -13,13 +13,18 @@
 // inherit chain, the auto object, the #define environment, a receiver
 // that is this_object() or a constant path). A call whose receiver is
 // unknown is a Ref without Defs; a name nothing is known of is no Ref at
-// all. Local variables and parameters are not resolved, and a name they
-// may shadow is not taken for a global.
+// all. A parameter or a local variable is the one in scope where the
+// name stands (syntax.Scope), and a name is a global variable only
+// where none is.
+//
+// Beside it: the outline of the file (Symbols), and what can be written
+// at a place (Complete).
 package resolve
 
 import (
 	"bytes"
 	"slices"
+	"sort"
 	"sync"
 
 	"github.com/mmcdole/dgdtools/pkg/calls"
@@ -47,6 +52,15 @@ const (
 	// Variable is a global variable of an object.
 	Variable
 	Macro
+	// Local is a local variable of a function, Parameter one of its
+	// parameters.
+	Local
+	Parameter
+	// Keyword is a word of the language, a type among them, and
+	// Directory a directory in a path: what a completion offers beside
+	// the names above (Item).
+	Keyword
+	Directory
 )
 
 func (k Kind) String() string {
@@ -63,6 +77,14 @@ func (k Kind) String() string {
 		return "variable"
 	case Macro:
 		return "macro"
+	case Local:
+		return "local"
+	case Parameter:
+		return "parameter"
+	case Keyword:
+		return "keyword"
+	case Directory:
+		return "directory"
 	}
 	return "unknown"
 }
@@ -97,9 +119,9 @@ type Ref struct {
 	// expression of an inherit statement, the target of an #include.
 	Start, End uint32
 	// Decl says the place is itself a declaration of the name: the name
-	// of a function at its definition or prototype, of a global variable
-	// where it is declared, of a macro in its #define, a label in its
-	// inherit statement.
+	// of a function at its definition or prototype, of a variable or a
+	// parameter where it is declared, of a macro in its #define, a label
+	// in its inherit statement.
 	Decl bool
 	// Call is the call site when the name is a function's in a call
 	// that is bound when it runs (x->fn(), call_other, a registrar):
@@ -129,10 +151,12 @@ type Def struct {
 	// object gives every object.
 	Object string
 	Auto   bool
-	// What the index knows of the declaration, by Kind.
+	// What the index knows of the declaration, by Kind; of a local
+	// variable or a parameter, what its function's scope has.
 	Func  *index.FuncInfo
 	Var   *index.VarInfo
 	Macro *pp.Macro
+	Local *syntax.Local
 }
 
 // Resolver answers the questions about one file. It is safe for
@@ -145,14 +169,17 @@ type Resolver struct {
 
 	once  sync.Once
 	facts *calls.Facts
+
+	scoped sync.Once
+	scopes []*syntax.Scope
 }
 
 // New returns the resolver of a file.
 func New(f File) *Resolver { return &Resolver{File: f, s: f.Snapshot, u: f.Unit} }
 
 // At returns what the token at byte offset off of the file refers to, or
-// nil when that is nothing the tools can name: no name, a local
-// variable, a name in code that is not compiled or could not be read. An
+// nil when that is nothing the tools can name: no name, or a name in
+// code that is not compiled or could not be read. An
 // offset just after a name is on it, as an editor's cursor at the end of
 // a word is.
 func (r *Resolver) At(off uint32) *Ref {
@@ -355,9 +382,22 @@ func (r *Resolver) ident(ti int) *Ref {
 	case *syntax.Declarator:
 		// A declarator of the file itself is a global variable; one in a
 		// function is a local.
-		if _, top := path[1].(*syntax.VarDecl); top && len(path) == 3 && has(n.Name, ti) {
+		vd, ok := path[1].(*syntax.VarDecl)
+		switch {
+		case !ok || n.Name == nil || !has(n.Name, ti):
+		case len(path) == 3:
 			ref.Kind, ref.Decl, ref.Defs = Variable, true, r.variable(name)
 			return ref
+		default:
+			return r.local(tok, r.declared(ti, &syntax.Local{Name: name, Type: t.TypeText(vd.Type, n.Stars), Ident: n.Name}), true)
+		}
+	case *syntax.Param:
+		if n.Name != nil && has(n.Name, ti) {
+			return r.local(tok, r.declared(ti, &syntax.Local{Name: name, Type: t.TypeText(n.Type, n.Stars), Param: true, Ident: n.Name}), true)
+		}
+	case *syntax.CatchStmt:
+		if n.Exc != nil && has(n.Exc, ti) {
+			return r.local(tok, r.declared(ti, &syntax.Local{Name: name, Type: "string", Catch: true, Ident: n.Exc}), true)
 		}
 	case *syntax.Ident:
 		// &name(...) names a function; in (*f)(...) f is a variable.
@@ -365,8 +405,19 @@ func (r *Resolver) ident(ti int) *Ref {
 			ref.Kind, ref.Defs = Function, r.function(name)
 			return ref
 		}
-		if n.Name != name || r.shadowed(path, name) {
+		if n.Name != name {
 			return nil // ::name without a call is no variable
+		}
+		// The parameter or the local variable in scope here, before a
+		// global. A statement before this one that the parser could not
+		// read may declare the name: nothing is said then.
+		if sc := r.scope(tok.Off); sc != nil {
+			if l := sc.Lookup(name, tok.Off); l != nil {
+				return r.local(tok, l, false)
+			}
+			if sc.Unsure(tok.Off, func(start, end uint32) bool { return r.mentions(start, end, name) }) {
+				return nil
+			}
 		}
 		if defs := r.variable(name); len(defs) > 0 {
 			ref.Kind, ref.Defs = Variable, defs
@@ -663,42 +714,75 @@ func (r *Resolver) variable(name string) []Def {
 	return defs
 }
 
-// shadowed reports whether name, used at the place path leads to, may be
-// a parameter or a local variable of the function it is in: the function
-// declares one of that name anywhere, or has a statement the parser
-// could not read that mentions the name.
-func (r *Resolver) shadowed(path []syntax.Node, name string) bool {
-	var fn *syntax.FuncDecl
-	for _, n := range path {
-		if f, ok := n.(*syntax.FuncDecl); ok {
-			fn = f
+// --------------------------------------------------------------- locals
+
+// scope returns the scope of the function whose body byte offset off
+// is in, nil when it is in none. The scopes are read from the tree on
+// first need.
+func (r *Resolver) scope(off uint32) *syntax.Scope {
+	scopes := r.allScopes()
+	i := sort.Search(len(scopes), func(i int) bool { return scopes[i].Start > off }) - 1
+	if i < 0 || scopes[i].At(off) == nil {
+		return nil
+	}
+	return scopes[i]
+}
+
+// allScopes returns the scopes of the file's functions, in the order of
+// the file, read from the tree on first need.
+func (r *Resolver) allScopes() []*syntax.Scope {
+	r.scoped.Do(func() { r.scopes = r.Tree.Scopes() })
+	return r.scopes
+}
+
+// declared returns the variable that the token at index ti declares,
+// as the scope of its function has it; l, which describes it, when it
+// is in no scope: a parameter of a prototype.
+func (r *Resolver) declared(ti int, l *syntax.Local) *syntax.Local {
+	var find func(s *syntax.Scope) *syntax.Local
+	find = func(s *syntax.Scope) *syntax.Local {
+		for _, have := range s.Locals {
+			if have.Ident == l.Ident {
+				return have
+			}
+		}
+		for _, in := range s.Blocks {
+			if have := find(in); have != nil {
+				return have
+			}
+		}
+		return nil
+	}
+	for _, s := range r.allScopes() {
+		if first, last := s.Func.Span(); first <= ti && ti <= last {
+			if have := find(s); have != nil {
+				return have
+			}
 		}
 	}
-	if fn == nil {
-		return false
+	return l
+}
+
+// local is the reference of the name at tok to a parameter or a local
+// variable of the function it is in.
+func (r *Resolver) local(tok token.Token, l *syntax.Local, decl bool) *Ref {
+	kind := Local
+	if l.Param {
+		kind = Parameter
 	}
-	for _, p := range fn.Params {
-		if p.Name != nil && p.Name.Name == name {
+	start := r.Tree.Off(l.Ident)
+	return &Ref{Kind: kind, Name: l.Name, Start: tok.Off, End: tok.End, Decl: decl,
+		Defs: []Def{{Kind: kind, Name: l.Name, Path: r.Tok.Path, Start: start, End: r.Tree.End(l.Ident), Local: l}}}
+}
+
+// mentions reports whether the bytes [start, end) of the file have the
+// identifier name.
+func (r *Resolver) mentions(start, end uint32, name string) bool {
+	toks := r.Tok.Tokens
+	for i := r.Tok.TokenAt(start); i < len(toks) && toks[i].Off < end; i++ {
+		if toks[i].Kind == token.Ident && string(r.Tok.Text(toks[i])) == name {
 			return true
 		}
 	}
-	if fn.Body == nil {
-		return false
-	}
-	found := false
-	syntax.Inspect(fn.Body, func(n syntax.Node) bool {
-		switch n := n.(type) {
-		case *syntax.Declarator:
-			found = found || (n.Name != nil && n.Name.Name == name)
-		case *syntax.BadStmt:
-			first, last := n.Span()
-			for i := first; i <= last && i < len(r.Tok.Tokens) && !n.Missing; i++ {
-				if t := r.Tok.Tokens[i]; t.Kind == token.Ident && string(r.Tok.Text(t)) == name {
-					found = true
-				}
-			}
-		}
-		return !found
-	})
-	return found
+	return false
 }

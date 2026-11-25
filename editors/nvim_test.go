@@ -453,3 +453,114 @@ func TestNeovimSymbols(t *testing.T) {
 	}, got.Found)
 	assert.NotContains(t, log, "level=ERROR")
 }
+
+// nvimCompletions is Neovim completing as a user does: in insert mode
+// it types something on a line of a function's body and asks for
+// completions with CTRL-X CTRL-O (the omnifunc, which the client sets to
+// the server's), and writes down what the menu offers and what the line
+// is once the first offer is taken.
+const nvimCompletions = `
+local dir, out = vim.env.DGDLPC_DIR, { cases = {} }
+local ok, err = pcall(function()
+  vim.opt.runtimepath:prepend(vim.env.DGDLPC_NVIM)
+  vim.opt.runtimepath:prepend(vim.env.DGDLPC_VIM)
+  vim.cmd('filetype plugin indent on')
+  vim.lsp.config('dgdtools', { cmd = { vim.env.DGDLPC_BIN, 'lsp', '--log', dir .. '/lsp.log' } })
+  vim.lsp.enable('dgdtools')
+  vim.cmd('edit ' .. vim.fn.fnameescape(dir .. '/lib/obj/a.c'))
+  local function wait(what, cond)
+    assert(vim.wait(20000, cond, 20), 'waited in vain for ' .. what)
+  end
+  wait('the server', function()
+    local c = vim.lsp.get_clients({ bufnr = 0 })[1]
+    return c ~= nil and c.initialized
+  end)
+  local caps = vim.lsp.get_clients({ bufnr = 0 })[1].server_capabilities
+  out.triggers, out.resolve = caps.completionProvider.triggerCharacters, caps.completionProvider.resolveProvider
+  out.omnifunc = vim.bo.omnifunc
+  vim.opt.completeopt = { 'menu', 'menuone', 'noselect' }
+
+  -- In insert mode, with the menu asked for: what it has, when it comes.
+  local seen
+  vim.keymap.set('i', '<F5>', function()
+    vim.wait(seen.nothing and 700 or 20000, function() return vim.fn.pumvisible() == 1 end, 20)
+    for _, item in ipairs(vim.fn.complete_info({ 'items' }).items or {}) do
+      table.insert(seen.words, item.word)
+      seen.kinds[item.word] = item.kind
+      seen.menus[item.word] = item.menu
+    end
+  end)
+  local row
+  for i, line in ipairs(vim.api.nvim_buf_get_lines(0, 0, -1, false)) do
+    if line:find('HERE', 1, true) then row = i end
+  end
+  for _, case in ipairs(vim.json.decode(vim.env.DGDLPC_PLACES)) do
+    seen = { typed = case[1], words = {}, kinds = vim.empty_dict(), menus = vim.empty_dict(), nothing = case[2] }
+    vim.api.nvim_win_set_cursor(0, { row, 0 })
+    -- The line is written anew, the menu asked for and looked at, its
+    -- first offer taken when there is to be one.
+    local keys = 'S' .. case[1] .. '<C-x><C-o><F5>' .. (case[2] and '' or '<C-n><C-y>') .. '<Esc>'
+    vim.api.nvim_feedkeys(vim.keycode(keys), 'x', false)
+    seen.line = vim.api.nvim_buf_get_lines(0, row - 1, row, false)[1]
+    table.insert(out.cases, seen)
+  end
+end)
+if not ok then out.error = tostring(err) end
+vim.fn.writefile({ vim.json.encode(out) }, dir .. '/result.json')
+vim.cmd('qall!')
+`
+
+// TestNeovimCompletion has the Neovim on PATH complete through the
+// language server, with characters of several bytes before the cursor:
+// a name in code, the functions after "::" and after "->" on a path, a
+// callback's name in its string, the header of an #include; and nothing
+// on a receiver nobody knows.
+func TestNeovimCompletion(t *testing.T) {
+	files := map[string]string{
+		"lib/dgdtools.yml":  "include_dirs: [/include]\n",
+		"lib/include/std.h": "/* blåbær \U0001F600 */ #define BASE \"/std/base\"\n",
+		"lib/std/base.c":    "int weight;\nvarargs void set_weight(int grams, string why...) {}\nvoid create() {}\n",
+		"lib/obj/a.c": "#include <std.h>\ninherit BASE;\nvoid later_on(int when) {}\n" +
+			"void create(object ob) {\n    int local_count;\n    HERE\n}\n",
+	}
+	// What is typed on the line, and whether no menu is to come.
+	t.Setenv("DGDLPC_PLACES", `[["/* blåbær 😀 */ local_", false], ["later", false], ["::cr", false], ["\"/std/base\"->set", false],
+		["call_out(\"lat", false], ["#include <st", false], ["ob->", true]]`)
+	_, data, log := nvimRun(t, files, nvimCompletions)
+	var got struct {
+		Error    string
+		Triggers []string
+		Resolve  bool
+		Omnifunc string
+		Cases    []struct {
+			Typed, Line  string
+			Words        []string
+			Kinds, Menus map[string]string
+		}
+	}
+	require.NoError(t, json.Unmarshal(data, &got), "%s", data)
+	require.Empty(t, got.Error, "the server's log:\n%s", log)
+	assert.Equal(t, []string{">", ":", "\"", "/", "<"}, got.Triggers)
+	assert.True(t, got.Resolve)
+	assert.Equal(t, "v:lua.vim.lsp.omnifunc", got.Omnifunc)
+	var seen []string
+	for _, c := range got.Cases {
+		line := c.Typed + " => " + strings.TrimSpace(c.Line) + " [" + strings.Join(c.Words, " ") + "]"
+		if len(c.Words) > 0 {
+			line += " " + c.Kinds[c.Words[0]] + " " + c.Menus[c.Words[0]]
+		}
+		seen = append(seen, line)
+	}
+	// Neovim filters what the server offers by what is written, takes
+	// an item's text for the word, and says its kind and its detail.
+	assert.Equal(t, []string{
+		"/* blåbær \U0001F600 */ local_ => /* blåbær \U0001F600 */ local_count [local_count] Variable int local_count",
+		"later => later_on [later_on] Function void later_on(int when)",
+		"::cr => ::create [create] Function void create()",
+		"\"/std/base\"->set => \"/std/base\"->set_weight [set_weight] Function varargs void set_weight(int grams, string why...)",
+		"call_out(\"lat => call_out(\"later_on [later_on] Function void later_on(int when)",
+		"#include <st => #include <std.h [std.h] File ",
+		"ob-> => ob-> []",
+	}, seen)
+	assert.NotContains(t, log, "level=ERROR")
+}

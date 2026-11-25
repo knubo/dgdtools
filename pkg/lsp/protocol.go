@@ -85,6 +85,12 @@ type InitializeParams struct {
 			Hover struct {
 				ContentFormat []string `json:"contentFormat"`
 			} `json:"hover"`
+			Completion struct {
+				CompletionItem struct {
+					SnippetSupport      bool     `json:"snippetSupport"`
+					DocumentationFormat []string `json:"documentationFormat"`
+				} `json:"completionItem"`
+			} `json:"completion"`
 			DocumentSymbol struct {
 				HierarchicalDocumentSymbolSupport bool `json:"hierarchicalDocumentSymbolSupport"`
 			} `json:"documentSymbol"`
@@ -123,6 +129,7 @@ type ServerCapabilities struct {
 	PositionEncoding                string                  `json:"positionEncoding"`
 	TextDocumentSync                TextDocumentSyncOptions `json:"textDocumentSync"`
 	CodeActionProvider              *CodeActionOptions      `json:"codeActionProvider,omitempty"`
+	CompletionProvider              *CompletionOptions      `json:"completionProvider,omitempty"`
 	DefinitionProvider              bool                    `json:"definitionProvider"`
 	HoverProvider                   bool                    `json:"hoverProvider"`
 	SignatureHelpProvider           *SignatureHelpOptions   `json:"signatureHelpProvider,omitempty"`
@@ -395,6 +402,79 @@ type SignatureInformation struct {
 // reads offsets (labelOffsetSupport), else as its text.
 type ParameterInformation struct {
 	Label any `json:"label"`
+}
+
+// CompletionOptions names the characters that, typed, make a client
+// ask for completions, and says that an item's documentation is had by
+// asking for the item (completionItem/resolve).
+type CompletionOptions struct {
+	TriggerCharacters []string `json:"triggerCharacters"`
+	ResolveProvider   bool     `json:"resolveProvider"`
+}
+
+// TriggerCharacter is the CompletionTriggerKind of a completion asked
+// for because a trigger character was typed.
+const TriggerCharacter = 2
+
+type CompletionParams struct {
+	TextDocument TextDocumentIdentifier `json:"textDocument"`
+	Position     Position               `json:"position"`
+	Context      *struct {
+		TriggerKind      int    `json:"triggerKind"`
+		TriggerCharacter string `json:"triggerCharacter"`
+	} `json:"context"`
+}
+
+// CompletionList is the items that can be written at a place.
+// IsIncomplete says they are not all: the client asks again as more is
+// typed instead of choosing among them.
+type CompletionList struct {
+	IsIncomplete bool             `json:"isIncomplete"`
+	Items        []CompletionItem `json:"items"`
+}
+
+// FormatSnippet is the InsertTextFormat of a text that says where the
+// cursor is to be once it is inserted ("$0").
+const FormatSnippet = 2
+
+// CompletionItem is one thing that can be written: TextEdit puts it in
+// place of what is written of it already, SortText orders it among the
+// others, and Data is the server's own, sent back with the item when
+// the client asks for its documentation.
+type CompletionItem struct {
+	Label            string          `json:"label"`
+	Kind             int             `json:"kind"`
+	Detail           string          `json:"detail,omitempty"`
+	Documentation    any             `json:"documentation,omitempty"` // a string, or a MarkupContent
+	SortText         string          `json:"sortText,omitempty"`
+	InsertTextFormat int             `json:"insertTextFormat,omitempty"`
+	TextEdit         *TextEdit       `json:"textEdit,omitempty"`
+	Data             json.RawMessage `json:"data,omitempty"`
+}
+
+// UnmarshalJSON reads an item a client sent back, its documentation as
+// a string or a MarkupContent, as it was written.
+func (c *CompletionItem) UnmarshalJSON(data []byte) error {
+	type plain CompletionItem
+	var in struct {
+		*plain
+		Documentation json.RawMessage `json:"documentation"`
+	}
+	in.plain = (*plain)(c)
+	if err := json.Unmarshal(data, &in); err != nil {
+		return err
+	}
+	if len(in.Documentation) > 0 && string(in.Documentation) != "null" {
+		var markup MarkupContent
+		var text string
+		switch {
+		case json.Unmarshal(in.Documentation, &text) == nil:
+			c.Documentation = text
+		case json.Unmarshal(in.Documentation, &markup) == nil:
+			c.Documentation = markup
+		}
+	}
+	return nil
 }
 
 type DocumentSymbolParams struct {

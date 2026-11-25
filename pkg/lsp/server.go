@@ -215,6 +215,9 @@ type capabilities struct {
 	links               bool // a definition as LocationLinks
 	hoverMarkdown       bool // a hover as Markdown
 	hierarchy           bool // an outline as DocumentSymbols
+	// What a completion item may carry: its documentation as Markdown,
+	// its text as a snippet.
+	completionMarkdown, snippets bool
 	// What a signature may carry: its documentation as Markdown, its
 	// parameters as offsets in the label, its own active parameter.
 	signatureMarkdown, labelOffsets, signatureActive bool
@@ -385,6 +388,18 @@ func (s *server) request(ctx context.Context, method string, params json.RawMess
 			return nil, err
 		}
 		result, err = s.signatureHelp(ctx, &p)
+	case "textDocument/completion":
+		var p CompletionParams
+		if err := unmarshal(params, &p); err != nil {
+			return nil, err
+		}
+		result, err = s.completion(ctx, &p)
+	case "completionItem/resolve":
+		var p CompletionItem
+		if err := unmarshal(params, &p); err != nil {
+			return nil, err
+		}
+		result, err = s.resolveCompletion(ctx, &p)
 	case "textDocument/documentSymbol":
 		var p DocumentSymbolParams
 		if err := unmarshal(params, &p); err != nil {
@@ -527,6 +542,8 @@ func (s *server) initialize(params json.RawMessage) (any, error) {
 		hoverMarkdown:   slices.Contains(c.TextDocument.Hover.ContentFormat, Markdown),
 		hierarchy:       c.TextDocument.DocumentSymbol.HierarchicalDocumentSymbolSupport,
 	}
+	s.caps.completionMarkdown = slices.Contains(c.TextDocument.Completion.CompletionItem.DocumentationFormat, Markdown)
+	s.caps.snippets = c.TextDocument.Completion.CompletionItem.SnippetSupport
 	si := &c.TextDocument.SignatureHelp.SignatureInformation
 	s.caps.signatureMarkdown = slices.Contains(si.DocumentationFormat, Markdown)
 	s.caps.labelOffsets = si.ParameterInformation.LabelOffsetSupport
@@ -562,6 +579,7 @@ func (s *server) initialize(params json.RawMessage) (any, error) {
 	res := &InitializeResult{ServerInfo: ServerInfo{Name: "dgdtools", Version: s.opt.Version}}
 	res.Capabilities.PositionEncoding = s.caps.encoding()
 	res.Capabilities.TextDocumentSync = TextDocumentSyncOptions{OpenClose: true, Change: SyncIncremental}
+	res.Capabilities.CompletionProvider = &CompletionOptions{TriggerCharacters: TriggerCharacters, ResolveProvider: true}
 	res.Capabilities.DefinitionProvider = true
 	res.Capabilities.HoverProvider = true
 	// Asked for when a call is opened and at each argument; asked again

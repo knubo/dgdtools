@@ -198,7 +198,7 @@ type Capabilities struct {
 	// tags or rule links on diagnostics, edits without versions,
 	// definitions as locations and not as links, hovers and signatures
 	// as plain text, a signature's parameters by their text, an outline
-	// without its hierarchy.
+	// without its hierarchy, completions without snippets.
 	Plain bool
 	// Options are the initializationOptions.
 	Options any
@@ -232,6 +232,8 @@ func (c *Client) Initialize(caps Capabilities, folders ...string) json.RawMessag
 		td["publishDiagnostics"].(map[string]any)["tagSupport"] = map[string]any{"valueSet": []int{1, 2}}
 		td["hover"] = map[string]any{"contentFormat": []string{lsp.Markdown, lsp.PlainText}}
 		td["documentSymbol"] = map[string]any{"hierarchicalDocumentSymbolSupport": true}
+		td["completion"] = map[string]any{"completionItem": map[string]any{
+			"snippetSupport": true, "documentationFormat": []string{lsp.Markdown, lsp.PlainText}}}
 		td["signatureHelp"] = map[string]any{"contextSupport": true, "signatureInformation": map[string]any{
 			"documentationFormat":    []string{lsp.Markdown, lsp.PlainText},
 			"parameterInformation":   map[string]any{"labelOffsetSupport": true},

@@ -187,15 +187,7 @@ func (r *Resolver) info(ref *Ref, d *Def, texts *texts) Info {
 		}
 		info.Line, info.Doc = texts.declared(d.Path, d.Start, info.Profile != "")
 	case Variable:
-		if d.Var != nil {
-			info.Code = join(d.Var.Type, d.Name)
-			if d.Var.Static {
-				info.Code = "static " + info.Code
-			}
-			if d.Var.Private {
-				info.Code = "private " + info.Code
-			}
-		}
+		info.Code = variableCode(d)
 		info.Line, info.Doc = texts.declared(d.Path, d.Start, info.Profile != "")
 	case Macro:
 		if m := d.Macro; m != nil {
@@ -210,6 +202,11 @@ func (r *Resolver) info(ref *Ref, d *Def, texts *texts) Info {
 		if m := r.Env.Lookup(d.Name); m != nil {
 			info.Class = m.Class.String() // what the project says it is, before what its body says
 		}
+	case Local, Parameter:
+		if d.Local != nil {
+			info.Code = join(d.Local.Type, d.Name)
+		}
+		info.Line = r.Tok.Pos(d.Start).Line
 	case Label:
 		for _, decl := range r.Tree.Decls {
 			in, ok := decl.(*syntax.InheritDecl)
@@ -232,6 +229,22 @@ func (r *Resolver) info(ref *Ref, d *Def, texts *texts) Info {
 	}
 	info.Code = utf8Text(info.Code)
 	return info
+}
+
+// variableCode writes a global variable as it is declared: "private
+// static int weight".
+func variableCode(d *Def) string {
+	if d.Var == nil {
+		return ""
+	}
+	code := join(d.Var.Type, d.Name)
+	if d.Var.Static {
+		code = "static " + code
+	}
+	if d.Var.Private {
+		code = "private " + code
+	}
+	return code
 }
 
 // origin says where the file at path is.

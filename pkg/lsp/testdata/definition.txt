@@ -33,7 +33,7 @@ void create() {
     call_other(this_player(), "cmd");
     sizeof(({ }));
 }
-int cmd(string s) { return 1; }
+int cmd(string s) { return s != 0; }
 -- script --
 initialize lib
 open lib/obj/a.c
@@ -57,6 +57,9 @@ definition lib/obj/a.c 9:17
 # A global variable of an inherited object, and a macro.
 definition lib/obj/a.c 6:5
 definition lib/obj/a.c 8:6
+
+# A parameter, from where it is used.
+definition lib/obj/a.c 13:27
 
 # The place is that of the text the editor has: a file that is open and
 # changed is the buffer, and the answer follows it.
@@ -85,6 +88,7 @@ exit
 <     "positionEncoding": "utf-16",
 <     "textDocumentSync": {"openClose": true, "change": 2},
 <     "codeActionProvider": {"codeActionKinds": ["quickfix", "source.fixAll.dgdtools"]},
+<     "completionProvider": {"triggerCharacters": [">", ":", "\"", "/", "<"], "resolveProvider": true},
 <     "definitionProvider": true,
 <     "hoverProvider": true,
 <     "signatureHelpProvider": {"triggerCharacters": ["(", ","], "retriggerCharacters": [")"]},
@@ -203,6 +207,16 @@ exit
 <     "targetUri": "file://$ROOT/lib/include/std.h",
 <     "targetRange": {"start": {"line": 1, "character": 8}, "end": {"line": 1, "character": 14}},
 <     "targetSelectionRange": {"start": {"line": 1, "character": 8}, "end": {"line": 1, "character": 14}}
+<   }
+< ]
+# A parameter, from where it is used.
+> definition lib/obj/a.c 13:27
+< [
+<   {
+<     "originSelectionRange": {"start": {"line": 13, "character": 27}, "end": {"line": 13, "character": 28}},
+<     "targetUri": "file://$ROOT/lib/obj/a.c",
+<     "targetRange": {"start": {"line": 13, "character": 15}, "end": {"line": 13, "character": 16}},
+<     "targetSelectionRange": {"start": {"line": 13, "character": 15}, "end": {"line": 13, "character": 16}}
 <   }
 < ]
 # The place is that of the text the editor has: a file that is open and

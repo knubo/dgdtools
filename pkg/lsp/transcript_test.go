@@ -42,6 +42,9 @@ var update = flag.Bool("update", false, "rewrite the transcripts in testdata")
 //	definition FILE L:C          textDocument/definition
 //	hover FILE L:C               textDocument/hover
 //	signature FILE L:C           textDocument/signatureHelp
+//	complete FILE L:C [CHAR]     textDocument/completion, asked for by
+//	                             typing CHAR when there is one
+//	resolve N                    completionItem/resolve of the Nth item
 //	symbols FILE                 textDocument/documentSymbol
 //	find QUERY                   workspace/symbol
 //	text FILE                    the editor's text
@@ -120,8 +123,10 @@ type player struct {
 	// of the server's messages of each method were shown.
 	actions    []lsp.CodeAction
 	actionFile string
-	settings   map[string]json.RawMessage
-	seen       map[string]int
+	// items are those of the last completion, as they came.
+	items    []json.RawMessage
+	settings map[string]json.RawMessage
+	seen     map[string]int
 }
 
 func (p *player) path(rel string) string { return filepath.Join(p.root, filepath.FromSlash(rel)) }
@@ -313,6 +318,35 @@ func (p *player) play(script string) string {
 			var result json.RawMessage
 			method := map[string]string{"definition": "textDocument/definition", "hover": "textDocument/hover", "signature": "textDocument/signatureHelp"}[cmd]
 			if err := c.Call(method, params, &result); err != nil {
+				p.show(err.Error())
+				break
+			}
+			p.show(result)
+		case "complete":
+			var pos lsp.Position
+			_, err := fmt.Sscanf(arg[1], "%d:%d", &pos.Line, &pos.Character)
+			require.NoError(t, err, line)
+			params := map[string]any{"textDocument": lsp.TextDocumentIdentifier{URI: lsptest.URI(p.path(arg[0]))}, "position": pos}
+			if len(arg) > 2 {
+				params["context"] = map[string]any{"triggerKind": lsp.TriggerCharacter, "triggerCharacter": arg[2]}
+			}
+			var result json.RawMessage
+			if err := c.Call("textDocument/completion", params, &result); err != nil {
+				p.show(err.Error())
+				break
+			}
+			var list struct {
+				Items []json.RawMessage `json:"items"`
+			}
+			require.NoError(t, json.Unmarshal(result, &list))
+			p.items = list.Items
+			p.show(result)
+		case "resolve":
+			n, err := strconv.Atoi(arg[0])
+			require.NoError(t, err)
+			require.Less(t, n, len(p.items), line)
+			var result json.RawMessage
+			if err := c.Call("completionItem/resolve", p.items[n], &result); err != nil {
 				p.show(err.Error())
 				break
 			}

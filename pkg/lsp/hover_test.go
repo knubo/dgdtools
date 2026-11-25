@@ -96,7 +96,7 @@ func TestHoverIsResolve(t *testing.T) {
 		}
 		require.NoError(t, c.Shutdown())
 		// The lib has something of everything.
-		for _, kind := range []string{"include", "object", "label", "function", "variable", "macro"} {
+		for _, kind := range []string{"include", "object", "label", "function", "variable", "macro", "local"} {
 			assert.NotZero(t, hovers[kind], kind)
 		}
 		assert.NotZero(t, signatures)

@@ -226,7 +226,7 @@ func form(doc *lint.Document, ti int, ref *resolve.Ref) string {
 			return "macro: in a directive"
 		}
 		return "macro"
-	case resolve.Variable, resolve.Label:
+	case resolve.Variable, resolve.Label, resolve.Local, resolve.Parameter:
 		if ref.Decl {
 			return ref.Kind.String() + ": its declaration"
 		}
@@ -280,6 +280,9 @@ type verifier struct {
 type declared struct {
 	src                          []byte
 	funcs, vars, macros, inherit map[uint32]string
+	// locals are the parameters and the variables declared in the
+	// functions, whatever their scopes.
+	locals map[uint32]string
 }
 
 func (v *verifier) fail(format string, args ...any) {
@@ -303,12 +306,35 @@ func (v *verifier) read(path string) *declared {
 	if err != nil {
 		return nil
 	}
-	d = &declared{src: src, funcs: map[uint32]string{}, vars: map[uint32]string{}, macros: map[uint32]string{}, inherit: map[uint32]string{}}
+	d = &declared{src: src, funcs: map[uint32]string{}, vars: map[uint32]string{}, macros: map[uint32]string{}, inherit: map[uint32]string{},
+		locals: map[uint32]string{}}
 	collect := func(tree *syntax.File) {
+		local := func(id *syntax.Ident) {
+			if id != nil {
+				d.locals[tree.Off(id)] = id.Name
+			}
+		}
 		tree.Funcs(func(fn *syntax.FuncDecl) bool {
 			if fn.Name != nil {
 				d.funcs[tree.Off(fn.Name)] = fn.Name.Name
 			}
+			syntax.Inspect(fn, func(n syntax.Node) bool {
+				switch n := n.(type) {
+				case *syntax.Param:
+					local(n.Name)
+				case *syntax.Declarator:
+					local(n.Name)
+				case *syntax.CatchStmt:
+					local(n.Exc)
+				case *syntax.BadStmt:
+					if decl, ok := n.Resumed.(*syntax.DeclStmt); ok && decl.Decl != nil {
+						for _, dv := range decl.Decl.Vars {
+							local(dv.Name)
+						}
+					}
+				}
+				return true
+			})
 			return true
 		})
 		for _, decl := range tree.Decls {
@@ -347,7 +373,7 @@ func (v *verifier) check(file string, src []byte, ref *resolve.Ref) {
 	at := fmt.Sprintf("%s:%d: %s %s", file, ref.Start, ref.Kind, ref.Name)
 	named := string(src[ref.Start:ref.End])
 	switch ref.Kind {
-	case resolve.Function, resolve.Variable, resolve.Macro, resolve.Label:
+	case resolve.Function, resolve.Variable, resolve.Macro, resolve.Label, resolve.Local, resolve.Parameter:
 		if named != ref.Name {
 			v.fail("%s: the text there is %q", at, named)
 		}
@@ -403,6 +429,15 @@ func (v *verifier) check(file string, src []byte, ref *resolve.Ref) {
 			found = d.inherit
 			if def.Path != file {
 				v.fail("%s: a label of another file: %s", at, there)
+			}
+		case resolve.Local, resolve.Parameter:
+			// In this file, and declared before it is used.
+			found = d.locals
+			switch {
+			case def.Path != file || def.Local == nil:
+				v.fail("%s: no variable of this file's at %s", at, there)
+			case ref.Decl != (def.Start == ref.Start), !ref.Decl && def.End > ref.Start:
+				v.fail("%s: used at %d and declared at %s", at, ref.Start, there)
 			}
 		}
 		if int(def.End) > len(d.src) || !bytes.Equal(d.src[def.Start:def.End], []byte(ref.Name)) {

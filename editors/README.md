@@ -227,10 +227,10 @@ and what it formats is what `dgdtools format` writes. What it does:
   file's, an inherited one, the auto object's; `::fn` and `label::fn`;
   `->fn`, `call_other` and string callbacks when the receiver is
   `this_object()` or a path), from a macro to its `#define`, from a
-  global variable to its declaration. With a profile, what is not in
-  your folder opens as the profile's read-only stub. Where the tools
-  cannot know (a call on an object held in a variable, a local
-  variable), nothing happens rather than a guess.
+  variable, a local or a parameter to its declaration. With a profile,
+  what is not in your folder opens as the profile's read-only stub.
+  Where the tools cannot know (a call on an object held in a variable),
+  nothing happens rather than a guess.
 - **Hover** on any of those names: the declaration (a function's with
   its specifiers and types, a variable's type, a macro's `#define` and
   what the parser takes it for), the comment directly above it, and
@@ -252,6 +252,16 @@ and what it formats is what `dgdtools format` writes. What it does:
   of its objects and the macros of its headers that have the letters
   you type, in their order, the closest match first. With a profile
   the names of the profile's stubs are found too, and say so.
+- **Completion** as you type: the parameters and locals in scope, the
+  object's variables and functions (its own, inherited, the auto
+  object's), the macros in view, kfuns and keywords, each with its
+  declaration and its comment; after `::` and `label::` the inherited
+  functions; after `->` on `this_object()` or a path the functions
+  that can be called there, and nothing on a receiver nobody knows; the
+  files of an `#include` and the objects of an `inherit` path, on disk
+  and in a profile; the function's name in the string of `call_out`,
+  `call_other` and your lib's registrars. It is asked for by itself
+  after `->`, `::`, and in a path at `"`, `<` and `/`.
 
 It keeps a log when asked to: `dgdtools lsp --log /tmp/dgdtools-lsp.log`,
 and with `--trace` every message in both directions. It never writes to
@@ -280,7 +290,8 @@ the client attached, `:lua vim.diagnostic.setqflist()` lists the
 findings, `gra` (or `:lua vim.lsp.buf.code_action()`) offers the fixes
 and the comments, `:lua vim.lsp.buf.format()` formats, and `gq` formats
 a selection; `CTRL-]` goes to a definition, `K` shows the hover, and
-`CTRL-S` in insert mode the signature of the call being written; `gO`
+`CTRL-S` in insert mode the signature of the call being written, and
+`CTRL-X CTRL-O` completes (the server sets `omnifunc`); `gO`
 lists the outline, and `:lua vim.lsp.buf.workspace_symbol()` asks for a
 name to find in the lib. To
 format on save:
@@ -322,8 +333,8 @@ screen: it runs the server under the `nvim` on `PATH`, waits for the
 diagnostics of a file, mends one finding by typing and one by the
 server's fix, and has the file formatted. `TestNeovimDefinition` goes
 to definitions the same way, `TestNeovimHover` reads what `K` and
-`CTRL-S` show, and `TestNeovimSymbols` lists the outline and searches
-the lib.
+`CTRL-S` show, `TestNeovimSymbols` lists the outline and searches
+the lib, and `TestNeovimCompletion` completes with `CTRL-X CTRL-O`.
 
 ### Vim
 

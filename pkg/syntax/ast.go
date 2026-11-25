@@ -262,6 +262,9 @@ type (
 	CatchStmt struct {
 		span
 		Body Stmt
+		// Exc is the variable `catch (e)` gives the error to; nil for
+		// `catch (...)` and for the other form.
+		Exc *Ident
 		// HandlerTok is the ':' or the 'catch' that introduces Handler;
 		// meaningful when Handler != nil.
 		HandlerTok int

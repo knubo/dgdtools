@@ -1,0 +1,289 @@
+Completion, for a client that reads Markdown and snippets: the
+functions after "::" and "->", the names a callback's string can have,
+the files of an #include and the objects of an inherit statement, with
+what each item replaces; the comment above a declaration when the item
+is asked for; and what a trigger character gets where it begins nothing.
+
+-- lib/dgdtools.yml --
+include_dirs: [/include]
+-- lib/include/std.h --
+#define BASE "/std/base"
+-- lib/include/sys/types.h --
+-- lib/std/base.c --
+/*
+ * Sets the weight.
+ */
+varargs void set_weight(int grams, string why...) {}
+void create() {}
+static void quiet() {}
+-- lib/obj/a.c --
+#include <std.h>
+inherit BASE;
+/* blåbær 🫐 */ void create() { ::create(); "/std/base"->set_weight(1); call_out("create", 1); }
+void f(object ob, int n) { ob->create(); n = n > 1 ? n : 2; }
+-- script --
+initialize lib
+open lib/obj/a.c
+# after "::", in the middle of the name: the inherited functions
+complete lib/obj/a.c 2:35
+resolve 2
+# after "->" on a path: what a call from outside reaches
+complete lib/obj/a.c 2:57 >
+# in a callback's string: the object's own functions, as names
+complete lib/obj/a.c 2:84
+# on a receiver nobody knows: nothing
+complete lib/obj/a.c 3:31 >
+# a '>' and a ':' that begin nothing
+complete lib/obj/a.c 3:48 >
+complete lib/obj/a.c 3:56 :
+# paths
+complete lib/obj/a.c 0:10 <
+complete lib/obj/a.c 0:12
+change lib/obj/a.c 1:8-1:12 "\"/std/"
+complete lib/obj/a.c 1:14 /
+shutdown
+exit
+-- transcript --
+> initialize lib
+< {
+<   "capabilities": {
+<     "positionEncoding": "utf-16",
+<     "textDocumentSync": {"openClose": true, "change": 2},
+<     "codeActionProvider": {"codeActionKinds": ["quickfix", "source.fixAll.dgdtools"]},
+<     "completionProvider": {"triggerCharacters": [">", ":", "\"", "/", "<"], "resolveProvider": true},
+<     "definitionProvider": true,
+<     "hoverProvider": true,
+<     "signatureHelpProvider": {"triggerCharacters": ["(", ","], "retriggerCharacters": [")"]},
+<     "documentSymbolProvider": true,
+<     "workspaceSymbolProvider": true,
+<     "documentFormattingProvider": true,
+<     "documentRangeFormattingProvider": true,
+<     "workspace": {
+<       "workspaceFolders": {"supported": true, "changeNotifications": true},
+<       "textDocumentContent": {"schemes": ["dgdtools-profile"]}
+<     }
+<   },
+<   "serverInfo": {"name": "dgdtools", "version": "test"}
+< }
+> open lib/obj/a.c
+# after "::", in the middle of the name: the inherited functions
+> complete lib/obj/a.c 2:35
+< {
+<   "isIncomplete": false,
+<   "items": [
+<     {
+<       "label": "create",
+<       "kind": 3,
+<       "detail": "void create()",
+<       "documentation": {"kind": "markdown", "value": "/std/base.c:5"},
+<       "sortText": "2create",
+<       "textEdit": {
+<         "range": {"start": {"line": 2, "character": 34}, "end": {"line": 2, "character": 40}},
+<         "newText": "create"
+<       },
+<       "data": {"uri": "file://$ROOT/lib/obj/a.c", "path": "$ROOT/lib/std/base.c", "off": 85}
+<     },
+<     {
+<       "label": "quiet",
+<       "kind": 3,
+<       "detail": "static void quiet()",
+<       "documentation": {"kind": "markdown", "value": "/std/base.c:6"},
+<       "sortText": "2quiet",
+<       "textEdit": {
+<         "range": {"start": {"line": 2, "character": 34}, "end": {"line": 2, "character": 40}},
+<         "newText": "quiet"
+<       },
+<       "data": {"uri": "file://$ROOT/lib/obj/a.c", "path": "$ROOT/lib/std/base.c", "off": 109}
+<     },
+<     {
+<       "label": "set_weight",
+<       "kind": 3,
+<       "detail": "varargs void set_weight(int grams, string why...)",
+<       "documentation": {"kind": "markdown", "value": "/std/base.c:4"},
+<       "sortText": "2set_weight",
+<       "textEdit": {
+<         "range": {"start": {"line": 2, "character": 34}, "end": {"line": 2, "character": 40}},
+<         "newText": "set_weight"
+<       },
+<       "data": {"uri": "file://$ROOT/lib/obj/a.c", "path": "$ROOT/lib/std/base.c", "off": 40}
+<     }
+<   ]
+< }
+> resolve 2
+< {
+<   "label": "set_weight",
+<   "kind": 3,
+<   "detail": "varargs void set_weight(int grams, string why...)",
+<   "documentation": {"kind": "markdown", "value": "Sets the weight.\n\n/std/base.c:4"},
+<   "sortText": "2set_weight",
+<   "textEdit": {
+<     "range": {"start": {"line": 2, "character": 34}, "end": {"line": 2, "character": 40}},
+<     "newText": "set_weight"
+<   },
+<   "data": {"off": 40, "path": "$ROOT/lib/std/base.c", "uri": "file://$ROOT/lib/obj/a.c"}
+< }
+# after "->" on a path: what a call from outside reaches
+> complete lib/obj/a.c 2:57 >
+< {
+<   "isIncomplete": false,
+<   "items": [
+<     {
+<       "label": "create",
+<       "kind": 3,
+<       "detail": "void create()",
+<       "documentation": {"kind": "markdown", "value": "/std/base.c:5"},
+<       "sortText": "1create",
+<       "insertTextFormat": 2,
+<       "textEdit": {
+<         "range": {"start": {"line": 2, "character": 57}, "end": {"line": 2, "character": 57}},
+<         "newText": "create()$0"
+<       },
+<       "data": {"uri": "file://$ROOT/lib/obj/a.c", "path": "$ROOT/lib/std/base.c", "off": 85}
+<     },
+<     {
+<       "label": "set_weight",
+<       "kind": 3,
+<       "detail": "varargs void set_weight(int grams, string why...)",
+<       "documentation": {"kind": "markdown", "value": "/std/base.c:4"},
+<       "sortText": "1set_weight",
+<       "insertTextFormat": 2,
+<       "textEdit": {
+<         "range": {"start": {"line": 2, "character": 57}, "end": {"line": 2, "character": 57}},
+<         "newText": "set_weight($0)"
+<       },
+<       "data": {"uri": "file://$ROOT/lib/obj/a.c", "path": "$ROOT/lib/std/base.c", "off": 40}
+<     }
+<   ]
+< }
+# in a callback's string: the object's own functions, as names
+> complete lib/obj/a.c 2:84
+< {
+<   "isIncomplete": false,
+<   "items": [
+<     {
+<       "label": "create",
+<       "kind": 3,
+<       "detail": "void create()",
+<       "documentation": {"kind": "markdown", "value": "/obj/a.c:3"},
+<       "sortText": "1create",
+<       "textEdit": {
+<         "range": {"start": {"line": 2, "character": 82}, "end": {"line": 2, "character": 84}},
+<         "newText": "create"
+<       },
+<       "data": {"uri": "file://$ROOT/lib/obj/a.c", "path": "$ROOT/lib/obj/a.c", "off": 56}
+<     },
+<     {
+<       "label": "f",
+<       "kind": 3,
+<       "detail": "void f(object ob, int n)",
+<       "documentation": {"kind": "markdown", "value": "/obj/a.c:4"},
+<       "sortText": "1f",
+<       "textEdit": {
+<         "range": {"start": {"line": 2, "character": 82}, "end": {"line": 2, "character": 84}},
+<         "newText": "f"
+<       },
+<       "data": {"uri": "file://$ROOT/lib/obj/a.c", "path": "$ROOT/lib/obj/a.c", "off": 137}
+<     },
+<     {
+<       "label": "quiet",
+<       "kind": 3,
+<       "detail": "static void quiet()",
+<       "documentation": {"kind": "markdown", "value": "/std/base.c:6"},
+<       "sortText": "2quiet",
+<       "textEdit": {
+<         "range": {"start": {"line": 2, "character": 82}, "end": {"line": 2, "character": 84}},
+<         "newText": "quiet"
+<       },
+<       "data": {"uri": "file://$ROOT/lib/obj/a.c", "path": "$ROOT/lib/std/base.c", "off": 109}
+<     },
+<     {
+<       "label": "set_weight",
+<       "kind": 3,
+<       "detail": "varargs void set_weight(int grams, string why...)",
+<       "documentation": {"kind": "markdown", "value": "/std/base.c:4"},
+<       "sortText": "2set_weight",
+<       "textEdit": {
+<         "range": {"start": {"line": 2, "character": 82}, "end": {"line": 2, "character": 84}},
+<         "newText": "set_weight"
+<       },
+<       "data": {"uri": "file://$ROOT/lib/obj/a.c", "path": "$ROOT/lib/std/base.c", "off": 40}
+<     }
+<   ]
+< }
+# on a receiver nobody knows: nothing
+> complete lib/obj/a.c 3:31 >
+< {"isIncomplete": false, "items": []}
+# a '>' and a ':' that begin nothing
+> complete lib/obj/a.c 3:48 >
+< null
+> complete lib/obj/a.c 3:56 :
+< null
+# paths
+> complete lib/obj/a.c 0:10 <
+< {
+<   "isIncomplete": false,
+<   "items": [
+<     {
+<       "label": "std.h",
+<       "kind": 17,
+<       "sortText": "0std.h",
+<       "textEdit": {
+<         "range": {"start": {"line": 0, "character": 10}, "end": {"line": 0, "character": 10}},
+<         "newText": "std.h"
+<       }
+<     },
+<     {
+<       "label": "sys",
+<       "kind": 19,
+<       "sortText": "1sys",
+<       "textEdit": {
+<         "range": {"start": {"line": 0, "character": 10}, "end": {"line": 0, "character": 10}},
+<         "newText": "sys"
+<       }
+<     }
+<   ]
+< }
+> complete lib/obj/a.c 0:12
+< {
+<   "isIncomplete": false,
+<   "items": [
+<     {
+<       "label": "std.h",
+<       "kind": 17,
+<       "sortText": "0std.h",
+<       "textEdit": {
+<         "range": {"start": {"line": 0, "character": 10}, "end": {"line": 0, "character": 12}},
+<         "newText": "std.h"
+<       }
+<     },
+<     {
+<       "label": "sys",
+<       "kind": 19,
+<       "sortText": "1sys",
+<       "textEdit": {
+<         "range": {"start": {"line": 0, "character": 10}, "end": {"line": 0, "character": 12}},
+<         "newText": "sys"
+<       }
+<     }
+<   ]
+< }
+> change lib/obj/a.c 1:8-1:12 "\"/std/"
+> complete lib/obj/a.c 1:14 /
+< {
+<   "isIncomplete": false,
+<   "items": [
+<     {
+<       "label": "base",
+<       "kind": 17,
+<       "sortText": "0base",
+<       "textEdit": {
+<         "range": {"start": {"line": 1, "character": 14}, "end": {"line": 1, "character": 14}},
+<         "newText": "base"
+<       }
+<     }
+<   ]
+< }
+> shutdown
+< null
+> exit
+< "the server exited after shutdown"

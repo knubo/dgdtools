@@ -76,7 +76,7 @@ s.FS()                             // the files as the tools read them
 ### What is built
 
 `dgdtools lsp` speaks LSP 3.17 on standard input and output. `pkg/lsp`
-is some 2,700 lines over `session.Session`, the protocol's types among
+is some 3,200 lines over `session.Session`, the protocol's types among
 them. It makes one session, with `DiscoverOptions{ProfileDirs,
 UserConfig, Folders}` and no working directory: every path it is given
 is absolute.
@@ -89,6 +89,7 @@ is absolute.
 | `actions.go` | `textDocument/codeAction`, `formatting`, `rangeFormatting` |
 | `definition.go` | `textDocument/definition`: `lint.Document.Resolve`'s answer as links or locations |
 | `hover.go` | `textDocument/hover` and `textDocument/signatureHelp`: `lint.Document.Hover`'s and `Signature`'s answers laid out as Markdown or plain text |
+| `completion.go` | `textDocument/completion` and `completionItem/resolve`: `lint.Document.Complete`'s items as the protocol's, and the comment above a declaration when an item is asked for |
 | `symbols.go` | `textDocument/documentSymbol` and `workspace/symbol`: `lint.Document.Symbols`' outline and `index.Snapshot.FindSymbols`' matches as the protocol's symbols |
 | `content.go` | `workspace/textDocumentContent`: the text of a profile's stub |
 | `position.go` | `PositionMapper`, URIs and paths |
@@ -99,8 +100,10 @@ Capabilities announced: `positionEncoding` (`utf-8` when the client
 offers it, else `utf-16`), `textDocumentSync` (open and close,
 incremental changes), `codeActionProvider` (`quickfix`,
 `source.fixAll.dgdtools`; only to a client with code action literals),
-`definitionProvider`, `hoverProvider`, `signatureHelpProvider` (asked
-for at `(` and `,`, and again at `)`), `documentSymbolProvider`,
+`completionProvider` (asked for at `>`, `:`, `"`, `/` and `<`, with
+`completionItem/resolve`), `definitionProvider`, `hoverProvider`,
+`signatureHelpProvider` (asked for at `(` and `,`, and again at `)`),
+`documentSymbolProvider`,
 `workspaceSymbolProvider`,
 `documentFormattingProvider`, `documentRangeFormattingProvider`,
 `workspace.workspaceFolders` (with change notifications),
@@ -118,7 +121,11 @@ the driver's kernel functions, and in `pkg/resolve` what there is to
 tell about a place and what a call takes ("As built, step 5"); for step
 6 the outline of a file (`resolve.Resolver.Symbols`), the search of a
 generation of the index by name (`index.Snapshot.FindSymbols`) and the
-matcher under it (`internal/fuzzy`) ("As built, step 6").
+matcher under it (`internal/fuzzy`) ("As built, step 6"); for step 7
+the scopes of a function (`syntax.File.Scopes`), what can be written at
+a place (`resolve.Resolver.Complete`) and the entries of a directory of
+the lib, on disk and in a profile's stubs (`index.Snapshot.IncludeEntries`,
+`ObjectEntries`) ("As built, step 7").
 
 Where what is built is not what the sections below planned, the section
 says so in a paragraph that begins **As built**. In short:
@@ -429,7 +436,7 @@ knows the code base.
 | 4 **built** | `definition`: `#include` targets, `inherit` paths, function calls (direct, `::`, `label::`, `->` with a known receiver, string callbacks in registrars), macros | `Document.Snapshot` and a `Query` on it: `ResolveInclude`, `ObjectPath`, `Chain`, `LookupCallable`; the file's `pp.Env` (`pp.Macro.Path/Off`) | `syntax.PathAt(file, offset)` (innermost node chain at a position); a stub target is already located by its virtual document URI (`dgdtools-profile://NAME/std/room.c`, see `profile.Location`), which the server answers with the stub's text | 4 |
 | 5 **built** | `hover` and `signatureHelp` | `ChainFunc.Decl/Type/DefinedIn`, `index.Params`, macro body and class, variable types | active-parameter computation from the argument list around the cursor; kfun table for built-ins (new data file) | 3 |
 | 6 **built** | `documentSymbol`, `workspace/symbol` | `syntax.File.Decls`; units' symbol tables (whole-lib scan, cached) | fuzzy matcher | 2 |
-| 7 | `completion`: functions callable here (own chain, auto object, kfuns), `->` members for a known receiver, macros in view, `#include` and inherit paths, locals | chain + view + profile | local scopes (block-level symbol tables in `pkg/syntax`); tolerant parse at the cursor (the parser already recovers; completion context comes from tokens left of the cursor) | 5 |
+| 7 **built** | `completion`: functions callable here (own chain, auto object, kfuns), `->` members for a known receiver, macros in view, `#include` and inherit paths, locals | chain + view + profile | local scopes (block-level symbol tables in `pkg/syntax`); tolerant parse at the cursor (the parser already recovers; completion context comes from tokens left of the cursor) | 5 |
 | 8 | `references` (and `documentHighlight`) | new: a reverse index of call sites and macro uses per name, built with the whole-lib scan and invalidated per file | reverse index in `pkg/index`; in a partial checkout results are labelled as "in this checkout" | 4 |
 | 9 | `semanticTokens` (section 10.2): what a grammar cannot know. Ships in two parts: 9a macros by class, declarations, inherit labels, calls resolved through the chain (no scopes needed); 9b parameters/locals and unresolved names | tree + view + chain | 9b needs scopes (from 7) | 9a: 2, 9b: 2 |
 | 10 | `prepareRename` and `rename` for the symbols one file decides (section 9): locals and parameters, private functions and variables, macros a `.c` file defines for itself | `pkg/rename` (new) over the tree, the scopes and the file's `pp.Env` | scopes (from 7); `syntax.PathAt` (from 4) | 3 |
@@ -527,10 +534,11 @@ What deliberately does not, each "prove it or stay silent":
   `private` in an inherited object, or lies below a `private inherit` of
   one, is not the file's; and it may hide one that is, so nothing is
   said.
-- **Locals and parameters.** There are no scopes yet (step 7). A name
-  the enclosing function declares as a parameter or a local, anywhere in
-  it, is not taken for the global of that name, nor is one that a
-  statement the parser could not read mentions.
+- **Locals and parameters.** A name is the parameter or the local
+  variable in scope where it stands (`syntax.Scope`, step 7), and a
+  global only where none is. Where a statement before it in a scope
+  around it could not be parsed and mentions the name, nothing is said:
+  it may be a declaration.
 - **Code that is not compiled or was not read.** A branch of a
   conditional that is skipped, a comment, a statement that did not
   parse and the first one after it (`BadStmt.Resumed` is not part of the
@@ -693,8 +701,9 @@ Not built: parameter names for the driver's kfuns (the driver's manual
 pages have them, in a repository of their own that the driver's
 checkout only links to); `->fn` on a receiver the code makes known a
 line earlier (`ob = clone_object("/obj/x")`), which waits for receiver
-flow as the linter does; a hover for locals and parameters (scopes,
-step 7); `signatureHelp` in the arguments of a function pointer.
+flow as the linter does; `signatureHelp` in the arguments of a
+function pointer. (A hover and a definition for locals and parameters
+came with the scopes of step 7.)
 
 **As built, step 6.** Two answers of the library's, and
 `pkg/lsp/symbols.go` their protocol.
@@ -779,6 +788,92 @@ Not built: `workspaceSymbol/resolve` (a location has its range at
 once); objects as symbols (an editor finds a file by its name);
 several words in a query.
 
+**As built, step 7.** Scopes in `pkg/syntax`, the answer in
+`pkg/resolve`, and `pkg/lsp/completion.go` its protocol.
+
+```go
+for _, sc := range tree.Scopes() {     // []*syntax.Scope, one for each function with a body
+    sc.Func, sc.Start, sc.End          // the function; the bytes of its body
+    sc.Locals                          // the parameters, then the outermost block's variables
+    sc.Blocks                          // the scopes of the blocks inside, each with its Locals
+}
+l := sc.Lookup("count", off)           // *syntax.Local: Name, Type ("string *"), Param, Catch, Ident, From
+vis := sc.Visible(off)                 // what can be named at off, the innermost first, none hidden
+
+c := doc.Complete(off)                 // *resolve.Completion, nil where there is nothing to say
+c.Context                              // InCode, AfterArrow, AfterScope, InInclude, InInherit, InCallback, InDirective
+c.Start, c.End                         // what an item replaces: the word, the last part of a path
+c.Called                               // a '(' follows already
+for _, it := range c.Items {           // the nearest first, then by name
+    it.Kind, it.Name, it.Detail        // Function, "set_weight", "varargs void set_weight(int grams, ...)"
+    it.Doc, it.Origin                  // a kfun's line of the table; where it is, as a hover says it
+    it.Path, it.Off                    // where the declaration is: doc.Comment(path, off) is its comment
+    it.Call, it.Args, it.Rank
+}
+```
+
+**The scopes** are DGD's (`comp/compile.cpp`): the parameters and the
+outermost block of a body are one scope, every other block one inside
+it, a variable is there from the end of its name in its declarator on,
+and `try { } catch (e) { }` declares `e`, a string, for its handler. The
+tree has what was written, so a declaration that DGD would refuse (after
+a statement, the second of a name in one scope) is in scope from where
+it stands. A statement that did not parse is kept as a range of the
+scope (`Scope.Unread`): what it may declare is not known, and a name it
+mentions after it is not resolved. With them `Resolve` and `Hover` know
+locals and parameters: the name goes to its declarator, the hover says
+`int count` and "local variable, /obj/a.c:12" or "parameter, ...", and
+the heuristic that kept a name a function declares anywhere from being
+taken for a global is gone. A local's own declarator is a `Decl`.
+
+**Completion** is read from the compiled tokens left of the cursor, as
+signature help is, so it is there while the statement does not parse:
+
+| where | what is offered |
+|---|---|
+| in a function's body | the parameters and locals in scope, the global variables (the file's and those it inherits and may name), the functions it can call (its own, those it inherits, the auto object's), the macros in view, the kfuns where `Resolver.kfun`'s rule says a name means one, and the keywords: statements and types where a statement begins, types after `(`, `object` after `new` and `<-`, `nil`, `new` and `catch` anywhere |
+| where declarations stand | the types, the specifiers, `inherit`, and the macros the project or their body make a type or a specifier; after `inherit`, the macros that are a path; in the value of a global variable, what an expression can name |
+| after `::`, `label::` | the functions of the inherited objects (through that label) that are not private there; after `::`, the auto object's; in the auto object and what it is made of, the kfuns |
+| after `->` | for `this_object()` (or a macro of it), the object's own functions, static ones too; for a constant path or a macro of one, what a call from outside reaches: the chain's functions that are neither private nor static, and the auto object's that are not static. Anything else, nothing: an empty list, not a guess |
+| in a callback's string | for `call_out`, `call_other` and the project's `call_registry`, the functions of the object it is called in, known as for `->`; the name is not called there |
+| in `#include "..."`, `<...>` | the files and directories of the directory written so far, where `ResolveInclude` looks: beside the file (not for `<...>`), then in each include directory; a header first |
+| in `inherit "..."` | the objects (without `.c`) and directories of that lib directory |
+| in `#ifdef`, `#if`, `#elif`, `#undef` | the macros |
+| in a comment, a number, a string that names nothing, code that is not compiled | `null` |
+
+The directories are listed on disk and from a profile's stubs
+(`Snapshot.IncludeEntries`, `ObjectEntries`; a stub the checkout speaks
+for is not listed), so a wizard's checkout completes `/std/` from the
+profile. A name is offered once: a function and a variable may share
+one, a macro's name is the macro.
+
+An item is a `CompletionItem` with the name as label and as the text of
+an edit over `Start..End`, the declaration as detail, and as
+documentation (Markdown when the client reads it) a kfun's line and
+where it is, as the hover says it. Kinds: `Function`, `Variable` (a
+global, a local, a parameter), `Constant` (a macro), `Keyword`, `File`
+and `Folder`. `sortText` is the rank and the name: a local, the file's
+own, what it inherits, a macro, the auto object's, a kfun, a keyword;
+in a path a header, a directory, another file. The comment above a
+declaration is not read for a list of hundreds: the item carries where
+it is in `data`, and `completionItem/resolve` puts the comment before
+the rest. To a client with `snippetSupport` a function's name comes with
+its parentheses, the cursor between them when it takes arguments
+(`foo($0)`, `foo()$0`), unless a `(` follows already; nothing else is a
+snippet. The list is all there is (`isIncomplete: false`), which the
+client filters as more is typed, unless it has more than 2,000 items
+(`resolve.MaxItems`): then it is the 2,000 that `internal/fuzzy` matches
+best to what is written, and incomplete. Asked for because a trigger
+character was typed, the server answers only where that character
+begins something (`->`, `::`, a path, a callback's string); a `>` that
+compares, a `:` of `?:` or a `case`, a `/` that divides get `null`.
+
+Not built: members after `->` on a receiver the code makes known a line
+earlier (receiver flow, as for definition); a macro after `->` (`ob->QP(x)`
+with `QP` expanding to a function's name); the arguments of a call
+(gopls' and rust-analyzer's postfix and signature-driven completion);
+labels for `goto`.
+
 Steps 1 to 3 (9 days) are the "useful every day" milestone: live
 diagnostics, fixes, formatting. Steps 4 to 6 (9 days) make it a
 navigation tool. Steps 7 to 9 (13 days) need two pieces of library work
@@ -788,7 +883,7 @@ of step 7 and the reverse index of step 8.
 
 Library additions, all testable without a server: `syntax.PathAt`
 (built, with `token.File.TokenAt`),
-block scopes, kfun table (name, parameters, return type; built,
+block scopes (built, `syntax.Scope`), kfun table (name, parameters, return type; built,
 `pkg/kfun`), reverse
 reference index, `pkg/rename`. A lint already returns the parsed tree,
 tokens, `#define` environment, index unit and snapshot with the
@@ -1201,7 +1296,7 @@ resolved through the chain, kfuns once the table exists) needs nothing
 beyond today's library and is worth shipping right after hover, because
 "is this name a macro or a function, and where does it come from" is the
 question LPC code most often leaves open. 9b (parameters, locals,
-unresolved names) waits for block scopes.
+unresolved names) waits for nothing more: the scopes are built (step 7).
 
 ## 11. Editor clients
 
@@ -1732,6 +1827,46 @@ grammars alone can ship in the first.
   41 to 119 ms a query, 48 ms on average over 400 names of the sample,
   each of which is the first of its results; every symbol found is
   held to the text at its place.
+- **As built, completion (step 7).** In `pkg/syntax`: `TestScopes`
+  (parameters and the outermost block as one scope, nested blocks and
+  shadowing, a variable from its declarator on, `catch (e)`, an
+  unclosed block) and `TestScopeUnsure`. In `pkg/index`:
+  `TestDirEntries`, `TestDirEntriesInStubs`, `TestDirEntriesOnDisk`. In
+  `pkg/resolve`: `TestLocals` (definition and hover of parameters and
+  locals, shadowing, a statement that did not parse) and, for
+  completion, `TestCompleteInCode` (every kind of item, its detail,
+  origin, rank and comment), `TestCompletePlaces` (what the cursor is
+  in or behind, where statements, expressions, declarations and the
+  value of a global stand, and where nothing is said),
+  `TestCompleteMembers` (`::`, `label::`, `->` on `this_object()`, a
+  path and a path macro, and nothing on any other receiver; callbacks),
+  `TestCompletePaths`, `TestCompletePartialCheckout` (stubs, the auto
+  object and the kfuns of a profile, paths through both),
+  `TestCompleteNoLib`, `TestCompleteCapped` and
+  `TestCompleteEveryPrefix` (a file typed a byte at a time). In
+  `pkg/lsp`: `TestCompletionIsResolve` holds the server's answer to the
+  library's at every offset of every file of a lib, in both encodings,
+  with Markdown and snippets and without; `TestCompletionContent`
+  (kinds, sort text, snippets, `completionItem/resolve`) and
+  `TestCompletionTrigger`; the transcript `completion.txt`, and the
+  capability in the others. In `editors`: `TestNeovimCompletion`, the
+  `nvim` on `PATH` completing with `CTRL-X CTRL-O` behind characters of
+  several bytes. On the corpus, `TestCorpusComplete` takes a name out
+  at 22,202 sampled places of 2,000 files of the VikingMUD lib and asks
+  for a completion where it stood: the name is offered at 20,112 of the
+  20,126 places where the tools know it (99.93%; locals, globals,
+  kfuns, callbacks, `::fn` and `label::fn` 100%, macros 99.1%, `->` on
+  a known object 99.6%), and nothing at the 1,118 calls on a receiver
+  nobody knows. 0.47 ms a completion on average, 14 ms the slowest;
+  570 items for the median, 990 at the 95th percentile, 1,481 at most,
+  never the cap. The misses are code that does not parse around the
+  place, a label macro after `inherit`, and a macro after `->`.
+  `TestCorpusCompletePartial` does the same in ten checkouts with the
+  profile: 11,910 of 11,915 (99.96%), 0.73 ms on average.
+  `TestCorpusResolve` and `TestCorpusHover` count locals and parameters
+  now (20,983 uses and 3,932 declarations of locals, 10,094 and 3,612
+  of parameters in the sample, every one resolved and held to its
+  declarator).
 - **Edit fuzzing** (`go test -fuzz`): start from a corpus file, apply a
   random sequence of range edits through incremental sync while applying
   the same edits to a plain string; after each step the server's buffer

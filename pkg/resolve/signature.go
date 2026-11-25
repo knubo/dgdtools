@@ -70,18 +70,38 @@ func (r *Resolver) Signature(off uint32) *SignatureHelp {
 	if n == 0 {
 		return nil
 	}
-	// Code is the body of a function; anything else is a declaration.
-	body := -1
-	for _, d := range f.Tree.Decls {
-		if fn, ok := d.(*syntax.FuncDecl); ok && fn.Body != nil {
-			if first, last := fn.Body.Span(); first < sig[n-1] && sig[n-1] <= last {
-				body = first
-			}
-		}
-	}
+	body := r.bodyAround(sig[n-1])
 	if body < 0 {
 		return nil
 	}
+	open, commas, ok := r.callAround(n, body)
+	if !ok {
+		return nil
+	}
+	return r.signature(open, commas)
+}
+
+// bodyAround returns the index of the '{' that opens the body of the
+// function the token at index tok is in; -1 when it is in none. Code is
+// the body of a function; anything else is a declaration.
+func (r *Resolver) bodyAround(tok int) int {
+	for _, d := range r.Tree.Decls {
+		if fn, ok := d.(*syntax.FuncDecl); ok && fn.Body != nil {
+			if first, last := fn.Body.Span(); first < tok && tok <= last {
+				return first
+			}
+		}
+	}
+	return -1
+}
+
+// callAround finds the call whose argument list is open after the first
+// n compiled tokens, which are those of the body of a function that
+// opens at token body: the innermost one. open is the index in the
+// compiled tokens of its '(', which follows a name, and commas are the
+// commas of its argument list so far.
+func (r *Resolver) callAround(n, body int) (open int, commas []int, ok bool) {
+	toks, sig := r.Tok.Tokens, r.Tree.Sel.Sig
 	kind := func(i int) token.Kind {
 		if i < 0 || sig[i] <= body {
 			return token.EOF
@@ -89,19 +109,17 @@ func (r *Resolver) Signature(off uint32) *SignatureHelp {
 		return toks[sig[i]].Kind
 	}
 
-	// Back to the '(' that is open at the cursor and follows a name.
-	// commas are the commas of its argument list so far, by index in
-	// sig; an opening bracket of another kind starts the count again,
+	// Back to the '(' that is open at the cursor and follows a name. An
+	// opening bracket of another kind starts the count of commas again,
 	// its commas being its own.
 	depth, aggregate := 0, false
-	var commas []int
 	for i := n - 1; i >= 0 && sig[i] > body; i-- {
 		switch toks[sig[i]].Kind {
 		case token.RParen, token.RBracket, token.RBrace:
 			depth++
 		case token.Semicolon:
 			if depth == 0 {
-				return nil
+				return 0, nil, false
 			}
 		case token.Comma:
 			if depth == 0 {
@@ -116,7 +134,7 @@ func (r *Resolver) Signature(off uint32) *SignatureHelp {
 			// a block, where no call is being written.
 			aggregate = kind(i-1) == token.LParen
 			if !aggregate && toks[sig[i]].Kind == token.LBrace {
-				return nil
+				return 0, nil, false
 			}
 			commas = nil
 		case token.LParen:
@@ -126,14 +144,14 @@ func (r *Resolver) Signature(off uint32) *SignatureHelp {
 			}
 			if !aggregate && kind(i-1) == token.Ident {
 				slices.Reverse(commas)
-				return r.signature(i, commas)
+				return i, commas, true
 			}
 			// Parentheses around an expression, a condition, the '('
 			// of an aggregate.
 			aggregate, commas = false, nil
 		}
 	}
-	return nil
+	return 0, nil, false
 }
 
 // signature describes the call whose '(' is at index open of the
