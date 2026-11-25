@@ -16,6 +16,11 @@ type frame struct {
 	kind     token.Kind // LParen, LBracket, LBrace
 	literal  bool       // "({" array or "([" mapping literal
 	isSwitch bool       // brace of a switch body, in code the parser did not understand
+	// base is the indentation level the bracket is opened at: that of
+	// its line, or, when it is opened on a line inside a bracket that
+	// line opened too, that of the lines inside that one. What is inside
+	// is indented from it, and the closer stands at it.
+	base int
 }
 
 // state is what the printer carries from token to token and what the
@@ -60,6 +65,11 @@ type printer struct {
 	// selected line is indented from it; see indent.
 	taught [][]byte
 
+	// lineLevel is the indentation level of the line the last
+	// significant token is on, as the plan and the open brackets give it
+	// (whether or not the line is selected).
+	lineLevel int
+
 	prev       int        // index of the last significant token (-1 = none)
 	prevKind   token.Kind // its kind
 	prevLast   byte       // its last byte
@@ -78,6 +88,9 @@ func (p *printer) run() {
 			return
 		default:
 			p.gap(gap, i)
+			if p.prev < 0 || slices.ContainsFunc(gap, func(g token.Token) bool { return g.Kind == token.Newline }) {
+				p.lineLevel = p.indentOf(i)
+			}
 			gap = gap[:0]
 			p.emit(i)
 			p.ord++
@@ -514,22 +527,6 @@ func (p *printer) writeNewline(orig []byte) {
 	}
 }
 
-// depth counts what is open inside the current statement that holds
-// lines of its own: the braces, and the brackets of mapping literals.
-// Each indents the lines inside it by one level, so a literal inside a
-// literal is one level further in. A parenthesis or an index bracket
-// does not: a line inside one continues its statement, however many are
-// open.
-func (p *printer) depth() int {
-	n := 0
-	for _, fr := range p.stack {
-		if fr.kind == token.LBrace || fr.kind == token.LBracket && fr.literal {
-			n++
-		}
-	}
-	return n
-}
-
 // inSwitch reports whether the innermost open brace is a switch body's.
 func (p *printer) inSwitch() bool {
 	for i := len(p.stack) - 1; i >= 0; i-- {
@@ -550,21 +547,22 @@ func (p *printer) indentOf(i int) int {
 	if x.flags&head != 0 {
 		return int(x.level)
 	}
-	// Inside a statement: what is open in it, and one more for a line
-	// that continues it.
-	level := int(x.level) + p.depth()
+	// Inside a statement: indented from the line the innermost open
+	// bracket is on, and one more for a line that continues something.
+	level := p.inner(x)
 	switch t.Kind {
 	case token.RBrace:
-		if p.depth() > 0 {
-			level--
+		// A parenthesis left open inside the braces ends with them.
+		for k := len(p.stack) - 1; k >= 0; k-- {
+			if p.stack[k].kind == token.LBrace {
+				return p.stack[k].base
+			}
 		}
-	case token.RBracket:
-		// The bracket of a mapping stands where the mapping began; one
-		// that closes a continuation sits at the base level.
-		if p.topLiteral(token.LBracket) {
-			level--
+	case token.RBracket, token.RParen:
+		// The closer stands at the line of its opener.
+		if n := len(p.stack); n > 0 && p.stack[n-1].kind == opener(t.Kind) {
+			return p.stack[n-1].base
 		}
-	case token.RParen:
 	case token.KwCase, token.KwDefault:
 		if p.inSwitch() {
 			level--
@@ -575,6 +573,27 @@ func (p *printer) indentOf(i int) int {
 		}
 	}
 	return level
+}
+
+// push opens a bracket in the statement of the token planned as x.
+func (p *printer) push(x info, fr frame) {
+	fr.base = max(p.lineLevel, p.inner(x))
+	p.stack = append(p.stack, fr)
+}
+
+// inner returns the indentation level of the lines inside the innermost
+// open bracket: one more than the line the bracket is opened on for a
+// brace or a literal's bracket, that line's for a parenthesis or an
+// index (whose lines continue it); the statement's when none is open.
+func (p *printer) inner(x info) int {
+	n := len(p.stack)
+	if n == 0 {
+		return int(x.level)
+	}
+	if fr := p.stack[n-1]; fr.kind == token.LBrace || fr.kind == token.LBracket && fr.literal {
+		return fr.base + 1
+	}
+	return p.stack[n-1].base
 }
 
 // commentIndent returns the indentation level of a comment on a line of
@@ -596,16 +615,16 @@ func (p *printer) commentIndent(i int) int {
 		}
 		return int(x.level)
 	case x.flags&known == 0:
-		return int(x.level) + p.depth()
+		return p.inner(x)
 	}
 	switch t.Kind {
 	case token.RBrace:
-		return int(x.level) + p.depth()
+		return p.inner(x)
 	case token.RParen, token.RBracket:
 		if t.Kind == token.RBracket && p.topLiteral(token.LBracket) {
-			return int(x.level) + p.depth()
+			return p.inner(x)
 		}
-		return int(x.level) + p.depth() + 1
+		return p.inner(x) + 1
 	}
 	return p.indentOf(i)
 }
@@ -654,22 +673,22 @@ func (p *printer) emit(i int) {
 	case token.KwSwitch:
 		p.pendSwitch = !understood
 	case token.LParen:
-		p.stack = append(p.stack, frame{kind: t.Kind})
+		p.push(x, frame{kind: t.Kind})
 	case token.LBracket:
 		lit := x.flags&literal != 0
 		if !understood {
 			lit = p.prevKind == token.LParen
 		}
-		p.stack = append(p.stack, frame{kind: t.Kind, literal: lit})
+		p.push(x, frame{kind: t.Kind, literal: lit})
 	case token.LBrace:
 		switch {
 		case x.flags&block != 0:
 			// Its nesting is in the levels of what it holds.
 		case understood:
-			p.stack = append(p.stack, frame{kind: t.Kind, literal: true})
+			p.push(x, frame{kind: t.Kind, literal: true})
 		default:
 			lit := p.prevKind == token.LParen
-			p.stack = append(p.stack, frame{kind: t.Kind, literal: lit, isSwitch: p.pendSwitch && !lit})
+			p.push(x, frame{kind: t.Kind, literal: lit, isSwitch: p.pendSwitch && !lit})
 			if !lit {
 				p.pendSwitch = false
 			}

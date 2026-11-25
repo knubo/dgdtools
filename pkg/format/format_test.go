@@ -203,6 +203,24 @@ func TestBlockCommentIndentation(t *testing.T) {
 	assert.Equal(t, "void\nf()\n{\n    /* one\n    two */\n    x = 1;\n}\n", fmtSrc(t, in, Options{}))
 }
 
+// What is inside a bracket is indented from the line the bracket is
+// opened on, and the closer stands at that line: a literal that opens on
+// a line continuing a call, and a call inside a call's arguments.
+func TestBracketsIndentFromTheirLine(t *testing.T) {
+	in := "void f() {\nfoo(name,\n({\n1,\n2,\n}),\nn);\nfoo(a,\nbar(b,\nc),\nd);\n}\n"
+	want := "void f() {\n    foo(name,\n        ({\n            1,\n            2,\n        }),\n        n);\n" +
+		"    foo(a,\n        bar(b,\n            c),\n        d);\n}\n"
+	assert.Equal(t, want, fmtSrc(t, in, Options{}))
+	assert.Equal(t, want, fmtSrc(t, want, Options{}))
+}
+
+// The ':' of catch's handler is spaced like a conditional's.
+func TestCatchHandlerColon(t *testing.T) {
+	in := "void f() {\ncatch { i++; }: { j--; }\ncatch {\ni++;\n}:{\nj--;\n}\n}\n"
+	want := "void f() {\n    catch { i++; } : { j--; }\n    catch {\n        i++;\n    } : {\n        j--;\n    }\n}\n"
+	assert.Equal(t, want, fmtSrc(t, in, Options{}))
+}
+
 func TestRefusesIllegal(t *testing.T) {
 	f := lexer.Lex("t.c", []byte("int x;\n  \"unterminated\nint y;\n"), lexer.Default)
 	_, err := Format(f, Options{})

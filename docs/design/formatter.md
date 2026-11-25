@@ -65,6 +65,16 @@ K&R, Allman and GNU layouts all come out as written, indented by the
 one rule). The only line breaks the formatter removes are those of
 blank lines beyond two in a row and at the end of a file.
 
+The one rule for a line inside brackets: it is indented from the line
+the bracket is opened on, one level for a literal's elements or a
+block's statements, one level as a continuation inside a parenthesis or
+an index, and the closer on a line of its own stands at the level of
+the opener's line. A literal that opens on a line continuing a call is
+indented from that line, and the arguments of a call inside a call's
+arguments one level further than that call. A bracket opened on the same
+line as one it is inside counts from the lines inside that one, so
+`({ ([` on one line puts the mapping's lines two levels in.
+
 Joining a lone `{` or `else` onto the line above was the last place the
 formatter moved a line, and it was taken out for the same reason as the
 header layout: it is a style of new code, not a layout everyone agrees
@@ -332,9 +342,9 @@ scope after excludes), braces kept on their lines:
 
 | | |
 |---|---|
-| reformatted | 104,487 |
-| already formatted | 5,742 |
-| refused: does not tokenize | 764 |
+| reformatted | 104,494 |
+| already formatted | 5,744 |
+| refused: does not tokenize | 755 |
 | gate failures | 0 |
 | changed by a second pass | 0 |
 | a non-blank line joined or split | 0 files |

@@ -22,7 +22,7 @@ const (
 	head
 	binary    // '+' '-' '*' '&' between two operands
 	postfix   // '++' or '--' after its operand
-	ternary   // the '?' or ':' of a conditional expression
+	ternary   // the '?' or ':' of a conditional expression, or the ':' of catch's handler
 	literal   // a brace of ({ }) or a bracket of ([ ])
 	block     // a brace of a block statement or function body
 	caseLabel // 'case' or 'default' in the block of its switch
@@ -394,6 +394,7 @@ func (b *builder) stmt(s syntax.Stmt, level int) {
 		b.body(s.Body, level)
 		if s.Handler != nil {
 			b.markKind(s.HandlerTok, token.KwCatch, head)
+			b.markKind(s.HandlerTok, token.Colon, ternary) // catch { } : { }, spaced the same
 			b.body(s.Handler, level)
 		}
 	case *syntax.CaseStmt: // a label outside the block of its switch
