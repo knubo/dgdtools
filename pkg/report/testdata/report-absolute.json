@@ -136,31 +136,31 @@
       "code": "E002",
       "group": "syntax",
       "doc": "adjacent strings",
-      "url": "https://github.com/mmcdole/dgdtools/blob/main/docs/rules.md#adjacent-strings"
+      "url": "https://github.com/mmcdole/dgdtools/blob/v1.2.3/docs/rules.md#adjacent-strings"
     },
     "callable-not-found": {
       "code": "R001",
       "group": "runtime",
       "doc": "no such function",
-      "url": "https://github.com/mmcdole/dgdtools/blob/main/docs/rules.md#callable-not-found"
+      "url": "https://github.com/mmcdole/dgdtools/blob/v1.2.3/docs/rules.md#callable-not-found"
     },
     "static-crossobj": {
       "code": "R002",
       "group": "runtime",
       "doc": "out of reach",
-      "url": "https://github.com/mmcdole/dgdtools/blob/main/docs/rules.md#static-crossobj"
+      "url": "https://github.com/mmcdole/dgdtools/blob/v1.2.3/docs/rules.md#static-crossobj"
     },
     "unformatted": {
       "code": "C003",
       "group": "convention",
       "doc": "not formatted",
-      "url": "https://github.com/mmcdole/dgdtools/blob/main/docs/rules.md#unformatted"
+      "url": "https://github.com/mmcdole/dgdtools/blob/v1.2.3/docs/rules.md#unformatted"
     },
     "unreachable-code": {
       "code": "S004",
       "group": "suspicious",
       "doc": "never runs",
-      "url": "https://github.com/mmcdole/dgdtools/blob/main/docs/rules.md#unreachable-code"
+      "url": "https://github.com/mmcdole/dgdtools/blob/v1.2.3/docs/rules.md#unreachable-code"
     }
   },
   "summary": {

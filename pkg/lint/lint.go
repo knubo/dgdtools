@@ -26,6 +26,7 @@ import (
 	"io/fs"
 	"maps"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"sort"
 	"strings"
@@ -87,11 +88,24 @@ type Rule struct {
 	Run     func(*Pass)
 }
 
-// DocsURL is where the rules are documented, one section each.
-const DocsURL = "https://github.com/mmcdole/dgdtools/blob/main/docs/rules.md"
+// release is the version of a release, which has a tag of that name: not
+// a development build ("dev"), a snapshot, or a build past a tag.
+var release = regexp.MustCompile(`^v[0-9]+\.[0-9]+\.[0-9]+(-(alpha|beta|rc)[.0-9]*)?$`)
 
-// URL returns the address of the rule's documentation.
-func (r *Rule) URL() string { return DocsURL + "#" + r.Name }
+// DocsURL returns where the rules are documented, one section each, for
+// a build of the given version: a release links to its own tag, any
+// other build to main.
+func DocsURL(version string) string {
+	ref := "main"
+	if release.MatchString(version) {
+		ref = version
+	}
+	return "https://github.com/mmcdole/dgdtools/blob/" + ref + "/docs/rules.md"
+}
+
+// URL returns the address of the rule's documentation for a build of
+// the given version.
+func (r *Rule) URL(version string) string { return DocsURL(version) + "#" + r.Name }
 
 // Pass is the per-file, per-rule context handed to Rule.Run.
 type Pass struct {

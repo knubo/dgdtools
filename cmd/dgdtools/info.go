@@ -77,7 +77,7 @@ func explainCmd(_ context.Context, args []string, _ io.Reader, stdout, stderr io
 	if !r.Late {
 		fmt.Fprintf(stdout, "\nSuppress one occurrence with a comment on its line, or on the line above:\n    /* dgdtools-ignore lint/%s */\n", r.Name)
 	}
-	fmt.Fprintf(stdout, "\n%s\n", r.URL())
+	fmt.Fprintf(stdout, "\n%s\n", r.URL(version))
 	return 0
 }
 

@@ -709,7 +709,8 @@ Properties the core guarantees (each has a test in `pkg/lint` or
   its tags once (`Rule.Tags`). Every rule has a documentation address
   (`Rule.URL`, a section of `docs/rules.md`, which is written from the
   rule table and checked by a test), for LSP `codeDescription`, SARIF
-  `helpUri` and the JSON report.
+  `helpUri` and the JSON report: the page at the release's tag for a
+  release build (`v1.2.3`), at `main` for any other.
 - **What a rule finds is filtered in one place, in one order.**
   `Pass.Report` always records the finding and returns it. The engine
   then (1) withholds the findings of a `CompiledOnly` rule that lie in a

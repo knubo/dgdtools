@@ -245,7 +245,7 @@ func JSON(w io.Writer, res *lint.Result, rules []*lint.Rule, o Options) error {
 			out.Summary.Infos++
 		}
 		if r := byName[d.Rule]; r != nil {
-			out.Rules[d.Rule] = jsonRule{r.Code, r.Group, r.Doc, r.URL()}
+			out.Rules[d.Rule] = jsonRule{r.Code, r.Group, r.Doc, r.URL(o.Version)}
 		}
 		jd := jsonDiag{
 			Rule: d.Rule, Code: d.Code, Severity: d.Severity.String(),
@@ -402,7 +402,7 @@ func SARIF(w io.Writer, res *lint.Result, rules []*lint.Rule, o Options) error {
 		srules = append(srules, sarifRule{
 			ID: r.Name, Name: r.Name,
 			ShortDescription: sarifMsg{r.Doc}, FullDescription: sarifMsg{r.Explain},
-			HelpURI:       r.URL(),
+			HelpURI:       r.URL(o.Version),
 			DefaultConfig: map[string]string{"level": sarifLevel(r.Severity)},
 			Properties:    map[string]any{"code": r.Code, "group": r.Group},
 		})

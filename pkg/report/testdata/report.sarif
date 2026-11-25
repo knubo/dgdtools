@@ -210,7 +210,7 @@
               "fullDescription": {
                 "text": "Two strings side by side."
               },
-              "helpUri": "https://github.com/mmcdole/dgdtools/blob/main/docs/rules.md#adjacent-strings",
+              "helpUri": "https://github.com/mmcdole/dgdtools/blob/v1.2.3/docs/rules.md#adjacent-strings",
               "defaultConfiguration": {
                 "level": "error"
               },
@@ -228,7 +228,7 @@
               "fullDescription": {
                 "text": "The function is not there."
               },
-              "helpUri": "https://github.com/mmcdole/dgdtools/blob/main/docs/rules.md#callable-not-found",
+              "helpUri": "https://github.com/mmcdole/dgdtools/blob/v1.2.3/docs/rules.md#callable-not-found",
               "defaultConfiguration": {
                 "level": "error"
               },
@@ -246,7 +246,7 @@
               "fullDescription": {
                 "text": "The function cannot be called from there."
               },
-              "helpUri": "https://github.com/mmcdole/dgdtools/blob/main/docs/rules.md#static-crossobj",
+              "helpUri": "https://github.com/mmcdole/dgdtools/blob/v1.2.3/docs/rules.md#static-crossobj",
               "defaultConfiguration": {
                 "level": "error"
               },
@@ -264,7 +264,7 @@
               "fullDescription": {
                 "text": "Nothing gets here."
               },
-              "helpUri": "https://github.com/mmcdole/dgdtools/blob/main/docs/rules.md#unreachable-code",
+              "helpUri": "https://github.com/mmcdole/dgdtools/blob/v1.2.3/docs/rules.md#unreachable-code",
               "defaultConfiguration": {
                 "level": "warning"
               },
@@ -282,7 +282,7 @@
               "fullDescription": {
                 "text": "The formatter would change it."
               },
-              "helpUri": "https://github.com/mmcdole/dgdtools/blob/main/docs/rules.md#unformatted",
+              "helpUri": "https://github.com/mmcdole/dgdtools/blob/v1.2.3/docs/rules.md#unformatted",
               "defaultConfiguration": {
                 "level": "note"
               },
@@ -300,7 +300,7 @@
               "fullDescription": {
                 "text": "Not among the findings."
               },
-              "helpUri": "https://github.com/mmcdole/dgdtools/blob/main/docs/rules.md#missing-visibility",
+              "helpUri": "https://github.com/mmcdole/dgdtools/blob/v1.2.3/docs/rules.md#missing-visibility",
               "defaultConfiguration": {
                 "level": "warning"
               },

@@ -124,7 +124,7 @@ func TestLSPMatchesLint(t *testing.T) {
 				for _, r := range d.RelatedInformation {
 					f.Related = append(f.Related, fmt.Sprintf("%s:%d %s", filepath.Base(r.Location.URI), r.Location.Range.Start.Line+1, r.Message))
 				}
-				assert.Equal(t, lint.RuleByName(d.Code).URL(), d.CodeDescription.Href)
+				assert.Equal(t, lint.RuleByName(d.Code).URL("dev"), d.CodeDescription.Href)
 				got = append(got, f)
 			}
 			assert.Equal(t, want, got, "%s (%s)", rel, c.Encoding)

@@ -287,7 +287,7 @@ func (s *server) progress(done <-chan struct{}, token, title string) {
 
 // diagnostics returns the findings of d as the protocol has them.
 func (s *server) diagnostics(sess *session.Session, d *lint.Document) []Diagnostic {
-	c := &converter{caps: s.caps, sess: sess, doc: d,
+	c := &converter{caps: s.caps, version: s.opt.Version, sess: sess, doc: d,
 		m: NewPositionMapper(d.File.Src, s.caps.encoding())}
 	out := make([]Diagnostic, 0, len(d.Diagnostics))
 	for i := range d.Diagnostics {
@@ -298,10 +298,11 @@ func (s *server) diagnostics(sess *session.Session, d *lint.Document) []Diagnost
 
 // converter turns the findings of one document into the protocol's.
 type converter struct {
-	caps capabilities
-	sess *session.Session
-	doc  *lint.Document
-	m    *PositionMapper
+	caps    capabilities
+	version string // the server's, for the address of a rule's page
+	sess    *session.Session
+	doc     *lint.Document
+	m       *PositionMapper
 	// others are the mappers of the other files related locations are
 	// in, nil for one that cannot be read.
 	others map[string]*PositionMapper
@@ -322,7 +323,7 @@ func (c *converter) diagnostic(d *diag.Diagnostic) Diagnostic {
 		out.Severity = SeverityWarning
 	}
 	if r := lint.RuleByName(d.Rule); r != nil && c.caps.href {
-		out.CodeDescription = &CodeDescription{Href: r.URL()}
+		out.CodeDescription = &CodeDescription{Href: r.URL(c.version)}
 	}
 	if c.caps.tags {
 		for _, t := range d.Tags {

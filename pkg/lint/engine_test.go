@@ -150,8 +150,13 @@ func TestDiagnosticModel(t *testing.T) {
 	// say: the preprocessor reads directives in skipped branches too.
 	compiledOnly := map[string]bool{}
 	for _, r := range lint.Rules() {
-		assert.Equal(t, "https://github.com/mmcdole/dgdtools/blob/main/docs/rules.md#"+r.Name, r.URL())
+		assert.Equal(t, "https://github.com/mmcdole/dgdtools/blob/main/docs/rules.md#"+r.Name, r.URL("dev"))
 		compiledOnly[r.Name] = r.CompiledOnly
+	}
+	// A release links to the page as it was tagged; any other build to main.
+	for v, ref := range map[string]string{"v1.2.3": "v1.2.3", "v1.0.0-rc.1": "v1.0.0-rc.1", "dev": "main", "": "main",
+		"v1.2.3-4-gabc1234": "main", "v1.2.3-dirty": "main", "v1.2.4-SNAPSHOT-abc1234": "main", "test": "main"} {
+		assert.Equal(t, "https://github.com/mmcdole/dgdtools/blob/"+ref+"/docs/rules.md", lint.DocsURL(v), v)
 	}
 	assert.True(t, compiledOnly["syntax-error"])
 	assert.True(t, compiledOnly["callable-not-found"])

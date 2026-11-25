@@ -31,8 +31,8 @@ func TestRulesDoc(t *testing.T) {
 		t.Error("docs/rules.md is not what the rule table says; run: go test ./pkg/lint -run TestRulesDoc -update")
 	}
 	for _, r := range lint.Rules() {
-		anchor := strings.TrimPrefix(r.URL(), lint.DocsURL)
-		assert.Contains(t, want, "\n### "+strings.TrimPrefix(anchor, "#")+"\n", "the section %s points to", r.URL())
+		anchor := strings.TrimPrefix(r.URL("dev"), lint.DocsURL("dev"))
+		assert.Contains(t, want, "\n### "+strings.TrimPrefix(anchor, "#")+"\n", "the section %s points to", r.URL("dev"))
 	}
 }
 
