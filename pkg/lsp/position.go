@@ -132,10 +132,11 @@ func pathOf(uri string) string {
 }
 
 // uriOf returns the URI of a location the tools name: a file by its
-// absolute path, or a stub of a profile, which is named by a URI already.
+// absolute path, or a stub of a profile, which is named by a URI already
+// and needs no more than escaping.
 func uriOf(path string) string {
-	if _, _, stub := profile.SplitLocation(path); stub {
-		return path
+	if name, file, stub := profile.SplitLocation(path); stub {
+		return stubURI(name, file)
 	}
 	p := filepath.ToSlash(path)
 	if !strings.HasPrefix(p, "/") {

@@ -82,6 +82,7 @@ is absolute.
 | `sync.go` | the open documents and their incremental changes; watched files; workspace folders and the two settings; the file watchers asked of the client |
 | `diagnostics.go` | when a document is linted, and what is published: the timers, the lint that a newer change stops, the whole-lib scan, `diag.Diagnostic` to the protocol's |
 | `actions.go` | `textDocument/codeAction`, `formatting`, `rangeFormatting` |
+| `content.go` | `workspace/textDocumentContent`: the text of a profile's stub |
 | `position.go` | `PositionMapper`, URIs and paths |
 | `protocol.go` | the protocol's types, as far as used (some 45) |
 | `lsptest/` | a client in the test's own process, over a pipe |
@@ -91,8 +92,9 @@ offers it, else `utf-16`), `textDocumentSync` (open and close,
 incremental changes), `codeActionProvider` (`quickfix`,
 `source.fixAll.dgdtools`; only to a client with code action literals),
 `documentFormattingProvider`, `documentRangeFormattingProvider`,
-`workspace.workspaceFolders` (with change notifications). Asked of the
-client when it can: `workspace/configuration`,
+`workspace.workspaceFolders` (with change notifications),
+`workspace.textDocumentContent` for the scheme `dgdtools-profile`. Asked
+of the client when it can: `workspace/configuration`,
 `client/registerCapability` for `workspace/didChangeWatchedFiles`,
 `window/workDoneProgress/create`.
 
@@ -112,6 +114,8 @@ says so in a paragraph that begins **As built**. In short:
   (sections 3 and 8).
 - The server has one request of its own, `dgdtools/idle`, for tests and
   scripts (section 13).
+- A profile's stub is read by `workspace/textDocumentContent`, a request
+  of LSP 3.18, which came with the VS Code client (section 11).
 
 ## 1. Shape
 
@@ -1055,7 +1059,11 @@ Each with the alternative it was chosen over.
 - **A separate `dgdlpc` Vim filetype**, not a DGD mode in the stock
   `lpc.vim` (10.1).
 - **Stubs open as read-only virtual documents**, rather than a
-  definition in the profile resolving to nothing.
+  definition in the profile resolving to nothing. Their text is asked of
+  the server with the protocol's own request
+  (`workspace/textDocumentContent`, LSP 3.18), not with one of ours and
+  not by a provider the extension would write: the client library has
+  it, and so will any other client (section 11).
 - **Editor support lives in this repository**, under `editors/` (10.1),
   so a grammar, a client and the server they talk to are one commit.
 - **The grammars are tested by `go test`**, by running them, not by a

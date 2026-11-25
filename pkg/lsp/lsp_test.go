@@ -26,6 +26,7 @@ import (
 	"github.com/mmcdole/dgdtools/pkg/lint"
 	"github.com/mmcdole/dgdtools/pkg/lsp"
 	"github.com/mmcdole/dgdtools/pkg/lsp/lsptest"
+	"github.com/mmcdole/dgdtools/pkg/profile"
 	"github.com/mmcdole/dgdtools/pkg/vfs"
 )
 
@@ -612,6 +613,85 @@ func TestSettings(t *testing.T) {
 	assert.Empty(t, c.Received("workspace/configuration"))
 	c.Notify("workspace/didChangeConfiguration", map[string]any{"settings": map[string]any{"dgdtools": map[string]any{}}})
 	assert.Equal(t, none, got(c))
+}
+
+// A declaration that comes from a profile is located in a stub, which is
+// no file: the server names it by a URI of its own and gives the text of
+// it when asked, so that an editor can show the place.
+func TestStubContent(t *testing.T) {
+	// A stub is a file of the lib without its function bodies.
+	const room = "inherit \"/std/object\";\n\nstatic void room_static() {}\nvoid room_public() {}\n"
+	p := &profile.Profile{
+		Manifest: profile.Manifest{Name: "Mini Lib", Dialect: profile.Dialect{Driver: "dgd"}, Covered: []string{"/std/"}},
+		Files:    map[string]string{"/std/room.c": room, "/std/object.c": "void create() {}\n"},
+	}
+	data, err := p.Marshal()
+	require.NoError(t, err)
+	files := map[string]string{
+		"ann/mini.profile":  string(data),
+		"ann/x.c":           "void f() { \"/std/room\"->room_static(); }\n",
+		"bob/b.c":           "void f() { }\n",
+		"elsewhere/alone.c": "void f() { }\n",
+	}
+	dir := tree(t, files)
+	path := func(rel string) string { return filepath.Join(dir, rel) }
+	content := func(c *lsptest.Client, uri string) (string, error) {
+		var res lsp.TextDocumentContentResult
+		err := c.Call(lsp.MethodTextDocumentContent, lsp.TextDocumentContentParams{URI: uri}, &res)
+		return res.Text, err
+	}
+
+	c := start(t)
+	// The profile is the folder's by the editor's settings, as for a
+	// wizard who has no config file.
+	c.Settings = func(uri string) any {
+		if uri == lsptest.URI(path("ann")) {
+			return map[string]any{"profile": path("ann/mini.profile"), "libPath": "/players/ann"}
+		}
+		return nil
+	}
+	var res lsp.InitializeResult
+	require.NoError(t, json.Unmarshal(c.Initialize(lsptest.Capabilities{}, path("ann"), path("bob")), &res))
+	assert.Equal(t, []string{profile.Scheme}, res.Capabilities.Workspace.TextDocumentContent.Schemes)
+
+	c.Open(path("ann/x.c"), files["ann/x.c"])
+	c.Open(path("bob/b.c"), files["bob/b.c"])
+	ds := c.Diagnostics(path("ann/x.c")).Diagnostics
+	require.Len(t, ds, 1)
+	assert.Equal(t, "static-crossobj", ruleOf(t, ds[0].Code))
+	require.Len(t, ds[0].RelatedInformation, 1)
+	loc := ds[0].RelatedInformation[0].Location
+	assert.Equal(t, "dgdtools-profile://Mini%20Lib/std/room.c", loc.URI)
+
+	// What the location names is there to read, and the range is of it.
+	text, err := content(c, loc.URI)
+	require.NoError(t, err)
+	assert.Equal(t, room, text)
+	start, end := lsptest.OffsetOf(text, loc.Range.Start, c.Encoding), lsptest.OffsetOf(text, loc.Range.End, c.Encoding)
+	assert.Equal(t, "room_static", text[start:end])
+
+	// An editor writes a URI its own way: the host in lower case.
+	text, err = content(c, "dgdtools-profile://mini%20lib/std/object.c")
+	require.NoError(t, err)
+	assert.Equal(t, "void create() {}\n", text)
+
+	// With the document closed the stub is still the folder's profile's.
+	c.Close(path("ann/x.c"))
+	text, err = content(c, loc.URI)
+	require.NoError(t, err)
+	assert.Equal(t, room, text)
+
+	for _, uri := range []string{
+		"dgdtools-profile://Mini%20Lib/std/nothing.c", // no such stub
+		"dgdtools-profile://Mini%20Lib/std",           // a directory of stubs
+		"dgdtools-profile://other/std/room.c",         // a profile nobody uses
+		lsptest.URI(path("ann/x.c")),                  // a file: the editor has those itself
+		"untitled:Untitled-1",
+	} {
+		_, err := content(c, uri)
+		assert.True(t, lsptest.IsCode(err, -32602), "%s: %v", uri, err)
+	}
+	require.NoError(t, c.Shutdown())
 }
 
 // A file that is Latin-1 on disk, opened as what it is and opened as

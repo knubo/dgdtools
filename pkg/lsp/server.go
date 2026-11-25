@@ -35,6 +35,7 @@ import (
 
 	"github.com/mmcdole/dgdtools/pkg/config"
 	"github.com/mmcdole/dgdtools/pkg/lint"
+	"github.com/mmcdole/dgdtools/pkg/profile"
 	"github.com/mmcdole/dgdtools/pkg/session"
 	"github.com/mmcdole/dgdtools/pkg/vfs"
 )
@@ -347,6 +348,12 @@ func (s *server) request(ctx context.Context, method string, params json.RawMess
 		err    error
 	)
 	switch method {
+	case MethodTextDocumentContent:
+		var p TextDocumentContentParams
+		if err := unmarshal(params, &p); err != nil {
+			return nil, err
+		}
+		result, err = s.textDocumentContent(p.URI)
 	case "textDocument/codeAction":
 		var p CodeActionParams
 		if err := unmarshal(params, &p); err != nil {
@@ -518,6 +525,10 @@ func (s *server) initialize(params json.RawMessage) (any, error) {
 	}
 	res.Capabilities.Workspace.WorkspaceFolders.Supported = true
 	res.Capabilities.Workspace.WorkspaceFolders.ChangeNotifications = true
+	// The stubs of a profile are documents of the server's: a client
+	// that knows the request shows them, read-only, when asked to go to
+	// one.
+	res.Capabilities.Workspace.TextDocumentContent.Schemes = []string{profile.Scheme}
 	s.log.Info("initialized", "encoding", s.caps.encoding(), "folders", len(s.folders))
 	return res, nil
 }

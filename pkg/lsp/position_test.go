@@ -12,6 +12,7 @@ import (
 	"github.com/mmcdole/dgdtools/pkg/lexer"
 	"github.com/mmcdole/dgdtools/pkg/lsp"
 	"github.com/mmcdole/dgdtools/pkg/lsp/lsptest"
+	"github.com/mmcdole/dgdtools/pkg/profile"
 )
 
 // texts have every kind of line break and of character: ASCII, two and
@@ -221,6 +222,32 @@ func TestURIs(t *testing.T) {
 	assert.Equal(t, "file:///lib/a%20b/%C3%A5.c", lsp.URIOf("/lib/a b/å.c"))
 	// A stub of a profile is named by its URI already.
 	assert.Equal(t, "dgdtools-profile://mylib/std/room.c", lsp.URIOf("dgdtools-profile://mylib/std/room.c"))
+	assert.Equal(t, "dgdtools-profile://my%20lib/std/a%20b%3F.c", lsp.URIOf("dgdtools-profile://my lib/std/a b?.c"))
+}
+
+// The URI of a stub comes back from an editor as the editor writes
+// URIs, and names the same stub.
+func TestStubURIs(t *testing.T) {
+	type stub struct{ name, file string }
+	for uri, want := range map[string]stub{
+		"dgdtools-profile://mylib/std/room.c":                     {"mylib", "/std/room.c"},
+		"dgdtools-profile://my%20lib/std/a%20b%3F.c":              {"my lib", "/std/a b?.c"},
+		"dgdtools-profile://mylib/include/std.h?x=1#L5":           {"mylib", "/include/std.h"},
+		"dgdtools-profile://mylib":                                {"mylib", "/"},
+		lsp.URIOf(profile.Location("Viking MUD") + "/std/room.c"): {"Viking MUD", "/std/room.c"},
+	} {
+		name, file, ok := lsp.StubOf(uri)
+		assert.True(t, ok, uri)
+		assert.Equal(t, want, stub{name, file}, uri)
+		// What the server says is what the library splits.
+		n, f, ok := profile.SplitLocation(profile.Location(name) + file)
+		assert.True(t, ok)
+		assert.Equal(t, want, stub{n, f}, uri)
+	}
+	for _, not := range []string{"file:///std/room.c", "dgdtools-profile:/std/room.c", "dgdtools-profile:///std/room.c", "dgdtools-profile://a%zz/x.c", ""} {
+		_, _, ok := lsp.StubOf(not)
+		assert.False(t, ok, not)
+	}
 }
 
 func TestSafeFixes(t *testing.T) {

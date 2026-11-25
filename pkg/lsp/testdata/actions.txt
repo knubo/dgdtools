@@ -51,7 +51,10 @@ exit
 <     "codeActionProvider": {"codeActionKinds": ["quickfix", "source.fixAll.dgdtools"]},
 <     "documentFormattingProvider": true,
 <     "documentRangeFormattingProvider": true,
-<     "workspace": {"workspaceFolders": {"supported": true, "changeNotifications": true}}
+<     "workspace": {
+<       "workspaceFolders": {"supported": true, "changeNotifications": true},
+<       "textDocumentContent": {"schemes": ["dgdtools-profile"]}
+<     }
 <   },
 <   "serverInfo": {"name": "dgdtools", "version": "test"}
 < }

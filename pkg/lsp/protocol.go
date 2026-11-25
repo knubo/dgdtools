@@ -2,9 +2,9 @@ package lsp
 
 import "encoding/json"
 
-// The part of the Language Server Protocol (3.17) the server speaks,
-// written out by hand: a few dozen types, of a specification of several
-// hundred. Fields the server neither reads nor sets are left out.
+// The part of the Language Server Protocol (3.17, and one request of
+// 3.18) the server speaks, written out by hand: a few dozen types, of a
+// specification of several hundred. Fields the server neither reads nor sets are left out.
 
 // Position is a place in a document: a 0-based line and an offset in it,
 // counted in the unit the two sides agreed on (PositionMapper).
@@ -112,7 +112,22 @@ type ServerCapabilities struct {
 			Supported           bool `json:"supported"`
 			ChangeNotifications bool `json:"changeNotifications"`
 		} `json:"workspaceFolders"`
+		TextDocumentContent TextDocumentContentOptions `json:"textDocumentContent"`
 	} `json:"workspace"`
+}
+
+// TextDocumentContentOptions names the URI schemes of the documents
+// whose text the server gives (LSP 3.18).
+type TextDocumentContentOptions struct {
+	Schemes []string `json:"schemes"`
+}
+
+type TextDocumentContentParams struct {
+	URI string `json:"uri"`
+}
+
+type TextDocumentContentResult struct {
+	Text string `json:"text"`
 }
 
 // SyncIncremental is TextDocumentSyncKind.Incremental: a change is sent

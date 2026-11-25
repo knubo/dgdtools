@@ -21,10 +21,12 @@ func LineRange(r Range) (first, last int) {
 	return lr.First, lr.Last
 }
 
-// PathOf and URIOf convert between URIs and paths.
+// PathOf and URIOf convert between URIs and paths, and StubOf splits the
+// URI of a profile's stub.
 var (
 	PathOf = pathOf
 	URIOf  = uriOf
+	StubOf = stubOf
 )
 
 // SafeFixes is what "fix all" applies.
