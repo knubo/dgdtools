@@ -229,6 +229,9 @@ type capabilities struct {
 	// Semantic tokens: the client asks for them, and can be told to
 	// ask again.
 	tokens, tokensRefresh bool
+	// prepareRename: the client asks whether a place can be renamed
+	// before it asks for the new name.
+	prepareRename bool
 }
 
 // encoding names the position encoding in use.
@@ -450,6 +453,18 @@ func (s *server) request(ctx context.Context, method string, params json.RawMess
 			return nil, err
 		}
 		result, err = s.semanticTokensRange(ctx, &p)
+	case "textDocument/prepareRename":
+		var p PrepareRenameParams
+		if err := unmarshal(params, &p); err != nil {
+			return nil, err
+		}
+		result, err = s.prepareRename(ctx, &p)
+	case "textDocument/rename":
+		var p RenameParams
+		if err := unmarshal(params, &p); err != nil {
+			return nil, err
+		}
+		result, err = s.rename(ctx, &p)
 	case "textDocument/formatting":
 		var p DocumentFormattingParams
 		if err := unmarshal(params, &p); err != nil {
@@ -588,6 +603,7 @@ func (s *server) initialize(params json.RawMessage) (any, error) {
 	s.caps.signatureActive = si.ActiveParameterSupport
 	s.caps.tokens = c.TextDocument.SemanticTokens != nil
 	s.caps.tokensRefresh = c.Workspace.SemanticTokens.RefreshSupport
+	s.caps.prepareRename = c.TextDocument.Rename.PrepareSupport
 	// A column is a byte offset wherever the client can count that way;
 	// UTF-16 is what every client can.
 	for _, e := range c.General.PositionEncodings {
@@ -634,6 +650,10 @@ func (s *server) initialize(params json.RawMessage) (any, error) {
 	res.Capabilities.DocumentRangeFormattingProvider = true
 	res.Capabilities.SemanticTokensProvider = &SemanticTokensOptions{Legend: TokenLegend, Range: true}
 	res.Capabilities.SemanticTokensProvider.Full.Delta = true
+	res.Capabilities.RenameProvider = true
+	if s.caps.prepareRename {
+		res.Capabilities.RenameProvider = &RenameOptions{PrepareProvider: true}
+	}
 	if c.TextDocument.CodeAction.CodeActionLiteralSupport != nil {
 		res.Capabilities.CodeActionProvider = &CodeActionOptions{CodeActionKinds: []string{KindQuickFix, KindFixAll}}
 	}

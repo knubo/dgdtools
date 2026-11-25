@@ -97,6 +97,7 @@ highlight lib/obj/a.c 3:1
 <       "range": true,
 <       "full": {"delta": true}
 <     },
+<     "renameProvider": {"prepareProvider": true},
 <     "workspace": {
 <       "workspaceFolders": {"supported": true, "changeNotifications": true},
 <       "textDocumentContent": {"schemes": ["dgdtools-profile"]}

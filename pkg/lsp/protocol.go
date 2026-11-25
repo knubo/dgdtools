@@ -98,7 +98,10 @@ type InitializeParams struct {
 				HierarchicalDocumentSymbolSupport bool `json:"hierarchicalDocumentSymbolSupport"`
 			} `json:"documentSymbol"`
 			SemanticTokens *struct{} `json:"semanticTokens"`
-			SignatureHelp  struct {
+			Rename         struct {
+				PrepareSupport bool `json:"prepareSupport"`
+			} `json:"rename"`
+			SignatureHelp struct {
 				SignatureInformation struct {
 					DocumentationFormat  []string `json:"documentationFormat"`
 					ParameterInformation struct {
@@ -144,7 +147,10 @@ type ServerCapabilities struct {
 	DocumentFormattingProvider      bool                    `json:"documentFormattingProvider"`
 	DocumentRangeFormattingProvider bool                    `json:"documentRangeFormattingProvider"`
 	SemanticTokensProvider          *SemanticTokensOptions  `json:"semanticTokensProvider,omitempty"`
-	Workspace                       struct {
+	// RenameProvider is true, or RenameOptions for a client that asks
+	// before it renames (prepareSupport).
+	RenameProvider any `json:"renameProvider,omitempty"`
+	Workspace      struct {
 		WorkspaceFolders struct {
 			Supported           bool `json:"supported"`
 			ChangeNotifications bool `json:"changeNotifications"`
@@ -330,6 +336,26 @@ type WorkspaceEdit struct {
 type TextDocumentEdit struct {
 	TextDocument VersionedTextDocumentIdentifier `json:"textDocument"`
 	Edits        []TextEdit                      `json:"edits"`
+}
+
+type RenameOptions struct {
+	PrepareProvider bool `json:"prepareProvider"`
+}
+
+type PrepareRenameParams struct {
+	TextDocument TextDocumentIdentifier `json:"textDocument"`
+	Position     Position               `json:"position"`
+}
+
+type PrepareRenameResult struct {
+	Range       Range  `json:"range"`
+	Placeholder string `json:"placeholder"`
+}
+
+type RenameParams struct {
+	TextDocument TextDocumentIdentifier `json:"textDocument"`
+	Position     Position               `json:"position"`
+	NewName      string                 `json:"newName"`
 }
 
 type DefinitionParams struct {
@@ -599,6 +625,7 @@ const (
 	codeInternalError        = -32603
 	codeRequestCancelled     = -32800
 	codeContentModified      = -32801
+	codeRequestFailed        = -32803
 )
 
 // MethodIdle is a request of this server's own, for whoever drives it

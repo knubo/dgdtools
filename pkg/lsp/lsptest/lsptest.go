@@ -200,7 +200,7 @@ type Capabilities struct {
 	// definitions as locations and not as links, hovers and signatures
 	// as plain text, a signature's parameters by their text, an outline
 	// without its hierarchy, completions without snippets, no semantic
-	// tokens.
+	// tokens, a rename without asking first whether it can be made.
 	Plain bool
 	// Options are the initializationOptions.
 	Options any
@@ -234,6 +234,7 @@ func (c *Client) Initialize(caps Capabilities, folders ...string) json.RawMessag
 		td["publishDiagnostics"].(map[string]any)["tagSupport"] = map[string]any{"valueSet": []int{1, 2}}
 		td["hover"] = map[string]any{"contentFormat": []string{lsp.Markdown, lsp.PlainText}}
 		td["documentSymbol"] = map[string]any{"hierarchicalDocumentSymbolSupport": true}
+		td["rename"] = map[string]any{"prepareSupport": true}
 		td["semanticTokens"] = map[string]any{
 			"requests":       map[string]any{"range": true, "full": map[string]any{"delta": true}},
 			"tokenTypes":     lsp.TokenLegend.TokenTypes,

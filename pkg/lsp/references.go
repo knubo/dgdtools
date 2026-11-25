@@ -34,15 +34,7 @@ func (s *server) references(ctx context.Context, p *ReferenceParams) (any, error
 	if ref == nil || len(ref.Defs) == 0 {
 		return nil, nil
 	}
-	switch ref.Kind {
-	case resolve.Local, resolve.Parameter, resolve.Label:
-	default:
-		if snap := d.Snapshot; !snap.Scanned() {
-			scanning, cancel := context.WithTimeout(ctx, scanBudget)
-			snap.Scan(scanning)
-			cancel()
-		}
-	}
+	scanFor(ctx, d, off)
 	refs := d.References(ctx, off, p.Context.IncludeDeclaration)
 	if ctx.Err() != nil {
 		return nil, ctx.Err()

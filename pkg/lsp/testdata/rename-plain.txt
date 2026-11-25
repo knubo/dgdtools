@@ -1,0 +1,83 @@
+Rename for a client that does not ask first, and reads edits without
+versions.
+
+-- lib/dgdtools.yml --
+include_dirs: [/include]
+-- lib/obj/a.c --
+void create() {
+    int n;
+    n = 1;
+}
+-- script --
+initialize plain lib
+open lib/obj/a.c
+rename lib/obj/a.c 2:4 count
+shutdown
+exit
+-- transcript --
+> initialize plain lib
+< {
+<   "capabilities": {
+<     "positionEncoding": "utf-16",
+<     "textDocumentSync": {"openClose": true, "change": 2},
+<     "codeActionProvider": {"codeActionKinds": ["quickfix", "source.fixAll.dgdtools"]},
+<     "completionProvider": {"triggerCharacters": [">", ":", "\"", "/", "<"], "resolveProvider": true},
+<     "definitionProvider": true,
+<     "referencesProvider": true,
+<     "documentHighlightProvider": true,
+<     "hoverProvider": true,
+<     "signatureHelpProvider": {"triggerCharacters": ["(", ","], "retriggerCharacters": [")"]},
+<     "documentSymbolProvider": true,
+<     "workspaceSymbolProvider": true,
+<     "documentFormattingProvider": true,
+<     "documentRangeFormattingProvider": true,
+<     "semanticTokensProvider": {
+<       "legend": {
+<         "tokenTypes": [
+<           "namespace",
+<           "type",
+<           "parameter",
+<           "variable",
+<           "function",
+<           "method",
+<           "macro",
+<           "keyword",
+<           "modifier"
+<         ],
+<         "tokenModifiers": ["declaration", "definition", "static", "defaultLibrary", "inherited", "local", "macro"]
+<       },
+<       "range": true,
+<       "full": {"delta": true}
+<     },
+<     "renameProvider": true,
+<     "workspace": {
+<       "workspaceFolders": {"supported": true, "changeNotifications": true},
+<       "textDocumentContent": {"schemes": ["dgdtools-profile"]}
+<     }
+<   },
+<   "serverInfo": {"name": "dgdtools", "version": "test"}
+< }
+> open lib/obj/a.c
+> rename lib/obj/a.c 2:4 count
+< {
+<   "changes": {
+<     "file://$ROOT/lib/obj/a.c": [
+<       {
+<         "range": {"start": {"line": 1, "character": 8}, "end": {"line": 1, "character": 9}},
+<         "newText": "count"
+<       },
+<       {
+<         "range": {"start": {"line": 2, "character": 4}, "end": {"line": 2, "character": 5}},
+<         "newText": "count"
+<       }
+<     ]
+<   }
+< }
+| void create() {\n
+|     int count;\n
+|     count = 1;\n
+| }\n
+> shutdown
+< null
+> exit
+< "the server exited after shutdown"

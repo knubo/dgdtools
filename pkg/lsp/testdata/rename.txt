@@ -1,0 +1,323 @@
+Rename within a file: a local, a private function (the call_out string
+is no call of it in DGD, and is left, with a message), a private
+variable, a macro the file defines. prepareRename says what is renamed
+there, or why not; a rename that must not be made is an error with the
+reason.
+
+-- lib/dgdtools.yml --
+include_dirs: [/include]
+-- lib/include/std.h --
+#define BASE "/std/base"
+-- lib/std/base.c --
+int weight;
+-- lib/obj/a.c --
+#include <std.h>
+inherit BASE;
+
+#define LIMIT 3
+
+private int count;
+
+private void tick() {
+    int n;
+    for (n = 0; n < LIMIT; n++) {
+        count += n;
+    }
+}
+
+static void start() {
+    tick();
+    call_out("tick", 1);
+}
+-- script --
+initialize lib
+open lib/obj/a.c
+prepare lib/obj/a.c 8:8
+prepare lib/obj/a.c 16:15
+prepare lib/obj/a.c 14:13
+prepare lib/obj/a.c 13:0
+rename lib/obj/a.c 9:9 i
+rename lib/obj/a.c 7:14 step
+received window/showMessage
+rename lib/obj/a.c 5:13 i
+rename lib/obj/a.c 5:13 total
+rename lib/obj/a.c 3:9 MAX
+rename lib/obj/a.c 14:13 begin
+rename lib/obj/a.c 9:9 2x
+rename lib/obj/a.c 9:9 weight
+shutdown
+exit
+-- transcript --
+> initialize lib
+< {
+<   "capabilities": {
+<     "positionEncoding": "utf-16",
+<     "textDocumentSync": {"openClose": true, "change": 2},
+<     "codeActionProvider": {"codeActionKinds": ["quickfix", "source.fixAll.dgdtools"]},
+<     "completionProvider": {"triggerCharacters": [">", ":", "\"", "/", "<"], "resolveProvider": true},
+<     "definitionProvider": true,
+<     "referencesProvider": true,
+<     "documentHighlightProvider": true,
+<     "hoverProvider": true,
+<     "signatureHelpProvider": {"triggerCharacters": ["(", ","], "retriggerCharacters": [")"]},
+<     "documentSymbolProvider": true,
+<     "workspaceSymbolProvider": true,
+<     "documentFormattingProvider": true,
+<     "documentRangeFormattingProvider": true,
+<     "semanticTokensProvider": {
+<       "legend": {
+<         "tokenTypes": [
+<           "namespace",
+<           "type",
+<           "parameter",
+<           "variable",
+<           "function",
+<           "method",
+<           "macro",
+<           "keyword",
+<           "modifier"
+<         ],
+<         "tokenModifiers": ["declaration", "definition", "static", "defaultLibrary", "inherited", "local", "macro"]
+<       },
+<       "range": true,
+<       "full": {"delta": true}
+<     },
+<     "renameProvider": {"prepareProvider": true},
+<     "workspace": {
+<       "workspaceFolders": {"supported": true, "changeNotifications": true},
+<       "textDocumentContent": {"schemes": ["dgdtools-profile"]}
+<     }
+<   },
+<   "serverInfo": {"name": "dgdtools", "version": "test"}
+< }
+> open lib/obj/a.c
+> prepare lib/obj/a.c 8:8
+< {
+<   "range": {"start": {"line": 8, "character": 8}, "end": {"line": 8, "character": 9}},
+<   "placeholder": "n"
+< }
+> prepare lib/obj/a.c 16:15
+< "jsonrpc2: code -32803 message: DGD does not call a private function by name (call_out()): this is not a call of 'tick'; rename it where it is declared or called"
+> prepare lib/obj/a.c 14:13
+< "jsonrpc2: code -32803 message: 'start' is a static function: objects that inherit this one or call it may name it; rename across files comes in a later version"
+> prepare lib/obj/a.c 13:0
+< null
+> rename lib/obj/a.c 9:9 i
+< {
+<   "documentChanges": [
+<     {
+<       "textDocument": {"uri": "file://$ROOT/lib/obj/a.c", "version": 1},
+<       "edits": [
+<         {
+<           "range": {"start": {"line": 8, "character": 8}, "end": {"line": 8, "character": 9}},
+<           "newText": "i"
+<         },
+<         {
+<           "range": {"start": {"line": 9, "character": 9}, "end": {"line": 9, "character": 10}},
+<           "newText": "i"
+<         },
+<         {
+<           "range": {"start": {"line": 9, "character": 16}, "end": {"line": 9, "character": 17}},
+<           "newText": "i"
+<         },
+<         {
+<           "range": {"start": {"line": 9, "character": 27}, "end": {"line": 9, "character": 28}},
+<           "newText": "i"
+<         },
+<         {
+<           "range": {"start": {"line": 10, "character": 17}, "end": {"line": 10, "character": 18}},
+<           "newText": "i"
+<         }
+<       ]
+<     }
+<   ]
+< }
+| #include <std.h>\n
+| inherit BASE;\n
+| \n
+| #define LIMIT 3\n
+| \n
+| private int count;\n
+| \n
+| private void tick() {\n
+|     int i;\n
+|     for (i = 0; i < LIMIT; i++) {\n
+|         count += i;\n
+|     }\n
+| }\n
+| \n
+| static void start() {\n
+|     tick();\n
+|     call_out(\"tick\", 1);\n
+| }\n
+> rename lib/obj/a.c 7:14 step
+< {
+<   "documentChanges": [
+<     {
+<       "textDocument": {"uri": "file://$ROOT/lib/obj/a.c", "version": 2},
+<       "edits": [
+<         {
+<           "range": {"start": {"line": 7, "character": 13}, "end": {"line": 7, "character": 17}},
+<           "newText": "step"
+<         },
+<         {
+<           "range": {"start": {"line": 15, "character": 4}, "end": {"line": 15, "character": 8}},
+<           "newText": "step"
+<         }
+<       ]
+<     }
+<   ]
+< }
+| #include <std.h>\n
+| inherit BASE;\n
+| \n
+| #define LIMIT 3\n
+| \n
+| private int count;\n
+| \n
+| private void step() {\n
+|     int i;\n
+|     for (i = 0; i < LIMIT; i++) {\n
+|         count += i;\n
+|     }\n
+| }\n
+| \n
+| static void start() {\n
+|     step();\n
+|     call_out(\"tick\", 1);\n
+| }\n
+> received window/showMessage
+< {
+<   "message": "rename tick to step: line 17: call_out(\"tick\") cannot reach the private function 'tick' (DGD calls no private function by name), and is left as it is",
+<   "type": 2
+< }
+> rename lib/obj/a.c 5:13 i
+< "jsonrpc2: code -32803 message: at line 11 the renamed variable would be hidden by the local variable 'i' declared at line 9"
+> rename lib/obj/a.c 5:13 total
+< {
+<   "documentChanges": [
+<     {
+<       "textDocument": {"uri": "file://$ROOT/lib/obj/a.c", "version": 3},
+<       "edits": [
+<         {
+<           "range": {"start": {"line": 5, "character": 12}, "end": {"line": 5, "character": 17}},
+<           "newText": "total"
+<         },
+<         {
+<           "range": {"start": {"line": 10, "character": 8}, "end": {"line": 10, "character": 13}},
+<           "newText": "total"
+<         }
+<       ]
+<     }
+<   ]
+< }
+| #include <std.h>\n
+| inherit BASE;\n
+| \n
+| #define LIMIT 3\n
+| \n
+| private int total;\n
+| \n
+| private void step() {\n
+|     int i;\n
+|     for (i = 0; i < LIMIT; i++) {\n
+|         total += i;\n
+|     }\n
+| }\n
+| \n
+| static void start() {\n
+|     step();\n
+|     call_out(\"tick\", 1);\n
+| }\n
+> rename lib/obj/a.c 3:9 MAX
+< {
+<   "documentChanges": [
+<     {
+<       "textDocument": {"uri": "file://$ROOT/lib/obj/a.c", "version": 4},
+<       "edits": [
+<         {
+<           "range": {"start": {"line": 3, "character": 8}, "end": {"line": 3, "character": 13}},
+<           "newText": "MAX"
+<         },
+<         {
+<           "range": {"start": {"line": 9, "character": 20}, "end": {"line": 9, "character": 25}},
+<           "newText": "MAX"
+<         }
+<       ]
+<     }
+<   ]
+< }
+| #include <std.h>\n
+| inherit BASE;\n
+| \n
+| #define MAX 3\n
+| \n
+| private int total;\n
+| \n
+| private void step() {\n
+|     int i;\n
+|     for (i = 0; i < MAX; i++) {\n
+|         total += i;\n
+|     }\n
+| }\n
+| \n
+| static void start() {\n
+|     step();\n
+|     call_out(\"tick\", 1);\n
+| }\n
+> rename lib/obj/a.c 14:13 begin
+< "jsonrpc2: code -32803 message: 'start' is a static function: objects that inherit this one or call it may name it; rename across files comes in a later version"
+> rename lib/obj/a.c 9:9 2x
+< "jsonrpc2: code -32803 message: '2x' is not a name: a name is letters, digits and '_', and does not begin with a digit"
+> rename lib/obj/a.c 9:9 weight
+< {
+<   "documentChanges": [
+<     {
+<       "textDocument": {"uri": "file://$ROOT/lib/obj/a.c", "version": 5},
+<       "edits": [
+<         {
+<           "range": {"start": {"line": 8, "character": 8}, "end": {"line": 8, "character": 9}},
+<           "newText": "weight"
+<         },
+<         {
+<           "range": {"start": {"line": 9, "character": 9}, "end": {"line": 9, "character": 10}},
+<           "newText": "weight"
+<         },
+<         {
+<           "range": {"start": {"line": 9, "character": 16}, "end": {"line": 9, "character": 17}},
+<           "newText": "weight"
+<         },
+<         {
+<           "range": {"start": {"line": 9, "character": 25}, "end": {"line": 9, "character": 26}},
+<           "newText": "weight"
+<         },
+<         {
+<           "range": {"start": {"line": 10, "character": 17}, "end": {"line": 10, "character": 18}},
+<           "newText": "weight"
+<         }
+<       ]
+<     }
+<   ]
+< }
+| #include <std.h>\n
+| inherit BASE;\n
+| \n
+| #define MAX 3\n
+| \n
+| private int total;\n
+| \n
+| private void step() {\n
+|     int weight;\n
+|     for (weight = 0; weight < MAX; weight++) {\n
+|         total += weight;\n
+|     }\n
+| }\n
+| \n
+| static void start() {\n
+|     step();\n
+|     call_out(\"tick\", 1);\n
+| }\n
+> shutdown
+< null
+> exit
+< "the server exited after shutdown"

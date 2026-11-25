@@ -51,6 +51,8 @@ var update = flag.Bool("update", false, "rewrite the transcripts in testdata")
 //	delta FILE [ID]              textDocument/semanticTokens/full/delta
 //	                             from the last tokens of the file (or
 //	                             those of ID), the edits made to them
+//	prepare FILE L:C             textDocument/prepareRename
+//	rename FILE L:C NAME         textDocument/rename, and make the edits
 //	symbols FILE                 textDocument/documentSymbol
 //	find QUERY                   workspace/symbol
 //	text FILE                    the editor's text
@@ -434,6 +436,37 @@ func (p *player) play(script string) string {
 				p.tokens[arg[0]] = sent{got.ResultID, data}
 			}
 			p.out.WriteString(lsptest.DecodeTokens(c.Doc(p.path(arg[0])).Text, data, c.Encoding))
+		case "prepare", "rename":
+			var pos lsp.Position
+			_, err := fmt.Sscanf(arg[1], "%d:%d", &pos.Line, &pos.Character)
+			require.NoError(t, err, line)
+			doc := lsp.TextDocumentIdentifier{URI: lsptest.URI(p.path(arg[0]))}
+			if cmd == "prepare" {
+				var result json.RawMessage
+				if err := c.Call("textDocument/prepareRename", lsp.PrepareRenameParams{TextDocument: doc, Position: pos}, &result); err != nil {
+					p.show(err.Error())
+					break
+				}
+				p.show(result)
+				break
+			}
+			require.Len(t, arg, 3, line)
+			var edit *lsp.WorkspaceEdit
+			if err := c.Call("textDocument/rename", lsp.RenameParams{TextDocument: doc, Position: pos, NewName: arg[2]}, &edit); err != nil {
+				p.show(err.Error())
+				break
+			}
+			p.show(edit)
+			var edits []lsp.TextEdit
+			for _, e := range edit.Changes {
+				edits = append(edits, e...)
+			}
+			for _, dc := range edit.DocumentChanges {
+				require.Equal(t, c.Doc(p.path(arg[0])).Version, dc.TextDocument.Version, "an edit is for the version it was asked for")
+				edits = append(edits, dc.Edits...)
+			}
+			c.Apply(p.path(arg[0]), edits)
+			p.showText(c.Doc(p.path(arg[0])).Text)
 		case "symbols", "find":
 			method, params := "workspace/symbol", any(lsp.WorkspaceSymbolParams{Query: rest})
 			if cmd == "symbols" {

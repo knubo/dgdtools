@@ -56,6 +56,7 @@ exit
 <       "range": true,
 <       "full": {"delta": true}
 <     },
+<     "renameProvider": true,
 <     "workspace": {
 <       "workspaceFolders": {"supported": true, "changeNotifications": true},
 <       "textDocumentContent": {"schemes": ["dgdtools-profile"]}

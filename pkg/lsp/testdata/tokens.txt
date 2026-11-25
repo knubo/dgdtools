@@ -89,6 +89,7 @@ tokens lib/obj/a.c 6:0-7:0
 <       "range": true,
 <       "full": {"delta": true}
 <     },
+<     "renameProvider": {"prepareProvider": true},
 <     "workspace": {
 <       "workspaceFolders": {"supported": true, "changeNotifications": true},
 <       "textDocumentContent": {"schemes": ["dgdtools-profile"]}
