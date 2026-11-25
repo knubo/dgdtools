@@ -10,7 +10,7 @@ Run against a full mudlib, in CI, or inside a single wizard checkout using a mud
 
 | Command | Purpose |
 |---|---|
-| `dgdtools lint` | Catch DGD compile errors and broken runtime calls without false positives |
+| `dgdtools lint` | Catch DGD compile errors and broken runtime calls, without guessing |
 | `dgdtools format` | Whitespace-only formatter (`gofmt` style) that preserves line breaks |
 | `dgdtools rename` | Rename symbols or move files across the mudlib with diff previews |
 | `dgdtools profile` | Build compact `.profile` interface files for partial checkouts |
@@ -72,12 +72,9 @@ For cross-file checks, navigation, and refactoring, add a `dgdtools.yml`:
 
 ```yaml
 root: lib
-dialect:
-  slash_slash: true
-  closures: false
-profile_build:
+driver_config: etc/mud.dgd
+profile_build:               # only needed to publish a profile
   name: mymud
-  driver_config: etc/mud.dgd
   share: ["kernel/**", "lib/**"]
   checkouts: ["usr/*"]
 ```
