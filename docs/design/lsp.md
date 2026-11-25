@@ -816,5 +816,7 @@ Each with the alternative it was chosen over.
 - **One rename engine for the editor and the command line; no
   deprecation machinery** (section 9).
 
-Still to decide: who publishes the VS Code extension to the Marketplace
-and Open VSX.
+- **The VS Code extension is published under the repository owner's
+  account**, to both the Visual Studio Marketplace and Open VSX (so
+  VSCodium and Cursor users get it too), when the client ships. Until
+  then the manifest stays `private` with a placeholder publisher.
