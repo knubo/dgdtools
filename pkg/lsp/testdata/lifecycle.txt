@@ -1,0 +1,191 @@
+The life of a session: nothing before initialize, what the server says it
+can do, a document opened, changed, saved and closed, and the end.
+
+-- lib/dgdtools.yml --
+lint:
+  rules:
+    unused-suppression: warning
+-- lib/obj/a.c --
+void f() {
+    a == 1;
+}
+-- script --
+request textDocument/formatting {"textDocument":{"uri":"file:///nowhere.c"}}
+initialize lib
+request initialize {"capabilities":{}}
+
+open lib/obj/a.c
+diagnostics lib/obj/a.c
+received window/logMessage
+watchers
+
+# An incremental change: the comparison becomes an assignment.
+change lib/obj/a.c 1:6-1:8 "="
+text lib/obj/a.c
+diagnostics lib/obj/a.c
+# A change of the whole text, as a client without ranges sends it.
+replace lib/obj/a.c "void f() {\n    a == 1; /* dgdtools-ignore lint/sscanf-format */\n}\n"
+diagnostics lib/obj/a.c
+save lib/obj/a.c
+diagnostics lib/obj/a.c
+# Closing takes the document's diagnostics away.
+close lib/obj/a.c
+received textDocument/publishDiagnostics
+
+request workspace/symbol {"query":"f"}
+shutdown
+request textDocument/formatting {"textDocument":{"uri":"file:///nowhere.c"}}
+exit
+-- transcript --
+> request textDocument/formatting {"textDocument":{"uri":"file:///nowhere.c"}}
+< "jsonrpc2: code -32002 message: initialize first"
+> initialize lib
+< {
+<   "capabilities": {
+<     "positionEncoding": "utf-16",
+<     "textDocumentSync": {"openClose": true, "change": 2},
+<     "codeActionProvider": {"codeActionKinds": ["quickfix", "source.fixAll.dgdtools"]},
+<     "documentFormattingProvider": true,
+<     "documentRangeFormattingProvider": true,
+<     "workspace": {"workspaceFolders": {"supported": true, "changeNotifications": true}}
+<   },
+<   "serverInfo": {"name": "dgdtools", "version": "test"}
+< }
+> request initialize {"capabilities":{}}
+< "jsonrpc2: code -32600 message: initialize was sent already"
+> open lib/obj/a.c
+> diagnostics lib/obj/a.c
+< {
+<   "uri": "file://$ROOT/lib/obj/a.c",
+<   "version": 1,
+<   "diagnostics": [
+<     {
+<       "range": {"start": {"line": 1, "character": 6}, "end": {"line": 1, "character": 8}},
+<       "severity": 2,
+<       "code": "no-effect-statement",
+<       "codeDescription": {"href": "https://github.com/mmcdole/dgdtools/blob/main/docs/rules.md#no-effect-statement"},
+<       "source": "dgdtools",
+<       "message": "comparison has no effect as a statement (did you mean =?)"
+<     }
+<   ]
+< }
+> received window/logMessage
+< {"message": "project $ROOT/lib/dgdtools.yml: lib $ROOT/lib", "type": 3}
+> watchers
+< [
+<   "**/*.profile",
+<   "**/*.{c,h}",
+<   "**/.dgdtools.yml",
+<   "**/.editorconfig",
+<   "**/dgdtools-baseline.json",
+<   "**/dgdtools.yml"
+< ]
+# An incremental change: the comparison becomes an assignment.
+> change lib/obj/a.c 1:6-1:8 "="
+> text lib/obj/a.c
+| void f() {\n
+|     a = 1;\n
+| }\n
+> diagnostics lib/obj/a.c
+< {"uri": "file://$ROOT/lib/obj/a.c", "version": 2, "diagnostics": []}
+# A change of the whole text, as a client without ranges sends it.
+> replace lib/obj/a.c "void f() {\n    a == 1; /* dgdtools-ignore lint/sscanf-format */\n}\n"
+> diagnostics lib/obj/a.c
+< {
+<   "uri": "file://$ROOT/lib/obj/a.c",
+<   "version": 3,
+<   "diagnostics": [
+<     {
+<       "range": {"start": {"line": 1, "character": 6}, "end": {"line": 1, "character": 8}},
+<       "severity": 2,
+<       "code": "no-effect-statement",
+<       "codeDescription": {"href": "https://github.com/mmcdole/dgdtools/blob/main/docs/rules.md#no-effect-statement"},
+<       "source": "dgdtools",
+<       "message": "comparison has no effect as a statement (did you mean =?)"
+<     },
+<     {
+<       "range": {"start": {"line": 1, "character": 31}, "end": {"line": 1, "character": 49}},
+<       "severity": 2,
+<       "code": "unused-suppression",
+<       "codeDescription": {"href": "https://github.com/mmcdole/dgdtools/blob/main/docs/rules.md#unused-suppression"},
+<       "source": "dgdtools",
+<       "message": "nothing to ignore: no sscanf-format finding on line 2",
+<       "tags": [1]
+<     }
+<   ]
+< }
+> save lib/obj/a.c
+> diagnostics lib/obj/a.c
+< {
+<   "uri": "file://$ROOT/lib/obj/a.c",
+<   "version": 3,
+<   "diagnostics": [
+<     {
+<       "range": {"start": {"line": 1, "character": 6}, "end": {"line": 1, "character": 8}},
+<       "severity": 2,
+<       "code": "no-effect-statement",
+<       "codeDescription": {"href": "https://github.com/mmcdole/dgdtools/blob/main/docs/rules.md#no-effect-statement"},
+<       "source": "dgdtools",
+<       "message": "comparison has no effect as a statement (did you mean =?)"
+<     },
+<     {
+<       "range": {"start": {"line": 1, "character": 31}, "end": {"line": 1, "character": 49}},
+<       "severity": 2,
+<       "code": "unused-suppression",
+<       "codeDescription": {"href": "https://github.com/mmcdole/dgdtools/blob/main/docs/rules.md#unused-suppression"},
+<       "source": "dgdtools",
+<       "message": "nothing to ignore: no sscanf-format finding on line 2",
+<       "tags": [1]
+<     }
+<   ]
+< }
+# Closing takes the document's diagnostics away.
+> close lib/obj/a.c
+> received textDocument/publishDiagnostics
+< {
+<   "diagnostics": [
+<     {
+<       "code": "no-effect-statement",
+<       "codeDescription": {"href": "https://github.com/mmcdole/dgdtools/blob/main/docs/rules.md#no-effect-statement"},
+<       "message": "comparison has no effect as a statement (did you mean =?)",
+<       "range": {"end": {"character": 8, "line": 1}, "start": {"character": 6, "line": 1}},
+<       "severity": 2,
+<       "source": "dgdtools"
+<     }
+<   ],
+<   "uri": "file://$ROOT/lib/obj/a.c",
+<   "version": 1
+< }
+< {"diagnostics": [], "uri": "file://$ROOT/lib/obj/a.c", "version": 2}
+< {
+<   "diagnostics": [
+<     {
+<       "code": "no-effect-statement",
+<       "codeDescription": {"href": "https://github.com/mmcdole/dgdtools/blob/main/docs/rules.md#no-effect-statement"},
+<       "message": "comparison has no effect as a statement (did you mean =?)",
+<       "range": {"end": {"character": 8, "line": 1}, "start": {"character": 6, "line": 1}},
+<       "severity": 2,
+<       "source": "dgdtools"
+<     },
+<     {
+<       "code": "unused-suppression",
+<       "codeDescription": {"href": "https://github.com/mmcdole/dgdtools/blob/main/docs/rules.md#unused-suppression"},
+<       "message": "nothing to ignore: no sscanf-format finding on line 2",
+<       "range": {"end": {"character": 49, "line": 1}, "start": {"character": 31, "line": 1}},
+<       "severity": 2,
+<       "source": "dgdtools",
+<       "tags": [1]
+<     }
+<   ],
+<   "uri": "file://$ROOT/lib/obj/a.c",
+<   "version": 3
+< }
+< {"diagnostics": [], "uri": "file://$ROOT/lib/obj/a.c"}
+> request workspace/symbol {"query":"f"}
+< "jsonrpc2: code -32601 message: no method workspace/symbol"
+> shutdown
+< null
+> request textDocument/formatting {"textDocument":{"uri":"file:///nowhere.c"}}
+< "jsonrpc2: code -32600 message: the server is shut down"
+> exit
+< "the server exited after shutdown"

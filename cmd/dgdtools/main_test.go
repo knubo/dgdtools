@@ -78,7 +78,7 @@ func TestCommands(t *testing.T) {
 	// Help, for the command and for each subcommand.
 	code, out, _ = dgdtools(t, "", "help")
 	assert.Equal(t, 0, code)
-	for _, want := range []string{"lint", "format", "rules", "explain RULE", "config", "profile build", "profile show", "version"} {
+	for _, want := range []string{"lint", "format", "rules", "explain RULE", "config", "profile build", "profile show", "lsp", "version"} {
 		assert.Contains(t, out, want)
 	}
 	for _, sub := range []string{"lint", "format", "rules", "explain", "config", "profile"} {
@@ -101,7 +101,7 @@ func TestCommands(t *testing.T) {
 
 	// The commands of later versions are known by name, say so, and are
 	// not advertised.
-	for _, later := range []string{"lsp", "rename"} {
+	for _, later := range []string{"rename"} {
 		code, out, errs = dgdtools(t, "", later, "x", "y")
 		assert.Equal(t, 2, code)
 		assert.Empty(t, out)

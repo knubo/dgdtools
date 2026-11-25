@@ -6,6 +6,7 @@
 //	dgdtools explain RULE                 describe one rule
 //	dgdtools config [path]                show the project and settings of a path
 //	dgdtools profile build|show           mudlib profiles
+//	dgdtools lsp                          the language server, for an editor
 //	dgdtools version
 //
 // Every subcommand is a thin front end: it parses its flags, reads the
@@ -57,6 +58,7 @@ commands:
   config [path]         show the project and the settings of a path
   profile build         capture the whole lib as a profile
   profile show          summarize a profile, or print one of its stubs
+  lsp                   run the language server, for an editor to talk to
   version               print the version
 
 "dgdtools <command> -h" lists a command's flags.
@@ -75,13 +77,13 @@ var commands = map[string]command{
 	"explain": explainCmd,
 	"config":  configCmd,
 	"profile": profileCmd,
+	"lsp":     lspCmd,
 }
 
 // reserved are the commands of later versions. They are not in the help,
 // which lists what works; they are known here so that whoever asks for
 // one is told what is the matter, and so that the names stay free.
 var reserved = map[string]string{
-	"lsp":    "the language server",
 	"rename": "renaming a symbol across the lib",
 }
 

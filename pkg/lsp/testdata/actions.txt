@@ -1,0 +1,555 @@
+Code actions: the fix a finding carries, the comments that suppress it,
+and every safe fix at once.
+
+-- lib/dgdtools.yml --
+lint:
+  rules:
+    unformatted: info
+-- lib/obj/a.c --
+void f()
+{
+    string s;
+
+    s = "one" "two";
+    s == "x" "y";
+}
+-- script --
+initialize lib
+open lib/obj/a.c
+diagnostics lib/obj/a.c
+
+# On the line of the first finding: its fix, preferred because it is
+# safe, and the two comments.
+actions lib/obj/a.c 4:15-4:15
+# Asked for one kind, the server answers with that kind.
+actions lib/obj/a.c 0:0-7:0 source.fixAll
+apply 0
+diagnostics lib/obj/a.c
+
+# What is left has no fix: it can be suppressed, for the line or the file.
+actions lib/obj/a.c 5:6-5:8 quickfix
+apply 0
+diagnostics lib/obj/a.c
+# A comment that is about the line already takes the next rule too.
+replace lib/obj/a.c "void f()\n{\n    string s;\n\n    /* dgdtools-ignore lint/sscanf-format */\n    s == \"x\" \"y\";\n}\n"
+actions lib/obj/a.c 5:6-5:6 quickfix
+apply 0
+diagnostics lib/obj/a.c
+# For the file: a range from its first line.
+actions lib/obj/a.c 5:13-5:13 quickfix
+apply 2
+diagnostics lib/obj/a.c
+
+shutdown
+exit
+-- transcript --
+> initialize lib
+< {
+<   "capabilities": {
+<     "positionEncoding": "utf-16",
+<     "textDocumentSync": {"openClose": true, "change": 2},
+<     "codeActionProvider": {"codeActionKinds": ["quickfix", "source.fixAll.dgdtools"]},
+<     "documentFormattingProvider": true,
+<     "documentRangeFormattingProvider": true,
+<     "workspace": {"workspaceFolders": {"supported": true, "changeNotifications": true}}
+<   },
+<   "serverInfo": {"name": "dgdtools", "version": "test"}
+< }
+> open lib/obj/a.c
+> diagnostics lib/obj/a.c
+< {
+<   "uri": "file://$ROOT/lib/obj/a.c",
+<   "version": 1,
+<   "diagnostics": [
+<     {
+<       "range": {"start": {"line": 0, "character": 0}, "end": {"line": 0, "character": 0}},
+<       "severity": 3,
+<       "code": "unformatted",
+<       "codeDescription": {"href": "https://github.com/mmcdole/dgdtools/blob/main/docs/rules.md#unformatted"},
+<       "source": "dgdtools",
+<       "message": "file is not formatted (run `dgdtools format`)"
+<     },
+<     {
+<       "range": {"start": {"line": 4, "character": 14}, "end": {"line": 4, "character": 19}},
+<       "severity": 1,
+<       "code": "adjacent-strings",
+<       "codeDescription": {"href": "https://github.com/mmcdole/dgdtools/blob/main/docs/rules.md#adjacent-strings"},
+<       "source": "dgdtools",
+<       "message": "adjacent string literals are a syntax error in DGD; join them with '+'"
+<     },
+<     {
+<       "range": {"start": {"line": 5, "character": 6}, "end": {"line": 5, "character": 8}},
+<       "severity": 2,
+<       "code": "no-effect-statement",
+<       "codeDescription": {"href": "https://github.com/mmcdole/dgdtools/blob/main/docs/rules.md#no-effect-statement"},
+<       "source": "dgdtools",
+<       "message": "comparison has no effect as a statement (did you mean =?)"
+<     },
+<     {
+<       "range": {"start": {"line": 5, "character": 13}, "end": {"line": 5, "character": 16}},
+<       "severity": 1,
+<       "code": "adjacent-strings",
+<       "codeDescription": {"href": "https://github.com/mmcdole/dgdtools/blob/main/docs/rules.md#adjacent-strings"},
+<       "source": "dgdtools",
+<       "message": "adjacent string literals are a syntax error in DGD; join them with '+'"
+<     }
+<   ]
+< }
+# On the line of the first finding: its fix, preferred because it is
+# safe, and the two comments.
+> actions lib/obj/a.c 4:15-4:15
+< [
+<   {
+<     "title": "insert '+' between the strings",
+<     "kind": "quickfix",
+<     "diagnostics": [
+<       {
+<         "range": {"start": {"line": 4, "character": 14}, "end": {"line": 4, "character": 19}},
+<         "severity": 1,
+<         "code": "adjacent-strings",
+<         "codeDescription": {"href": "https://github.com/mmcdole/dgdtools/blob/main/docs/rules.md#adjacent-strings"},
+<         "source": "dgdtools",
+<         "message": "adjacent string literals are a syntax error in DGD; join them with '+'"
+<       }
+<     ],
+<     "isPreferred": true,
+<     "edit": {
+<       "documentChanges": [
+<         {
+<           "textDocument": {"uri": "file://$ROOT/lib/obj/a.c", "version": 1},
+<           "edits": [
+<             {
+<               "range": {"start": {"line": 4, "character": 13}, "end": {"line": 4, "character": 13}},
+<               "newText": " +"
+<             }
+<           ]
+<         }
+<       ]
+<     }
+<   },
+<   {
+<     "title": "Suppress adjacent-strings for this line",
+<     "kind": "quickfix",
+<     "diagnostics": [
+<       {
+<         "range": {"start": {"line": 4, "character": 14}, "end": {"line": 4, "character": 19}},
+<         "severity": 1,
+<         "code": "adjacent-strings",
+<         "codeDescription": {"href": "https://github.com/mmcdole/dgdtools/blob/main/docs/rules.md#adjacent-strings"},
+<         "source": "dgdtools",
+<         "message": "adjacent string literals are a syntax error in DGD; join them with '+'"
+<       }
+<     ],
+<     "edit": {
+<       "documentChanges": [
+<         {
+<           "textDocument": {"uri": "file://$ROOT/lib/obj/a.c", "version": 1},
+<           "edits": [
+<             {
+<               "range": {"start": {"line": 4, "character": 0}, "end": {"line": 4, "character": 0}},
+<               "newText": "    /* dgdtools-ignore lint/adjacent-strings */\n"
+<             }
+<           ]
+<         }
+<       ]
+<     }
+<   },
+<   {
+<     "title": "Suppress adjacent-strings for this file",
+<     "kind": "quickfix",
+<     "diagnostics": [
+<       {
+<         "range": {"start": {"line": 4, "character": 14}, "end": {"line": 4, "character": 19}},
+<         "severity": 1,
+<         "code": "adjacent-strings",
+<         "codeDescription": {"href": "https://github.com/mmcdole/dgdtools/blob/main/docs/rules.md#adjacent-strings"},
+<         "source": "dgdtools",
+<         "message": "adjacent string literals are a syntax error in DGD; join them with '+'"
+<       }
+<     ],
+<     "edit": {
+<       "documentChanges": [
+<         {
+<           "textDocument": {"uri": "file://$ROOT/lib/obj/a.c", "version": 1},
+<           "edits": [
+<             {
+<               "range": {"start": {"line": 0, "character": 0}, "end": {"line": 0, "character": 0}},
+<               "newText": "/* dgdtools-ignore-start lint/adjacent-strings */\n"
+<             }
+<           ]
+<         }
+<       ]
+<     }
+<   },
+<   {
+<     "title": "Fix all safely fixable problems",
+<     "kind": "source.fixAll.dgdtools",
+<     "edit": {
+<       "documentChanges": [
+<         {
+<           "textDocument": {"uri": "file://$ROOT/lib/obj/a.c", "version": 1},
+<           "edits": [
+<             {
+<               "range": {"start": {"line": 4, "character": 13}, "end": {"line": 4, "character": 13}},
+<               "newText": " +"
+<             },
+<             {
+<               "range": {"start": {"line": 5, "character": 12}, "end": {"line": 5, "character": 12}},
+<               "newText": " +"
+<             }
+<           ]
+<         }
+<       ]
+<     }
+<   }
+< ]
+# Asked for one kind, the server answers with that kind.
+> actions lib/obj/a.c 0:0-7:0 source.fixAll
+< [
+<   {
+<     "title": "Fix all safely fixable problems",
+<     "kind": "source.fixAll.dgdtools",
+<     "edit": {
+<       "documentChanges": [
+<         {
+<           "textDocument": {"uri": "file://$ROOT/lib/obj/a.c", "version": 1},
+<           "edits": [
+<             {
+<               "range": {"start": {"line": 4, "character": 13}, "end": {"line": 4, "character": 13}},
+<               "newText": " +"
+<             },
+<             {
+<               "range": {"start": {"line": 5, "character": 12}, "end": {"line": 5, "character": 12}},
+<               "newText": " +"
+<             }
+<           ]
+<         }
+<       ]
+<     }
+<   }
+< ]
+> apply 0
+| void f()\n
+| {\n
+|     string s;\n
+| \n
+|     s = \"one\" + \"two\";\n
+|     s == \"x\" + \"y\";\n
+| }\n
+> diagnostics lib/obj/a.c
+< {
+<   "uri": "file://$ROOT/lib/obj/a.c",
+<   "version": 2,
+<   "diagnostics": [
+<     {
+<       "range": {"start": {"line": 0, "character": 0}, "end": {"line": 0, "character": 0}},
+<       "severity": 3,
+<       "code": "unformatted",
+<       "codeDescription": {"href": "https://github.com/mmcdole/dgdtools/blob/main/docs/rules.md#unformatted"},
+<       "source": "dgdtools",
+<       "message": "file is not formatted (run `dgdtools format`)"
+<     },
+<     {
+<       "range": {"start": {"line": 5, "character": 6}, "end": {"line": 5, "character": 8}},
+<       "severity": 2,
+<       "code": "no-effect-statement",
+<       "codeDescription": {"href": "https://github.com/mmcdole/dgdtools/blob/main/docs/rules.md#no-effect-statement"},
+<       "source": "dgdtools",
+<       "message": "comparison has no effect as a statement (did you mean =?)"
+<     }
+<   ]
+< }
+# What is left has no fix: it can be suppressed, for the line or the file.
+> actions lib/obj/a.c 5:6-5:8 quickfix
+< [
+<   {
+<     "title": "Suppress no-effect-statement for this line",
+<     "kind": "quickfix",
+<     "diagnostics": [
+<       {
+<         "range": {"start": {"line": 5, "character": 6}, "end": {"line": 5, "character": 8}},
+<         "severity": 2,
+<         "code": "no-effect-statement",
+<         "codeDescription": {
+<           "href": "https://github.com/mmcdole/dgdtools/blob/main/docs/rules.md#no-effect-statement"
+<         },
+<         "source": "dgdtools",
+<         "message": "comparison has no effect as a statement (did you mean =?)"
+<       }
+<     ],
+<     "edit": {
+<       "documentChanges": [
+<         {
+<           "textDocument": {"uri": "file://$ROOT/lib/obj/a.c", "version": 2},
+<           "edits": [
+<             {
+<               "range": {"start": {"line": 5, "character": 0}, "end": {"line": 5, "character": 0}},
+<               "newText": "    /* dgdtools-ignore lint/no-effect-statement */\n"
+<             }
+<           ]
+<         }
+<       ]
+<     }
+<   },
+<   {
+<     "title": "Suppress no-effect-statement for this file",
+<     "kind": "quickfix",
+<     "diagnostics": [
+<       {
+<         "range": {"start": {"line": 5, "character": 6}, "end": {"line": 5, "character": 8}},
+<         "severity": 2,
+<         "code": "no-effect-statement",
+<         "codeDescription": {
+<           "href": "https://github.com/mmcdole/dgdtools/blob/main/docs/rules.md#no-effect-statement"
+<         },
+<         "source": "dgdtools",
+<         "message": "comparison has no effect as a statement (did you mean =?)"
+<       }
+<     ],
+<     "edit": {
+<       "documentChanges": [
+<         {
+<           "textDocument": {"uri": "file://$ROOT/lib/obj/a.c", "version": 2},
+<           "edits": [
+<             {
+<               "range": {"start": {"line": 0, "character": 0}, "end": {"line": 0, "character": 0}},
+<               "newText": "/* dgdtools-ignore-start lint/no-effect-statement */\n"
+<             }
+<           ]
+<         }
+<       ]
+<     }
+<   }
+< ]
+> apply 0
+| void f()\n
+| {\n
+|     string s;\n
+| \n
+|     s = \"one\" + \"two\";\n
+|     /* dgdtools-ignore lint/no-effect-statement */\n
+|     s == \"x\" + \"y\";\n
+| }\n
+> diagnostics lib/obj/a.c
+< {
+<   "uri": "file://$ROOT/lib/obj/a.c",
+<   "version": 3,
+<   "diagnostics": [
+<     {
+<       "range": {"start": {"line": 0, "character": 0}, "end": {"line": 0, "character": 0}},
+<       "severity": 3,
+<       "code": "unformatted",
+<       "codeDescription": {"href": "https://github.com/mmcdole/dgdtools/blob/main/docs/rules.md#unformatted"},
+<       "source": "dgdtools",
+<       "message": "file is not formatted (run `dgdtools format`)"
+<     }
+<   ]
+< }
+# A comment that is about the line already takes the next rule too.
+> replace lib/obj/a.c "void f()\n{\n    string s;\n\n    /* dgdtools-ignore lint/sscanf-format */\n    s == \"x\" \"y\";\n}\n"
+> actions lib/obj/a.c 5:6-5:6 quickfix
+< [
+<   {
+<     "title": "Suppress no-effect-statement for this line",
+<     "kind": "quickfix",
+<     "diagnostics": [
+<       {
+<         "range": {"start": {"line": 5, "character": 6}, "end": {"line": 5, "character": 8}},
+<         "severity": 2,
+<         "code": "no-effect-statement",
+<         "codeDescription": {
+<           "href": "https://github.com/mmcdole/dgdtools/blob/main/docs/rules.md#no-effect-statement"
+<         },
+<         "source": "dgdtools",
+<         "message": "comparison has no effect as a statement (did you mean =?)"
+<       }
+<     ],
+<     "edit": {
+<       "documentChanges": [
+<         {
+<           "textDocument": {"uri": "file://$ROOT/lib/obj/a.c", "version": 4},
+<           "edits": [
+<             {
+<               "range": {"start": {"line": 4, "character": 41}, "end": {"line": 4, "character": 41}},
+<               "newText": ", lint/no-effect-statement"
+<             }
+<           ]
+<         }
+<       ]
+<     }
+<   },
+<   {
+<     "title": "Suppress no-effect-statement for this file",
+<     "kind": "quickfix",
+<     "diagnostics": [
+<       {
+<         "range": {"start": {"line": 5, "character": 6}, "end": {"line": 5, "character": 8}},
+<         "severity": 2,
+<         "code": "no-effect-statement",
+<         "codeDescription": {
+<           "href": "https://github.com/mmcdole/dgdtools/blob/main/docs/rules.md#no-effect-statement"
+<         },
+<         "source": "dgdtools",
+<         "message": "comparison has no effect as a statement (did you mean =?)"
+<       }
+<     ],
+<     "edit": {
+<       "documentChanges": [
+<         {
+<           "textDocument": {"uri": "file://$ROOT/lib/obj/a.c", "version": 4},
+<           "edits": [
+<             {
+<               "range": {"start": {"line": 0, "character": 0}, "end": {"line": 0, "character": 0}},
+<               "newText": "/* dgdtools-ignore-start lint/no-effect-statement */\n"
+<             }
+<           ]
+<         }
+<       ]
+<     }
+<   }
+< ]
+> apply 0
+| void f()\n
+| {\n
+|     string s;\n
+| \n
+|     /* dgdtools-ignore lint/sscanf-format, lint/no-effect-statement */\n
+|     s == \"x\" \"y\";\n
+| }\n
+> diagnostics lib/obj/a.c
+< {
+<   "uri": "file://$ROOT/lib/obj/a.c",
+<   "version": 5,
+<   "diagnostics": [
+<     {
+<       "range": {"start": {"line": 0, "character": 0}, "end": {"line": 0, "character": 0}},
+<       "severity": 3,
+<       "code": "unformatted",
+<       "codeDescription": {"href": "https://github.com/mmcdole/dgdtools/blob/main/docs/rules.md#unformatted"},
+<       "source": "dgdtools",
+<       "message": "file is not formatted (run `dgdtools format`)"
+<     },
+<     {
+<       "range": {"start": {"line": 5, "character": 13}, "end": {"line": 5, "character": 16}},
+<       "severity": 1,
+<       "code": "adjacent-strings",
+<       "codeDescription": {"href": "https://github.com/mmcdole/dgdtools/blob/main/docs/rules.md#adjacent-strings"},
+<       "source": "dgdtools",
+<       "message": "adjacent string literals are a syntax error in DGD; join them with '+'"
+<     }
+<   ]
+< }
+# For the file: a range from its first line.
+> actions lib/obj/a.c 5:13-5:13 quickfix
+< [
+<   {
+<     "title": "insert '+' between the strings",
+<     "kind": "quickfix",
+<     "diagnostics": [
+<       {
+<         "range": {"start": {"line": 5, "character": 13}, "end": {"line": 5, "character": 16}},
+<         "severity": 1,
+<         "code": "adjacent-strings",
+<         "codeDescription": {"href": "https://github.com/mmcdole/dgdtools/blob/main/docs/rules.md#adjacent-strings"},
+<         "source": "dgdtools",
+<         "message": "adjacent string literals are a syntax error in DGD; join them with '+'"
+<       }
+<     ],
+<     "isPreferred": true,
+<     "edit": {
+<       "documentChanges": [
+<         {
+<           "textDocument": {"uri": "file://$ROOT/lib/obj/a.c", "version": 5},
+<           "edits": [
+<             {
+<               "range": {"start": {"line": 5, "character": 12}, "end": {"line": 5, "character": 12}},
+<               "newText": " +"
+<             }
+<           ]
+<         }
+<       ]
+<     }
+<   },
+<   {
+<     "title": "Suppress adjacent-strings for this line",
+<     "kind": "quickfix",
+<     "diagnostics": [
+<       {
+<         "range": {"start": {"line": 5, "character": 13}, "end": {"line": 5, "character": 16}},
+<         "severity": 1,
+<         "code": "adjacent-strings",
+<         "codeDescription": {"href": "https://github.com/mmcdole/dgdtools/blob/main/docs/rules.md#adjacent-strings"},
+<         "source": "dgdtools",
+<         "message": "adjacent string literals are a syntax error in DGD; join them with '+'"
+<       }
+<     ],
+<     "edit": {
+<       "documentChanges": [
+<         {
+<           "textDocument": {"uri": "file://$ROOT/lib/obj/a.c", "version": 5},
+<           "edits": [
+<             {
+<               "range": {"start": {"line": 4, "character": 67}, "end": {"line": 4, "character": 67}},
+<               "newText": ", lint/adjacent-strings"
+<             }
+<           ]
+<         }
+<       ]
+<     }
+<   },
+<   {
+<     "title": "Suppress adjacent-strings for this file",
+<     "kind": "quickfix",
+<     "diagnostics": [
+<       {
+<         "range": {"start": {"line": 5, "character": 13}, "end": {"line": 5, "character": 16}},
+<         "severity": 1,
+<         "code": "adjacent-strings",
+<         "codeDescription": {"href": "https://github.com/mmcdole/dgdtools/blob/main/docs/rules.md#adjacent-strings"},
+<         "source": "dgdtools",
+<         "message": "adjacent string literals are a syntax error in DGD; join them with '+'"
+<       }
+<     ],
+<     "edit": {
+<       "documentChanges": [
+<         {
+<           "textDocument": {"uri": "file://$ROOT/lib/obj/a.c", "version": 5},
+<           "edits": [
+<             {
+<               "range": {"start": {"line": 0, "character": 0}, "end": {"line": 0, "character": 0}},
+<               "newText": "/* dgdtools-ignore-start lint/adjacent-strings */\n"
+<             }
+<           ]
+<         }
+<       ]
+<     }
+<   }
+< ]
+> apply 2
+| /* dgdtools-ignore-start lint/adjacent-strings */\n
+| void f()\n
+| {\n
+|     string s;\n
+| \n
+|     /* dgdtools-ignore lint/sscanf-format, lint/no-effect-statement */\n
+|     s == \"x\" \"y\";\n
+| }\n
+> diagnostics lib/obj/a.c
+< {
+<   "uri": "file://$ROOT/lib/obj/a.c",
+<   "version": 6,
+<   "diagnostics": [
+<     {
+<       "range": {"start": {"line": 0, "character": 0}, "end": {"line": 0, "character": 0}},
+<       "severity": 3,
+<       "code": "unformatted",
+<       "codeDescription": {"href": "https://github.com/mmcdole/dgdtools/blob/main/docs/rules.md#unformatted"},
+<       "source": "dgdtools",
+<       "message": "file is not formatted (run `dgdtools format`)"
+<     }
+<   ]
+< }
+> shutdown
+< null
+> exit
+< "the server exited after shutdown"
