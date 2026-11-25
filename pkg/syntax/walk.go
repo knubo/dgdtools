@@ -1,5 +1,7 @@
 package syntax
 
+import "slices"
+
 // Inspect walks the tree rooted at n in source order, calling fn for each
 // node. If fn returns false the node's children are skipped.
 func Inspect(n Node, fn func(Node) bool) {
@@ -147,4 +149,36 @@ func Inspect(n Node, fn func(Node) bool) {
 			Inspect(a, fn)
 		}
 	}
+}
+
+// PathAt returns the nodes whose tokens include the one at index tok of
+// the file's tokens (token.File.TokenAt), the innermost first and the
+// file last: the way Inspect goes down to the token. A name that is part
+// of a node and no node of its own (the callee of a CallExpr, the name of
+// a FuncDecl or of an ArrowExpr, a label) is found in the innermost node,
+// by its own span. A token that is not in the tree (a comment, a
+// directive, code in a branch that is not compiled, what the parser
+// skipped) has the nodes around it, the file at least.
+func PathAt(f *File, tok int) []Node {
+	path := []Node{f}
+	for at := Node(f); at != nil; {
+		parent := at
+		at = nil
+		// Of two children that both have the token (a statement that is
+		// missing has the span of what comes next) the later is the one.
+		Inspect(parent, func(n Node) bool {
+			if n == parent {
+				return true
+			}
+			if first, last := n.Span(); first <= tok && tok <= last {
+				at = n
+			}
+			return false
+		})
+		if at != nil {
+			path = append(path, at)
+		}
+	}
+	slices.Reverse(path)
+	return path
 }

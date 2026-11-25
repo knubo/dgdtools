@@ -17,6 +17,7 @@
 package pp
 
 import (
+	"bytes"
 	"strings"
 
 	"github.com/mmcdole/dgdtools/pkg/lexer"
@@ -67,6 +68,7 @@ type Macro struct {
 	Class    Class
 	Path     string // file containing the definition
 	Off      uint32 // byte offset of the directive in that file
+	NameOff  uint32 // byte offset of the name in that file
 	// Undefined is set when the file #undef'd the name after this
 	// definition and did not define it again: it is a macro for only part
 	// of the file, and its Class is ClassFragment.
@@ -173,6 +175,46 @@ func CleanDirective(text []byte) string {
 		}
 	}
 	return b.String()
+}
+
+// ArgOffset returns the offset in a directive's text of what follows the
+// directive's name (the macro's name in a #define, the target of an
+// #include): the first byte after it that is not blank, in a comment or
+// a line continuation. It is len(text) when nothing follows.
+func ArgOffset(text []byte) int {
+	i := skipBlank(text, 0)
+	if i < len(text) && text[i] == '#' {
+		i = skipBlank(text, i+1)
+	}
+	for i < len(text) && text[i] >= 'a' && text[i] <= 'z' {
+		i++
+	}
+	return skipBlank(text, i)
+}
+
+// skipBlank returns the offset of the first byte of text at or after i
+// that CleanDirective would not make a space of or drop.
+func skipBlank(text []byte, i int) int {
+	for i < len(text) {
+		switch c := text[i]; {
+		case c == ' ' || c == '\t' || c == '\v' || c == '\f':
+			i++
+		case c == '\\' && i+1 < len(text) && (text[i+1] == '\n' || text[i+1] == '\r'):
+			i += 2
+			if text[i-1] == '\r' && i < len(text) && text[i] == '\n' {
+				i++
+			}
+		case c == '/' && i+1 < len(text) && text[i+1] == '*':
+			end := bytes.Index(text[i+2:], []byte("*/"))
+			if end < 0 {
+				return len(text)
+			}
+			i += 2 + end + 2
+		default:
+			return i
+		}
+	}
+	return i
 }
 
 func needsCleaning(text []byte) bool {

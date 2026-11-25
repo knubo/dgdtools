@@ -117,6 +117,26 @@ func (e *Env) Lookup(name string) *Macro {
 	return found
 }
 
+// Definition returns the #define that name has at the end of the
+// environment: the latest one read, the file's own before those of the
+// files it includes and of the files read before it. Unlike Lookup it
+// says where the name is defined and not what the parser is to take it
+// for: a class the project configures for the name does not hide the
+// definition, and two definitions that disagree are not made one. It is
+// nil when no file read defines the name: it is no macro, or one the
+// driver or the project defines.
+func (e *Env) Definition(name string) *Macro {
+	if e == nil {
+		return nil
+	}
+	var found *Macro
+	e.tables(func(t *Table) bool {
+		found = t.Macros[name]
+		return found == nil
+	})
+	return found
+}
+
 // state reports what name is at the end of the environment as it stands,
 // which during a Scan is the directive being read: whether it is defined,
 // the definition when a file gave one (nil for a predefined or configured
@@ -387,6 +407,7 @@ func (e *Env) scan(f *token.File, include func(Include), take map[int]bool) *Sel
 				continue
 			}
 			m.Path, m.Off = f.Path, tok.Off
+			m.NameOff = tok.Off + uint32(ArgOffset(f.Text(tok)))
 			if old := t.Macros[m.Name]; old != nil && !old.Undefined &&
 				(old.Class != m.Class || old.FuncLike != m.FuncLike) {
 				m.Class = ClassFragment // conflicting definitions: trust neither

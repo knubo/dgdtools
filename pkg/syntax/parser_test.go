@@ -347,3 +347,71 @@ func TestNeverPanics(t *testing.T) {
 		}
 	}
 }
+
+// PathAt: the nodes around a token, innermost first.
+func TestPathAt(t *testing.T) {
+	src := `inherit base "/std/" + "room";
+int a, b;
+void f(int p) {
+	int local;
+	if (a) base::g(p, "x"->h(b + 1));
+	else
+		;
+	#if 0
+	dead(a);
+	#endif
+}
+`
+	f := parse(src, true)
+	path := func(at string) string {
+		cursor := strings.IndexByte(at, '|')
+		needle := at[:cursor] + at[cursor+1:]
+		require.Equal(t, 1, strings.Count(src, needle), at)
+		off := strings.Index(src, needle) + cursor
+		var out []string
+		for _, n := range PathAt(f, f.Tok.TokenAt(uint32(off))) {
+			out = append(out, strings.TrimPrefix(fmt.Sprintf("%T", n), "*syntax."))
+		}
+		return strings.Join(out, " ")
+	}
+	for at, want := range map[string]string{
+		"inherit ba|se": "InheritDecl File",
+		"\"/st|d/\"":    "BasicLit BinaryExpr InheritDecl File",
+		"\"ro|om\"":     "BasicLit BinaryExpr InheritDecl File",
+		"int a, |b":     "Declarator VarDecl File",
+		"i|nt a":        "VarDecl File",
+		"void |f(":      "FuncDecl File",
+		"int |p)":       "Param FuncDecl File",
+		"int lo|cal":    "Declarator VarDecl DeclStmt BlockStmt FuncDecl File",
+		"if (|a)":       "Ident IfStmt BlockStmt FuncDecl File",
+		"ba|se::g":      "CallExpr ExprStmt IfStmt BlockStmt FuncDecl File",
+		"base::|g":      "CallExpr ExprStmt IfStmt BlockStmt FuncDecl File",
+		"g(|p,":         "Ident CallExpr ExprStmt IfStmt BlockStmt FuncDecl File",
+		"\"|x\"->":      "BasicLit ArrowExpr CallExpr ExprStmt IfStmt BlockStmt FuncDecl File",
+		"->|h(":         "ArrowExpr CallExpr ExprStmt IfStmt BlockStmt FuncDecl File",
+		"h(|b + 1":      "Ident BinaryExpr ArrowExpr CallExpr ExprStmt IfStmt BlockStmt FuncDecl File",
+		"b |+ 1":        "BinaryExpr ArrowExpr CallExpr ExprStmt IfStmt BlockStmt FuncDecl File",
+		"el|se":         "IfStmt BlockStmt FuncDecl File",
+		"else\n\t\t|;":  "EmptyStmt IfStmt BlockStmt FuncDecl File",
+		"de|ad(a)":      "BlockStmt FuncDecl File",
+		"#if| 0":        "BlockStmt FuncDecl File",
+		"int a, b;|\n":  "File",
+		"#endif\n}|\n":  "File",
+	} {
+		assert.Equal(t, want, path(at), "at %q", at)
+	}
+	// Any token of any file has a path, and the file ends it.
+	for _, src := range []string{"", "void f() { if (x) }", "int ;;; void g( {", "#if 1\nvoid f() {\n#else\n}\n#endif\n"} {
+		f := parse(src, true)
+		for i := range f.Tok.Tokens {
+			p := PathAt(f, i)
+			require.NotEmpty(t, p)
+			assert.Same(t, f, p[len(p)-1])
+			for _, n := range p {
+				first, last := n.Span()
+				assert.True(t, first <= i && i <= last, "%q: token %d in %T", src, i, n)
+			}
+		}
+		assert.Equal(t, len(f.Tok.Tokens)-1, f.Tok.TokenAt(uint32(len(src))+7))
+	}
+}

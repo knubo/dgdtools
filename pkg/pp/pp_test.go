@@ -1,10 +1,12 @@
 package pp
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/mmcdole/dgdtools/pkg/lexer"
 	"github.com/mmcdole/dgdtools/pkg/token"
@@ -368,6 +370,55 @@ func TestLookup(t *testing.T) {
 	env.Complete = true
 	_, known := env.Defined("nope")
 	assert.True(t, known, "complete: a name defined nowhere is not defined")
+}
+
+// Where a name is defined, which is not what the parser takes it for:
+// the latest #define read, whatever class is configured and whatever
+// another file says.
+func TestDefinition(t *testing.T) {
+	texts := map[string]string{
+		"inc.h":  "#define NAME 1\n#define CLASH 1\n#define GONE 1\n",
+		"base.h": "#define CLASH { }\n#define FORCED 2\n",
+		"t.c":    "#undef NAME\n#  define /* mine */ NAME \"mine\"\n#define \\\n  LOCAL(a, b) 1\n#undef GONE\n#define\tTAB\n",
+	}
+	read := func(env *Env, path string) *Table {
+		env.Scan(lexer.Lex(path, []byte(texts[path]), lexer.Default), nil)
+		return env.Own()
+	}
+	env := NewEnv(map[string]bool{"__DGD__": true}, map[string]Class{"FORCED": ClassStatement, "ONLY": ClassType})
+	env.Add(read(NewEnv(nil, nil), "base.h"), read(NewEnv(nil, nil), "inc.h"))
+	read(env, "t.c")
+
+	// The file and line of the definition, and what is at the name.
+	at := func(m *Macro) string {
+		require.NotNil(t, m)
+		text := texts[m.Path]
+		assert.Equal(t, byte('#'), text[m.Off])
+		return fmt.Sprintf("%s:%d %s", m.Path, 1+strings.Count(text[:m.NameOff], "\n"), text[m.NameOff:int(m.NameOff)+len(m.Name)])
+	}
+	assert.Equal(t, "t.c:2 NAME", at(env.Definition("NAME")), "the file's own, at the name and not at the #")
+	assert.Equal(t, "t.c:4 LOCAL", at(env.Definition("LOCAL")), "a name on the line after a continuation")
+	assert.Equal(t, "t.c:6 TAB", at(env.Definition("TAB")))
+	assert.Equal(t, "inc.h:2 CLASH", at(env.Definition("CLASH")), "the later of two files")
+	assert.Equal(t, "base.h:2 FORCED", at(env.Definition("FORCED")), "a configured class hides no definition")
+	assert.Equal(t, "inc.h:3 GONE", at(env.Definition("GONE")), "an #undef is no definition")
+	assert.Nil(t, env.Definition("ONLY"), "configured, and defined by no file")
+	assert.Nil(t, env.Definition("__DGD__"))
+	assert.Nil(t, env.Definition("nope"))
+	assert.Nil(t, (*Env)(nil).Definition("NAME"))
+
+	for text, want := range map[string]string{
+		"#include <a.h>":             "<a.h>",
+		"#  include\t\"a.h\" // x":   "\"a.h\" // x",
+		"#define/* c */ X 1":         "X 1",
+		"# /* c */ if \\\r\n  X":     "X",
+		"#endif":                     "",
+		"#define /* never closed  X": "",
+		"#":                          "",
+		"":                           "",
+	} {
+		assert.Equal(t, want, text[ArgOffset([]byte(text)):], "%q", text)
+	}
 }
 
 func TestEvalString(t *testing.T) {

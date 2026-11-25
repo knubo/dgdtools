@@ -114,6 +114,12 @@ func (s *Snapshot) exists(p string) bool {
 	return s.isFile.getOrPut(p, func() bool { return is })
 }
 
+// ReadFile returns the text of the file at p, a path on disk or the
+// location of a stub, as the index reads it now: an editor's buffer, the
+// disk, a profile's stub. It is what the offsets of a declaration found
+// in this generation count in, as long as the generation is current.
+func (s *Snapshot) ReadFile(p string) ([]byte, error) { return s.fs.ReadFile(s.clean(p)) }
+
 // locate returns where libFile (a lib path with its extension) is read
 // from: the checkout for the directory it holds, else the lib on disk,
 // else a profile's stub. The second result lists the places on disk where

@@ -40,6 +40,7 @@ import (
 	"github.com/mmcdole/dgdtools/pkg/format"
 	"github.com/mmcdole/dgdtools/pkg/index"
 	"github.com/mmcdole/dgdtools/pkg/pp"
+	"github.com/mmcdole/dgdtools/pkg/resolve"
 	"github.com/mmcdole/dgdtools/pkg/syntax"
 	"github.com/mmcdole/dgdtools/pkg/token"
 	"github.com/mmcdole/dgdtools/pkg/vfs"
@@ -339,7 +340,17 @@ type Document struct {
 	// each. Their findings are missing; everything else stands.
 	Errors []*FileError
 
-	stats fileStats
+	stats    fileStats
+	registry *calls.Registry
+}
+
+// Resolve says what the token at byte offset off of the document refers
+// to, in the lib as the document's diagnostics saw it: resolve.At, of
+// the document. It is nil when that is nothing the tools can name.
+func (d *Document) Resolve(off uint32) *resolve.Ref {
+	return resolve.At(resolve.File{
+		Tok: d.File, Tree: d.Tree, Env: d.Env, Unit: d.Unit, Snapshot: d.Snapshot, Registry: d.registry,
+	}, off)
 }
 
 // Linter lints one project. It is safe for concurrent use.
@@ -650,6 +661,7 @@ func (l *Linter) lintFile(ctx context.Context, s *index.Snapshot, file string, s
 	doc = &Document{
 		Path: file, Snapshot: s, Generation: s.Generation(),
 		File: parsed.Tok, Tree: parsed.Tree, Env: parsed.Env, Unit: u,
+		registry: l.registry,
 	}
 	rel, _ := l.project.Tree().Rel(file) // the file's lib-relative name
 	rules, err := sel.rules(file, rel, set)

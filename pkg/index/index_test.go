@@ -1236,3 +1236,32 @@ func TestMemo(t *testing.T) {
 	assert.Equal(t, 7, next.load("slow", func() int { return 7 }, nil), "the next generation computes its own")
 	assert.Equal(t, 1, m.load("slow", func() int { return 99 }, nil), "and the old one keeps its own")
 }
+
+// What a front end asks beside the lookups: the auto object's functions
+// by name, and the text a generation's offsets count in.
+func TestAutoFuncAndReadFile(t *testing.T) {
+	l := newLib(t, map[string]string{"obj/a.c": "void f() { }\n"})
+	s := l.ix.Snapshot()
+	fn, ok := s.AutoFunc("hidden_auto")
+	require.True(t, ok)
+	assert.Equal(t, "/lib/sys/auto.c", fn.Path)
+	assert.True(t, fn.Static)
+	text, err := s.ReadFile(fn.Path)
+	require.NoError(t, err)
+	assert.Equal(t, "hidden_auto", string(text[fn.Off:fn.Off+11]))
+	_, ok = s.AutoFunc("f")
+	assert.False(t, ok)
+
+	// A buffer is the file, as for everything else the index reads.
+	l.set(t, "obj/a.c", "void g() { }\n")
+	text, err = l.ix.Snapshot().ReadFile("/lib/obj/../obj/a.c")
+	require.NoError(t, err)
+	assert.Equal(t, "void g() { }\n", string(text))
+	_, err = s.ReadFile("/lib/obj/none.c")
+	assert.Error(t, err)
+
+	// Without a lib there is no auto object.
+	none := New(&config.Config{}, Layout{}, vfs.Mem{})
+	_, ok = none.Snapshot().AutoFunc("anything")
+	assert.False(t, ok)
+}

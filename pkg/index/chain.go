@@ -142,6 +142,14 @@ func (s *Snapshot) autoState() *autoState {
 	})
 }
 
+// AutoFunc returns the function called name that the configured auto
+// objects give every object, when they have one. Its DefinedIn is not a
+// lib path; the declaration's own location (Loc.Path) is where it is.
+func (s *Snapshot) AutoFunc(name string) (ChainFunc, bool) {
+	f, ok := s.autoState().funcs[name]
+	return f, ok
+}
+
 // usersOf returns the objects whose program includes libPath's: those
 // that inherit it, however indirectly, and those that #include it as
 // code. It needs the whole-lib scan and runs it if it has not completed.
