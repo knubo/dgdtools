@@ -99,16 +99,12 @@ func TestCommands(t *testing.T) {
 	assert.Equal(t, 0, code)
 	assert.Equal(t, out, out2)
 
-	// The commands of later versions are known by name, say so, and are
-	// not advertised.
-	for _, later := range []string{"rename"} {
-		code, out, errs = dgdtools(t, "", later, "x", "y")
-		assert.Equal(t, 2, code)
-		assert.Empty(t, out)
-		assert.Contains(t, errs, "dgdtools "+later+": ")
-		assert.Contains(t, errs, "is not part of this version")
-		assert.NotContains(t, usage, later+" ")
-	}
+	// rename is a command like the others: advertised, and its usage
+	// without its arguments.
+	assert.Contains(t, usage, "rename SYMBOL NEW")
+	code, _, errs = dgdtools(t, "", "rename", "x")
+	assert.Equal(t, 2, code)
+	assert.Contains(t, errs, "dgdtools rename: want SYMBOL and NEW")
 }
 
 func TestRulesAndExplain(t *testing.T) {

@@ -6,6 +6,7 @@
 //	dgdtools explain RULE                 describe one rule
 //	dgdtools config [path]                show the project and settings of a path
 //	dgdtools profile build|show           mudlib profiles
+//	dgdtools rename [flags] SYMBOL NEW    rename across the mudlib
 //	dgdtools lsp                          the language server, for an editor
 //	dgdtools version
 //
@@ -58,6 +59,7 @@ commands:
   config [path]         show the project and the settings of a path
   profile build         capture the whole mudlib as a profile
   profile show          summarize a profile, or print one of its stubs
+  rename SYMBOL NEW     rename a function, variable or macro across the mudlib
   lsp                   run the language server, for an editor to talk to
   version               print the version
 
@@ -78,13 +80,7 @@ var commands = map[string]command{
 	"config":  configCmd,
 	"profile": profileCmd,
 	"lsp":     lspCmd,
-}
-
-// reserved are the commands of later versions. They are not in the help,
-// which lists what works; they are known here so that whoever asks for
-// one is told what is the matter, and so that the names stay free.
-var reserved = map[string]string{
-	"rename": "renaming a symbol across the mudlib",
+	"rename":  renameCmd,
 }
 
 func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) int {
@@ -106,10 +102,6 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	}
 	if cmd := commands[name]; cmd != nil {
 		return cmd(ctx, rest, stdin, stdout, stderr)
-	}
-	if what, ok := reserved[name]; ok {
-		fmt.Fprintf(stderr, "dgdtools %s: %s is not part of this version (%s)\n", name, what, version)
-		return 2
 	}
 	fmt.Fprintf(stderr, "dgdtools: unknown command %q\n\n%s", name, usage)
 	return 2
