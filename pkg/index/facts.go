@@ -27,6 +27,11 @@ type FuncInfo struct {
 	// PrototypeOnly marks a declared-but-never-defined function: DGD
 	// compiles these fine and raises "Undefined function" at call time.
 	PrototypeOnly bool
+	// Refused says DGD refuses the program's declarations of the name:
+	// one is private and another is not ("declaration does not match
+	// prototype"), or one is private and nomask ("private contradicts
+	// nomask"). Whether the function is private is then moot.
+	Refused bool
 	// MinArgs/MaxArgs bound the accepted argument count. MaxArgs -1 means
 	// unbounded (trailing ellipsis).
 	MinArgs, MaxArgs int
@@ -239,12 +244,16 @@ func sortFuncs(fs []FuncInfo) []FuncInfo {
 	out := fs[:0]
 	for i := 0; i < len(fs); {
 		j, pick := i, i
+		refused := false
 		for ; j < len(fs) && fs[j].Name == fs[i].Name; j++ {
 			if fs[pick].PrototypeOnly && !fs[j].PrototypeOnly {
 				pick = j
 			}
+			refused = refused || fs[j].Private != fs[i].Private || fs[j].Private && fs[j].Nomask
 		}
-		out = append(out, fs[pick])
+		f := fs[pick]
+		f.Refused = f.Refused || refused
+		out = append(out, f)
 		i = j
 	}
 	return slices.Clone(out)

@@ -92,6 +92,43 @@ var ruleStaticCrossObj = &Rule{
 	},
 }
 
+var rulePrivateCallback = &Rule{
+	Code: "R007", Name: "private-callback", Group: GroupRuntime,
+	Doc: "callback by name (call_out, a registrar of the lib) to a private function, which DGD never calls",
+	Explain: "call_out(\"fn\") and every callback the lib's registrars make by name " +
+		"(conventions.call_registry) find the function in the object's table of " +
+		"functions, and DGD leaves private functions out of that table, and the " +
+		"functions of an object inherited privately: the callback silently never " +
+		"happens. A static function is what such a callback can reach and no other " +
+		"object can call. Reported only when the receiver is this_object() and the " +
+		"name is a string constant, and when the name is private in the object's " +
+		"whole inherit chain, as known in full, and in every object that inherits " +
+		"or includes the file; not in a partial checkout or in the auto object. " +
+		"The ->fn and call_other forms are static-crossobj's. There is no fix: " +
+		"making the function static is what is usually meant, but a function that " +
+		"is no longer private redefines and clashes with the functions of that " +
+		"name of the objects it is inherited with, which only its author can weigh.",
+	Default: true, Severity: diag.Error, CrossFile: true, CompiledOnly: true,
+	Run: func(p *Pass) {
+		for _, c := range p.calls().Named {
+			if c.Kind != calls.SelfCallback || c.Target != calls.TargetSelf {
+				continue
+			}
+			fn, inherited, ok := p.Index.PrivateOnly(p.Ctx, c.Func)
+			if !ok {
+				continue
+			}
+			how := "private in " + fn.DefinedIn
+			if inherited {
+				how = "inherited privately from " + fn.DefinedIn
+			}
+			d := p.Report(c.Start, c.End, "%s() never calls '%s', which is %s: DGD calls no private function by name",
+				c.Via, c.Func, how)
+			d.Related = definedAt(fn, c.Func, "defined here")
+		}
+	},
+}
+
 var ruleUndefinedPrototype = &Rule{
 	Code: "R003", Name: "undefined-prototype", Group: GroupRuntime,
 	Doc: "function declared but never defined anywhere in the chain, and called",

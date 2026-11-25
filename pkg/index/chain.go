@@ -531,3 +531,105 @@ func (s *Snapshot) providedByUsers(ctx context.Context, libPath, fn string, user
 	}
 	return false
 }
+
+// symbolState says what a call by name finds in an object's table of
+// functions (DGD's symbol table, which call_out, call_other and every
+// callback search): a function that is not private, nothing, or that it
+// cannot be told.
+type symbolState uint8
+
+const (
+	symNone    symbolState = iota // no function of the name is in the table
+	symFound                      // a function that is not private is
+	symUnknown                    // some program of the chain is not known in full
+)
+
+// PrivateOnly reports whether a call by name of fn made on this_object()
+// in the file itself (call_out("fn"), a registrar's callback) finds
+// nothing but a private function: DGD's table of functions, which such
+// a call searches, has no private function in it (Control::makeSymbols),
+// nor any function of an object inherited privately, and a private
+// redefinition of an inherited function leaves the inherited one there.
+// It returns the private function the file's chain has under the name,
+// and whether it is private there because it is inherited privately.
+//
+// It reports false whenever that is not certain: the chain or one of the
+// objects that inherit or include the file (as which this_object() may
+// run) is not known in full, has a function of the name that is not
+// private or declarations of it that DGD refuses (FuncInfo.Refused), or
+// cannot be listed; the file is part of the auto object, or
+// the auto object has a function of the name; the lib is a partial
+// checkout, whose inheritors elsewhere cannot be seen.
+func (q *Query) PrivateOnly(ctx context.Context, fn string) (f ChainFunc, inherited, ok bool) {
+	s, libPath := q.s, q.unit.LibPath
+	if !s.HasLib() || s.partial || libPath == "" || ctx.Err() != nil {
+		return ChainFunc{}, false, false
+	}
+	cf, found := q.chain(libPath).Funcs[fn]
+	if !found || !cf.Private || cf.Refused {
+		return ChainFunc{}, false, false
+	}
+	auto := s.autoState()
+	if _, has := auto.funcs[fn]; has || auto.unseen || auto.members[libPath] {
+		return ChainFunc{}, false, false
+	}
+	memo := map[string]symbolState{}
+	if s.inSymbols(libPath, fn, memo) != symNone {
+		return ChainFunc{}, false, false
+	}
+	users, known := q.usersOf(ctx, libPath)
+	if !known {
+		return ChainFunc{}, false, false
+	}
+	for _, u := range users {
+		if ctx.Err() != nil || s.inSymbols(u, fn, memo) != symNone {
+			return ChainFunc{}, false, false
+		}
+	}
+	if u := s.Unit(cf.DefinedIn); u != nil {
+		if own, has := u.Func(fn); has && !own.Private {
+			inherited = true
+		}
+	}
+	return *cf, inherited, true
+}
+
+// inSymbols says what a call by name of fn finds in the table of functions
+// of the object at libPath: its own functions that are not private, and
+// those of what it inherits that are not inherited privately. memo holds
+// the answers of the programs already seen; one inherited twice is read
+// once, and a cycle is unknown.
+func (s *Snapshot) inSymbols(libPath, fn string, memo map[string]symbolState) symbolState {
+	if r, ok := memo[libPath]; ok {
+		return r
+	}
+	memo[libPath] = symUnknown
+	u := s.Unit(libPath)
+	if u == nil || u.Partial || u.Stub {
+		return symUnknown
+	}
+	if f, ok := u.Func(fn); ok && f.Refused {
+		return symUnknown
+	} else if ok && !f.Private {
+		memo[libPath] = symFound
+		return symFound
+	}
+	r := symNone
+	for _, ref := range u.Inherits {
+		switch {
+		case !ref.Resolved:
+			r = symUnknown
+		case ref.Private:
+			// Not in the table, whatever the object has.
+		default:
+			if sub := s.inSymbols(ref.Path, fn, memo); sub != symNone {
+				r = sub
+			}
+		}
+		if r == symFound {
+			break
+		}
+	}
+	memo[libPath] = r
+	return r
+}

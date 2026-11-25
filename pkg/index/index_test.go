@@ -1146,6 +1146,51 @@ func TestQueryWithoutScan(t *testing.T) {
 	assert.Equal(t, LookupFoundInUser, q.LookupCallable(bg, "/std/mod", "nope", true).State, "without NoScan the query scans")
 }
 
+// PrivateOnly: what a call by name finds in DGD's table of functions,
+// over the whole chain and every object the file's code may run as, and
+// a file that asked is told when an inheritor changes the answer.
+func TestPrivateOnly(t *testing.T) {
+	l := newLib(t, map[string]string{
+		"std/pub.c":  "void tick() { }\n",
+		"std/mod.c":  "private void tick() { }\n",
+		"obj/leaf.c": "inherit \"/std/mod\";\n",
+		"obj/prv.c":  "private inherit \"/std/pub\";\n",
+		"obj/prv2.c": "private inherit \"/std/pub\";\n",
+		"obj/diam.c": "inherit \"/std/pub\";\ninherit \"/obj/prv\";\nprivate void tock() { }\n",
+		"obj/hid.c":  "private void hidden_auto() { }\n",
+	})
+	privateOnly := func(lib, fn string) (string, bool, bool) {
+		s := l.ix.Snapshot()
+		f, inherited, ok := s.Query(s.Unit(lib), false).PrivateOnly(bg, fn)
+		return f.DefinedIn, inherited, ok
+	}
+	in, inh, ok := privateOnly("/std/mod", "tick")
+	assert.True(t, ok)
+	assert.Equal(t, "/std/mod", in)
+	assert.False(t, inh)
+	_, inh, ok = privateOnly("/obj/prv2", "tick")
+	assert.True(t, ok, "inherited privately")
+	assert.True(t, inh)
+	_, _, ok = privateOnly("/obj/prv", "tick")
+	assert.False(t, ok, "an inheritor has it, inherited not privately")
+	_, _, ok = privateOnly("/obj/diam", "tick")
+	assert.False(t, ok, "inherited both privately and not")
+	_, _, ok = privateOnly("/obj/diam", "tock")
+	assert.True(t, ok)
+	_, _, ok = privateOnly("/std/pub", "tick")
+	assert.False(t, ok, "not private")
+	_, _, ok = privateOnly("/obj/leaf", "nowhere")
+	assert.False(t, ok, "no function of the name")
+	_, _, ok = privateOnly("/obj/hid", "hidden_auto")
+	assert.False(t, ok, "the auto object has one")
+
+	// An inheritor that has it: this_object() may be that one.
+	assert.Contains(t, l.set(t, "obj/leaf.c", "inherit \"/std/mod\";\nvoid tick() { }\n"), "/lib/std/mod.c",
+		"the file that asked is told")
+	_, _, ok = privateOnly("/std/mod", "tick")
+	assert.False(t, ok)
+}
+
 // --------------------------------------------------------- partial libs
 
 func TestStubsAndCheckout(t *testing.T) {
@@ -1155,7 +1200,7 @@ func TestStubsAndCheckout(t *testing.T) {
 		"stub://lib/sys/auto.c":    "string object_name() {}\n",
 	}
 	disk := vfs.Mem{
-		"/home/ann/hall.c":       "#include <std.h>\n#include \"mine.h\"\ninherit ROOM;\nvoid f() { }\n",
+		"/home/ann/hall.c":       "#include <std.h>\n#include \"mine.h\"\ninherit ROOM;\nvoid f() { }\nprivate void p() { }\n",
 		"/home/ann/mine.h":       "#define MINE 1\n",
 		"/home/ann/sub/closet.c": "inherit \"/players/ann/hall\";\n",
 	}
@@ -1207,10 +1252,15 @@ func TestStubsAndCheckout(t *testing.T) {
 	lk = s.lookupCallable(bg, "/players/ann/sub/closet", "nowhere", true, s.usersOf, s.Chain)
 	assert.Equal(t, LookupMissing, lk.State)
 	assert.Equal(t, SearchedCheckout, lk.Searched)
+
+	// A private function of the checkout: an inheritor elsewhere may have
+	// the name, and a call by name would find it.
+	_, _, ok = s.Query(s.Unit("/players/ann/hall"), false).PrivateOnly(bg, "p")
+	assert.False(t, ok)
 }
 
 func TestRealFileWinsOverStub(t *testing.T) {
-	disk := vfs.Mem{"/lib/obj/a.c": "inherit \"/std/room\";\n", "/lib/keep": ""}
+	disk := vfs.Mem{"/lib/obj/a.c": "inherit \"/std/room\";\nprivate void mine() { }\n", "/lib/keep": ""}
 	stubs := vfs.Mem{"stub://lib/std/room.c": "void from_stub() {}\n"}
 	ov := vfs.NewOverlay(unionFS{disk, stubs})
 	ix := New(&config.Config{}, Layout{Tree: fileset.Tree{Root: "/lib"}, Stubs: "stub://lib"}, ov)
@@ -1218,6 +1268,8 @@ func TestRealFileWinsOverStub(t *testing.T) {
 	s := ix.Snapshot()
 	assert.Contains(t, s.Chain("/obj/a").Funcs, "from_stub")
 	assert.True(t, s.Unit("/std/room").Stub)
+	_, _, ok := s.Query(s.Unit("/obj/a"), false).PrivateOnly(bg, "mine")
+	assert.False(t, ok, "a stub lists the public functions only")
 
 	ov.Set("/lib/std/room.c", []byte("void from_disk() { }\n"))
 	assert.Equal(t, []string{"/lib/obj/a.c", "/lib/std/room.c"}, ix.Invalidate("/lib/std/room.c"))

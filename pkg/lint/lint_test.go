@@ -637,6 +637,105 @@ static void create() {
 	assert.Empty(t, got)
 }
 
+// A callback by name never reaches a private function: DGD leaves
+// private functions out of the table call_out and the registrars search.
+// Reported only when that is so in the whole chain and in every object
+// the code may run as.
+func TestPrivateCallback(t *testing.T) {
+	files := map[string]string{
+		"std/priv.c":    "private void tick() { }\nvoid shown() { }\n",
+		"std/pub.c":     "void tick() { }\n",
+		"std/stat.c":    "static void tick() { }\n",
+		"std/redef.c":   "inherit \"/std/pub\";\nprivate void tick() { }\nvoid f() { call_out(\"tick\", 1); }\n",
+		"std/hidden.c":  "private inherit \"/std/pub\";\nvoid f() { call_out(\"tick\", 1); }\n",
+		"std/both.c":    "inherit \"/std/pub\";\ninherit \"/std/priv\";\nvoid f() { call_out(\"tick\", 1); }\n",
+		"std/base2.c":   "private void tick() { }\nvoid f() { call_out(\"tick\", 1); }\n",
+		"obj/leaf2.c":   "inherit \"/std/base2\";\nvoid tick() { }\n",
+		"std/base3.c":   "private void tick() { }\nvoid f() { call_out(\"tick\", 1); }\n",
+		"obj/leaf3.c":   "inherit \"/std/base3\";\nvoid other() { }\n",
+		"std/base4.c":   "private void tick() { }\nvoid f() { call_out(\"tick\", 1); }\n",
+		"obj/leaf4.c":   "inherit \"/std/base4\";\ninherit \"/std/nowhere\";\n",
+		"std/broken.c":  "void tick() { }\nint lost( { return 2; }\n",
+		"std/partial.c": "inherit \"/std/broken\";\nprivate void tick() { }\nvoid f() { call_out(\"tick\", 1); }\n",
+		"std/unequal.c": "void tick();\nprivate void tick() { }\nvoid f() { call_out(\"tick\", 1); }\n",
+		"std/nomask.c":  "nomask private void tick() { }\nvoid f() { call_out(\"tick\", 1); }\n",
+	}
+	sel := lint.Request{Options: lint.Options{Select: []string{"private-callback"}}}
+	lintAt := func(file string, extra map[string]string) []string {
+		t.Helper()
+		all := map[string]string{}
+		for k, v := range files {
+			all[k] = v
+		}
+		for k, v := range extra {
+			all[k] = v
+		}
+		prj, m := memProject(all)
+		prj.Config.Conventions.CallRegistry = map[string]profile.CallForms{"store_fp": {{Function: 0}}}
+		req := sel
+		req.Paths = []string{"/lib/" + file}
+		var out []string
+		for _, d := range run(t, prj, m, req).Diagnostics {
+			out = append(out, fmt.Sprintf("%d:%d %s", d.Line, d.Col, d.Message))
+		}
+		return out
+	}
+
+	// Its own private function, by call_out and by a registrar of the lib;
+	// the -> and call_other forms are static-crossobj's.
+	got := lintAt("obj/t.c", map[string]string{"obj/t.c": "private void tick() { }\nvoid f() {\n call_out(\"tick\", 1);\n store_fp(\"tick\");\n this_object()->tick();\n call_other(this_object(), \"tick\");\n}\n"})
+	assert.Equal(t, []string{
+		"3:11 call_out() never calls 'tick', which is private in /obj/t: DGD calls no private function by name",
+		"4:11 store_fp() never calls 'tick', which is private in /obj/t: DGD calls no private function by name",
+	}, got)
+
+	// A private function of a parent, and one inherited privately.
+	got = lintAt("obj/t.c", map[string]string{"obj/t.c": "inherit \"/std/priv\";\nvoid f() { call_out(\"tick\", 1); call_out(\"shown\", 1); }\n"})
+	assert.Equal(t, []string{"2:21 call_out() never calls 'tick', which is private in /std/priv: DGD calls no private function by name"}, got)
+	got = lintAt("std/hidden.c", nil)
+	assert.Equal(t, []string{"2:21 call_out() never calls 'tick', which is inherited privately from /std/pub: DGD calls no private function by name"}, got)
+
+	// Each with a related location at the definition.
+	prj, m := memProject(files)
+	res := run(t, prj, m, lint.Request{Paths: []string{"/lib/std/base3.c"}, Options: lint.Options{Select: []string{"private-callback"}}})
+	require.Len(t, res.Diagnostics, 1)
+	require.Len(t, res.Diagnostics[0].Related, 1)
+	assert.Equal(t, 1, res.Diagnostics[0].Related[0].Line)
+	assert.Equal(t, "R007", res.Diagnostics[0].Code)
+
+	for name, file := range map[string]string{
+		"a static function is reached":                           "obj/t.c",
+		"a private redefinition leaves the inherited function":   "std/redef.c",
+		"another inherited object has it not private":            "std/both.c",
+		"an inheritor has it, and this_object() may be that one": "std/base2.c",
+		"an inheritor's chain is not known in full":              "std/base4.c",
+		"the file's own chain is not known in full":              "std/partial.c",
+		"DGD refuses a prototype that is not private":            "std/unequal.c",
+		"DGD refuses private and nomask":                         "std/nomask.c",
+	} {
+		extra := map[string]string{"obj/t.c": "private void tick() { }\nstatic void tock() { }\nvoid f() { call_out(\"tock\", 1); }\n"}
+		assert.Empty(t, lintAt(file, extra), name)
+	}
+	assert.Len(t, lintAt("std/base3.c", nil), 1, "inheritors that do not have it")
+
+	// A name made at run time, or a receiver that is not this_object().
+	src := "private void tick() { }\nvoid f(string s, object ob) {\n call_out(s, 1);\n call_out(\"ti\" + \"ck\", 1);\n store_fp(s);\n ob->tick();\n}\n"
+	assert.Empty(t, lintAt("obj/t.c", map[string]string{"obj/t.c": src}))
+
+	// The auto object has a function of the name; code of the auto object.
+	got = lintAt("obj/t.c", map[string]string{
+		"sys/auto.c": "string object_name() { return \"x\"; }\nvoid tick() { }\n",
+		"obj/t.c":    "private void tick() { }\nvoid f() { call_out(\"tick\", 1); }\n",
+	})
+	assert.Empty(t, got)
+	got = lintAt("sys/auto.c", map[string]string{"sys/auto.c": "private void tick() { }\nvoid f() { call_out(\"tick\", 1); }\n"})
+	assert.Empty(t, got)
+
+	// A suppression comment, as for every rule.
+	got = lintAt("obj/t.c", map[string]string{"obj/t.c": "private void tick() { }\nvoid f() {\n call_out(\"tick\", 1); // dgdtools-ignore lint/private-callback\n}\n"})
+	assert.Empty(t, got)
+}
+
 // Code that is part of the auto object runs as every object in the lib,
 // so a self-call there proves nothing about any one object.
 func TestAutoObjectSelfCallsAreUnknown(t *testing.T) {

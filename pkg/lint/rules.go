@@ -20,7 +20,7 @@ func Rules() []*Rule {
 		ruleParamType, ruleReturnValue,
 
 		ruleCallableNotFound, ruleStaticCrossObj, ruleUndefinedPrototype,
-		ruleTargetObjectMissing, ruleCallbackArity, ruleLifecycleChain,
+		ruleTargetObjectMissing, ruleCallbackArity, ruleLifecycleChain, rulePrivateCallback,
 
 		ruleAssignInCondition, ruleNoEffect, ruleSscanfFormat, ruleUnreachable,
 		ruleInvalidSuppression,
