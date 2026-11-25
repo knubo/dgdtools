@@ -341,8 +341,10 @@ func (p *printer) layout(gap []token.Token, next int, resumed, tail bool) {
 	var pendingNl []token.Token // their tokens, for byte preservation
 	var lastSpace []byte        // space run immediately before a comment
 	wroteComment := resumed
-	// A line is begun already when the rows before are kept.
-	fresh := p.buf.Len() > 0 && p.buf.Bytes()[p.buf.Len()-1] == '\n'
+	// A line is begun already when the rows before are kept: they end
+	// with a line break, which may be a carriage return by itself (the
+	// lexer's, and DGD's outside a string).
+	fresh := p.buf.Len() > 0 && endsLine(p.buf.Bytes())
 
 	flushNewlines := func() {
 		if pending == 0 {
@@ -963,9 +965,17 @@ func isBlank(b []byte) bool {
 	return true
 }
 
-// lineLen returns the length in bytes of the last (current) line of buf.
+// endsLine reports whether buf ends with a line break: \n, \r\n or a
+// carriage return by itself, as the lexer has them.
+func endsLine(buf []byte) bool {
+	c := buf[len(buf)-1]
+	return c == '\n' || c == '\r'
+}
+
+// lineLen returns the length in bytes of the last (current) line of buf,
+// which a line break of any of the lexer's kinds begins.
 func lineLen(buf []byte) int {
-	if i := bytes.LastIndexByte(buf, '\n'); i >= 0 {
+	if i := bytes.LastIndexAny(buf, "\r\n"); i >= 0 {
 		return len(buf) - i - 1
 	}
 	return len(buf)

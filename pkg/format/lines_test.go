@@ -155,6 +155,17 @@ func TestLinesFollowTheFile(t *testing.T) {
 	assert.Equal(t, want, fmtLines(t, in, Options{}, LineRange{7, 7}, LineRange{9, 9}))
 }
 
+func TestLinesLoneCR(t *testing.T) {
+	// A carriage return by itself ends a line (the lexer's and DGD's
+	// rule outside a string). When the line break kept before a
+	// selected line is one, the line is indented as any other, not run
+	// on from the kept one: "{\r ::create();" was the bug.
+	in := "void create() {\r    ::create();\r\r\n    x = 1;\r}\r"
+	assert.Equal(t, in, fmtLines(t, in, Options{}, LineRange{2, 3}))
+	messy := "void create() {\r::create();\r\r\n    x = 1;\r}\r"
+	assert.Equal(t, in, fmtLines(t, messy, Options{}, LineRange{2, 2}))
+}
+
 func TestLinesAndSkipMarkers(t *testing.T) {
 	in := "int   a;\n/* dgdtools-ignore-start format */\nint   b;\n/* dgdtools-ignore-end format */\nint   c;\n"
 	assert.Equal(t, "int   a;\n/* dgdtools-ignore-start format */\nint   b;\n/* dgdtools-ignore-end format */\nint c;\n", fmtLines(t, in, Options{}, LineRange{3, 5}))
@@ -208,12 +219,15 @@ func TestLinesEveryRange(t *testing.T) {
 		"void f() {\n  foreach(x in y)\n  {\n     z();\n  }\n   if (a) b(); else\n  c();\n}\n\n\n\nint g() { return 1; }   \n",
 		"mapping m;\nvoid\nf()\n{\n\tm = ([ \"a\" : 1,\n\t       \"b\" : 2, ]);   /* trailing\n\t\t\t\t    comment */\n\treturn;\n}\n",
 		"int a;\r\nvoid f() {\r\n  a=1;\r\n}\r\n",
+		// Old Mac line endings, a carriage return by itself, mixed with
+		// the others as a file edited on three systems has them.
+		"inherit I_ROOM;\r\rstatic void create() {\r    ::create();   \r\r\n  set_light(1);\r\tx=2;\n}\r",
 	}
 	for _, src := range samples {
 		f := lexer.Lex("t.c", []byte(src), lexer.Default)
 		whole, err := Format(f, Options{})
 		require.NoError(t, err)
-		n := strings.Count(src, "\n") + 1
+		n := len(f.Lines)
 		all, err := Lines(f, Options{}, []LineRange{{1, n}})
 		require.NoError(t, err)
 		assert.Equal(t, string(whole), string(all))
@@ -235,7 +249,7 @@ func TestLinesEveryRange(t *testing.T) {
 		}
 		// Formatting a formatted file by ranges changes nothing.
 		g := lexer.Lex("t.c", whole, lexer.Default)
-		m := strings.Count(string(whole), "\n") + 1
+		m := len(g.Lines)
 		for a := 1; a <= m; a++ {
 			out, err := Lines(g, Options{}, []LineRange{{a, min(a+2, m)}})
 			require.NoError(t, err)
