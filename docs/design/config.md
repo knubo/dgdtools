@@ -296,12 +296,9 @@ dgdtools version
 - **`lsp`** is the language server ([lsp.md](lsp.md)): the protocol on
   standard input and output, `--log FILE` and `--trace` for a log, exit
   code 1 when the editor went away without the protocol's shutdown.
-- **Reserved:** `rename` (semantic rename), planned in
-  [lsp.md](lsp.md), is a name the dispatcher knows and answers with
-  "not part of this version" and exit 2. It is not in the help: help lists what
-  works. Reserving it means a script written for a newer
-  version gets a precise message, and no later command has to work
-  around a squatter.
+- **`rename`** is the semantic rename and file move
+  ([lsp.md](lsp.md) section 9), the same engine the editor's rename
+  uses.
 - **No token-comparison or token-dump command.** Comparing two files'
   significant tokens is the formatter's gate and runs on every file it
   formats; a token dump for lexer debugging is better done by a test or

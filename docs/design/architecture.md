@@ -243,7 +243,7 @@ The kernel functions are data too. `pkg/kfun` has those of stock DGD,
 read out of the driver's source (`dgd.kfuns`, held to it by a test);
 what the extension modules of a mud's driver add is that mud's to say,
 as prototypes in `dialect.kfuns`, which its profile carries
-([lsp.md](lsp.md) section 8, "As built, step 5"). An editor's hover and
+([lsp.md](lsp.md) section 8.4). An editor's hover and
 signature help read the table; no rule does yet.
 
 ## 3. Project root and configuration discovery
@@ -557,7 +557,7 @@ is what a long-lived server needs.
 
 **Memory.** What a server holds is the index: a unit for each file of
 the lib (its functions and variables, inherits, include closure and the
-Uses references are found by, [lsp.md](lsp.md) section 8, step 8), the chains it has flattened, the
+Uses references are found by, [lsp.md](lsp.md) section 8.7), the chains it has flattened, the
 reverse edges for invalidation. `TestCorpusMemory` (`pkg/lsp`, `-tags
 corpus`) measures it on the VikingMUD lib (108,115 objects, 110,086
 files with headers, 12 CPUs): the server alone in the process, the
@@ -565,7 +565,7 @@ whole-lib scan, then an editor's session over 300 files (open, semantic
 tokens, five hovers and completions, an edit and its undo, close) and
 the references of `add_item` (140,161 places) and `set_short` (58,631);
 the heap after a collection at both points, the peak resident size, and
-with `$DGDTOOLS_PPROF` heap profiles for pprof. Before step 8's Uses the
+with `$DGDTOOLS_PPROF` heap profiles for pprof. Before the reverse index's Uses the
 heap at the end of a session was some 357 MB; they took it to 586. The
 profiles showed the Uses (125 MB in records of 28 bytes), the units'
 maps of functions (a map of one function is a group of eight slots of
@@ -576,7 +576,7 @@ order:
 
 | change | heap after scan | after session | in use, session | peak RSS | scan |
 |---|---|---|---|---|---|
-| before (step 9) | 537 MB | 586 MB | 890 MB | 1.8 GB | 3.0 s |
+| before | 537 MB | 586 MB | 890 MB | 1.8 GB | 3.0 s |
 | functions and variables in sorted slices | 456 | 508 | 790 | 1.7 | 3.0 |
 | a Use in 16 bytes | 403 | 455 | 690 | 1.4 | 3.1 |
 | one string per include path; no slack | 322 | 373 | 610 | 1.3 | 3.1 |
@@ -874,8 +874,8 @@ Described in [lsp.md](lsp.md): a thin layer, `pkg/lsp` behind the
 `dgdtools lsp` subcommand, holding one `session.Session`. Diagnostics,
 code actions, formatting, go to definition, hover, signature help,
 symbols, completion, references and highlights, semantic tokens,
-rename, in a file and across the lib, and the refactorings of step 12
-(a file moved, a missing prototype, a missing file's path) are built.
+rename, in a file and across the lib, and the refactorings ([lsp.md](lsp.md)
+section 9: a file moved, a missing prototype, a missing file's path) are built.
 What it maps onto:
 
 | LSP feature | Maps onto |
@@ -884,15 +884,15 @@ What it maps onto:
 | `textDocument/publishDiagnostics` | `Session.Lint` for the changed document, debounced, with the previous lint cancelled through its context, published when `Session.Current(doc)`. A change returns the dependents; those that are open are linted again. `Diagnostic.code` = rule code, `codeDescription` = `Rule.URL`, `relatedInformation` = `Related` (a range), `tags` = `Tags`, positions via `diag.UTF16Col` and `diag.ByteCol`. |
 | `workspace/didChangeWatchedFiles` | `Session.DiskChanged(paths...)`: sources, directories, and every kind of configuration file alike. |
 | `textDocument/codeAction` | `Fixes` on the diagnostics in range (quick-fix edits), the path of the one file of a missing `#include`'s or object's name (`lint.Document.PathFixes`, over `index.Snapshot.FilesNamed`), the "suppress with `dgdtools-ignore lint/RULE`" actions of `lint.Suppress`, and the prototype of a function called before the file defines it (`Document.Prototype`, a `refactor.rewrite`). |
-| `textDocument/definition` | `Document.Resolve(off)`, which is `pkg/resolve` on the document: the token at the offset as a `Ref` (what it names: the file of an `#include`, the object of an `inherit` or of a path argument, a label, a function, a global variable, a parameter or local in scope (`syntax.Scope`), a macro) and its `Defs`, the declarations it resolves to through `ResolveInclude`, `ObjectFile`, `Snapshot.Chain` (functions and variables; `::` and `label::` calls), `AutoFunc`, the receivers `pkg/calls` knows (`->`, `call_other`, the registrars' callbacks) and the file's `pp.Env` (`Definition`). Each `Def` has the file, the range of the declared name and the index's facts (`FuncInfo`, `VarInfo`, `pp.Macro`); a declaration in a profile stub is at `dgdtools-profile://NAME/std/room.c`. What cannot be proved has no `Def` ([lsp.md](lsp.md) section 8). |
+| `textDocument/definition` | `Document.Resolve(off)`, which is `pkg/resolve` on the document: the token at the offset as a `Ref` (what it names: the file of an `#include`, the object of an `inherit` or of a path argument, a label, a function, a global variable, a parameter or local in scope (`syntax.Scope`), a macro) and its `Defs`, the declarations it resolves to through `ResolveInclude`, `ObjectFile`, `Snapshot.Chain` (functions and variables; `::` and `label::` calls), `AutoFunc`, the receivers `pkg/calls` knows (`->`, `call_other`, the registrars' callbacks) and the file's `pp.Env` (`Definition`). Each `Def` has the file, the range of the declared name and the index's facts (`FuncInfo`, `VarInfo`, `pp.Macro`); a declaration in a profile stub is at `dgdtools-profile://NAME/std/room.c`. What cannot be proved has no `Def` ([lsp.md](lsp.md) section 8.3). |
 | `textDocument/hover` | `Document.Hover(off)`: the `Ref` of the place and an `Info` for each of its `Defs`, with the declaration as LPC (`FuncInfo.Decl`, a variable's type, a macro's `#define` and class), the comment directly above it (`resolve.Comment`, in the text `Snapshot.ReadFile` gives) and where it is (`Origin`: the file's name in the lib and the line, the auto object, a profile). A function of the driver's is told from the project's kfun table (`Config.Kfuns`: `pkg/kfun` and `dialect.kfuns`), where the whole program is known; a call whose receiver is unknown is told as that. |
 | `textDocument/signatureHelp` | `Document.Signature(off)`: the innermost call whose arguments the offset is in, read from the tokens left of it (`pp.Selection.Sig`), so that it is there while the statement does not parse; the callee resolved as for a definition (`Chain`, `AutoFunc`, the kfun table, a receiver that is `this_object()` or a constant path, the arguments a `calls.Registry` form passes on); each declaration with its parameters' places in it (`index.ParamSpans`) and the one the argument is for. |
 | `textDocument/documentSymbol` | `Document.Symbols()`: the file's inherit statements, functions, global variables and `#define`s in the order they stand (`syntax.File.Decls`, the directives the preprocessor reads), each with its detail and the ranges of the declaration and of its name. |
 | `workspace/symbol` | `Snapshot.FindSymbols(query, limit)`: the functions and variables in the units' symbol tables and the macros of the headers read, matched by `internal/fuzzy`, the best first; the whole lib after `Snapshot.Scan`, and a profile's stubs in a partial checkout (`Layout.StubFiles`). |
 | `textDocument/completion` | `Document.Complete(off)`: where the cursor is, read from the compiled tokens left of it, and what fits there: the parameters and locals in scope (`syntax.Scope`), the object's globals and callable functions (`Chain`, `AutoFuncs`), the macros in view (`pp.Env.Names`), the kfuns where a call by name is known to reach one, keywords; after `::`/`label::` the inherited functions; after `->` and in a registrar's string the functions of a receiver that is `this_object()` or a constant path, nothing for another; `#include` and `inherit` paths (`Snapshot.IncludeEntries`, `ObjectEntries`, on disk and in a profile's stubs). `Document.Comment(path, off)` is an item's comment, read when it is asked for. |
 | `textDocument/formatting`, `rangeFormatting` | `format.Source(prj, path, text, lines)`, a function of the buffer and the file's settings; `format.Edits` for the reply. |
-| `textDocument/prepareRename`, `rename` | `Document.PrepareRename(ctx, off)` and `Document.Rename(ctx, off, name, force)`, which are `pkg/rename` on the document: the symbol at the offset or the reason it is not renamed (`rename.Refusal`, `Forcible` for a variable `save_object` writes). What one file decides (a local, a parameter, a private function or variable, an inherit label, a macro the file defines) is planned in the file (`resolve.Resolver.At` for each identifier of the name, `syntax.Scope`, the code that does not parse, the branches not compiled); anything else across the lib, from the reverse index: the Uses of the old name in every unit (`Snapshot.UseUnits`, `Unit.Uses`), each looked up where it is (`Resolver.Lookup`) against the declarations renamed (a function's family of redefinitions, joined through `Unit.Func`, the chains of what each object inherits and the auto object), calls on unknown receivers as possible, the files edited read again (`Snapshot.Parse`) for the checks of the new name, the chains of the objects that see the symbol (`ChainFunc`, `ChainVar`), who includes a header and who inherits a file (`Snapshot.Includers`, `Users`). The server turns the plan into one `WorkspaceEdit` for every file, the possible edits under change annotations; `dgdtools rename` into diffs or writes ([lsp.md](lsp.md) section 8, "As built, step 11"). |
-| `workspace/willRenameFiles` | `rename.Files(ctx, snapshot, moves)`: the Uses of kind `UseObject` and `UseInclude` that name a moved file, the calls made in a moved object by its path (`Unit.UsesWith`), and the moved files' own, each rewritten as written and resolved as it will be (`Snapshot.ResolveIncludeIf`, `ObjectPath`); a path made by a macro possible. The server's `WorkspaceEdit` of the files as they are; `dgdtools rename FILE NEW` the diffs, or writes and moves ([lsp.md](lsp.md) section 8, "As built, step 12"). |
+| `textDocument/prepareRename`, `rename` | `Document.PrepareRename(ctx, off)` and `Document.Rename(ctx, off, name, force)`, which are `pkg/rename` on the document: the symbol at the offset or the reason it is not renamed (`rename.Refusal`, `Forcible` for a variable `save_object` writes). What one file decides (a local, a parameter, a private function or variable, an inherit label, a macro the file defines) is planned in the file (`resolve.Resolver.At` for each identifier of the name, `syntax.Scope`, the code that does not parse, the branches not compiled); anything else across the lib, from the reverse index: the Uses of the old name in every unit (`Snapshot.UseUnits`, `Unit.Uses`), each looked up where it is (`Resolver.Lookup`) against the declarations renamed (a function's family of redefinitions, joined through `Unit.Func`, the chains of what each object inherits and the auto object), calls on unknown receivers as possible, the files edited read again (`Snapshot.Parse`) for the checks of the new name, the chains of the objects that see the symbol (`ChainFunc`, `ChainVar`), who includes a header and who inherits a file (`Snapshot.Includers`, `Users`). The server turns the plan into one `WorkspaceEdit` for every file, the possible edits under change annotations; `dgdtools rename` into diffs or writes ([lsp.md](lsp.md) section 9). |
+| `workspace/willRenameFiles` | `rename.Files(ctx, snapshot, moves)`: the Uses of kind `UseObject` and `UseInclude` that name a moved file, the calls made in a moved object by its path (`Unit.UsesWith`), and the moved files' own, each rewritten as written and resolved as it will be (`Snapshot.ResolveIncludeIf`, `ObjectPath`); a path made by a macro possible. The server's `WorkspaceEdit` of the files as they are; `dgdtools rename FILE NEW` the diffs, or writes and moves ([lsp.md](lsp.md) section 9.5). |
 
 What the server adds itself: JSON-RPC transport, position conversion,
 debouncing, and per-document versioning. No analysis logic lives there.
@@ -1548,8 +1548,8 @@ Not built, in rough priority order:
    statement keeps its line breaks. Giving the formatter the project's
    headers would lay it out too, at the price of a result that depends
    on other files.
-7. **The rest of `dgdtools lsp`** (what [lsp.md](lsp.md) section 8 lists
-   as later), plus `dgdtools init` to write a starter config. Line wrapping in the
+7. **The rest of `dgdtools lsp`** (what [lsp.md](lsp.md) section 13 lists
+   as not built), plus `dgdtools init` to write a starter config. Line wrapping in the
    formatter is not planned ([formatter.md](formatter.md) 2.2).
 8. **Type rules** on the declarations the index keeps. Candidates,
    by the driver errors they would catch (file counts from the oracle):
