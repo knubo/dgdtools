@@ -169,7 +169,9 @@ func Format(f *token.File, o Options) ([]byte, error) {
 // What is formatted is the whitespace that belongs to a selected line:
 // its indentation, the line break before it and the spacing inside it,
 // and the comments and blank lines directly above it when they are
-// selected too. A selected line is indented from the lines around it: an
+// selected too. Nothing on a line that is not selected changes, not even
+// its line break, so a brace is cuddled to the line above only when that
+// is selected as well. A selected line is indented from the lines around it: an
 // unselected line that begins a statement says how deep its nesting
 // level is indented in this file, and a selected line follows that. In a
 // file that is already formatted the result is what Format gives.

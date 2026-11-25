@@ -61,8 +61,13 @@ func FuzzFormat(f *testing.F) {
 			t.Fatalf("the edits give\n%q, the formatter\n%q, of\n%q", got, out, src)
 		}
 		line := 1 + int(pick)%len(file.Lines)
-		if _, err := Lines(file, o, []LineRange{{First: line, Last: line + int(pick)%3}}); err != nil {
+		lines := []LineRange{{First: line, Last: line + int(pick)%3}}
+		out, err = Lines(file, o, lines)
+		if err != nil {
 			t.Fatalf("line %d: %v\n%q", line, err, src)
+		}
+		if err := editsWithin(file, out, lines); err != nil {
+			t.Fatalf("%v\n%q", err, src)
 		}
 	})
 }

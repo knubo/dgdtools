@@ -1,6 +1,7 @@
 package format
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -8,6 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/mmcdole/dgdtools/pkg/lexer"
+	"github.com/mmcdole/dgdtools/pkg/token"
 )
 
 func fmtLines(t *testing.T, src string, o Options, lines ...LineRange) string {
@@ -106,13 +108,16 @@ func TestLines(t *testing.T) {
 	// line that opens it.
 	want = strings.Replace(legacy, "    foo( i );\n    bar(i)   ;", "      foo(i);\n      bar(i);", 1)
 	assert.Equal(t, want, fmtLines(t, legacy, Options{}, LineRange{4, 5}))
-	// Several ranges; a selected brace joins the line above it.
+	// Several ranges; a brace joins the line above it when both are
+	// selected, and not when that line is not: it would change.
 	want = strings.Replace(legacy, "  for (i=0;i<3;i++) {", "  for (i = 0; i < 3; i++) {", 1)
-	want = strings.Replace(want, "  if (x)\n  {", "  if (x) {", 1)
 	assert.Equal(t, want, fmtLines(t, legacy, Options{}, LineRange{3, 3}, LineRange{8, 8}))
-	// The last line and the end of the file.
+	want = strings.Replace(want, "  if (x)\n  {", "  if (x) {", 1)
+	assert.Equal(t, want, fmtLines(t, legacy, Options{}, LineRange{3, 3}, LineRange{7, 8}))
+	// The last line, and the end of the file when it is selected too.
 	want = strings.Replace(legacy, "int   query()   { return 1; }", "int query() { return 1; }", 1)
-	assert.Equal(t, want, fmtLines(t, legacy+"\n\n", Options{}, LineRange{12, 12}))
+	assert.Equal(t, want+"\n\n", fmtLines(t, legacy+"\n\n", Options{}, LineRange{12, 12}))
+	assert.Equal(t, want, fmtLines(t, legacy+"\n\n", Options{}, LineRange{12, 14}))
 
 	// No lines: nothing changes. All lines: the same as Format.
 	assert.Equal(t, legacy, fmtLines(t, legacy, Options{}))
@@ -122,11 +127,19 @@ func TestLines(t *testing.T) {
 	// belongs to the next line; the next line is not touched.
 	in := "int a;   \nint   b;\n"
 	assert.Equal(t, "int a;\nint   b;\n", fmtLines(t, in, Options{}, LineRange{1, 1}))
+	// Not those on the line a comment of several lines ends on.
+	in = "int a; /*\n*/   \nint   b;\n"
+	assert.Equal(t, in, fmtLines(t, in, Options{}, LineRange{1, 1}))
 
-	// A comment line that is selected is formatted with the line it
-	// stands above.
+	// A comment line that is selected is formatted like the line it
+	// stands above; the lines around it are not touched.
 	in = "void\nf()\n{\n    x = 1;\n  /* note */\n        y = 2;\n}\n"
-	assert.Equal(t, "void\nf()\n{\n    x = 1;\n    /* note */\n    y = 2;\n}\n", fmtLines(t, in, Options{}, LineRange{5, 5}))
+	assert.Equal(t, "void\nf()\n{\n    x = 1;\n    /* note */\n        y = 2;\n}\n", fmtLines(t, in, Options{}, LineRange{5, 5}))
+	assert.Equal(t, "void\nf()\n{\n    x = 1;\n    /* note */\n    y = 2;\n}\n", fmtLines(t, in, Options{}, LineRange{5, 6}))
+	// The comments above a selected line that are not selected are not
+	// touched either (the owner's castle.c), nor the blanks on their lines.
+	in = "void\nf()\n{\n    x = 1;\n/* one */\n  /* two */\n   \n        y = 2;\n}\n"
+	assert.Equal(t, strings.Replace(in, "        y", "    y", 1), fmtLines(t, in, Options{}, LineRange{8, 8}))
 }
 
 func TestLinesFollowTheFile(t *testing.T) {
@@ -215,6 +228,14 @@ func TestLinesEveryRange(t *testing.T) {
 				}
 			}
 		}
+		// The edits of a range touch only its lines.
+		for a := 1; a <= n; a++ {
+			for b := a; b <= n; b++ {
+				out, err := Lines(f, Options{}, []LineRange{{a, b}})
+				require.NoError(t, err)
+				assert.NoError(t, editsWithin(f, out, []LineRange{{a, b}}), "lines %d-%d of %q", a, b, src)
+			}
+		}
 		// Formatting a formatted file by ranges changes nothing.
 		g := lexer.Lex("t.c", whole, lexer.Default)
 		m := strings.Count(string(whole), "\n") + 1
@@ -224,4 +245,32 @@ func TestLinesEveryRange(t *testing.T) {
 			assert.Equal(t, string(whole), string(out), "lines %d-%d", a, a+2)
 		}
 	}
+}
+
+// editsWithin returns an error if an edit that turns f into out, a
+// formatting of some of its lines, touches a line that is not one of
+// them: begins before the first, or reaches the line break that ends the
+// last. An edit at the very end of the file is on its last line.
+func editsWithin(f *token.File, out []byte, lines []LineRange) error {
+	in := func(n int) bool {
+		for _, r := range lines {
+			if r.First <= n && n <= r.Last {
+				return true
+			}
+		}
+		return false
+	}
+	for _, e := range Edits(f, out) {
+		first, last := f.Pos(e.Start).Line, f.Pos(e.End).Line
+		if int(e.End) == len(f.Src) && f.Pos(e.End).Col == 1 && last > 1 {
+			last--
+		}
+		for n := first; n <= last; n++ {
+			if !in(n) {
+				return fmt.Errorf("%s: lines %v: the edit %q of %s-%s touches line %d",
+					f.Path, lines, e.NewText, f.Pos(e.Start), f.Pos(e.End), n)
+			}
+		}
+	}
+	return nil
 }

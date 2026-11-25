@@ -202,19 +202,25 @@ server returns for formatting and range formatting alike.
 
 The unit is the *gap*: the whitespace and comments between two
 significant tokens. Formatting a file is replacing every gap; formatting
-lines is replacing the gaps that belong to them and copying the others
-byte for byte:
+lines is laying out the parts of gaps that lie on them and copying
+everything else byte for byte. A gap is made of *rows*, the stretches
+between its line breaks (a block comment can make a row of several
+lines):
 
-- a gap belongs to the line its following token starts on (so a line's
-  indentation, the break before it and the spacing inside it are
-  formatted together), and to any comment or blank line inside it; the
-  end of the file belongs to its last line of code;
-- trailing spaces on a selected line are removed even though the gap
-  they are in belongs to the next line.
+- the rows of a gap whose lines are all selected are laid out, when
+  they are one run; the rows at either end that are not selected are
+  copied, line breaks and all. So a selected line's indentation, the
+  spacing inside it and the comments and blank lines in the selection
+  are formatted, and the comments above it that are not selected stay
+  as they are;
+- trailing spaces on a selected line are removed;
+- the end of the file is formatted when all of it is selected.
 
-So the line above a selected line can change in one way: a selected `{`
-or `else` that the style cuddles moves up to it. Nothing else outside
-the selection changes.
+Nothing on a line outside the selection changes, so the edits of a range
+lie inside it, as LSP asks. In particular a `{` or `else` that the
+style cuddles moves up only when the line above is selected too.
+`TestLinesEveryRange`, `FuzzFormat` and `TestCorpusLines` hold the edits
+of ranges to their lines.
 
 **Indentation blends in.** The unselected lines keep their indentation,
 which in a legacy file is not the canonical one (tabs, two spaces). A

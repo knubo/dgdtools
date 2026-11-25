@@ -2,6 +2,7 @@ package format
 
 import (
 	"bytes"
+	"slices"
 
 	"github.com/mmcdole/dgdtools/pkg/diag"
 	"github.com/mmcdole/dgdtools/pkg/lexer"
@@ -12,8 +13,19 @@ import (
 // between two significant tokens; it is identified by the number of
 // significant tokens before it, which is the same in a file and in any
 // formatting of it.
+//
+// A gap is made of rows: the stretches between its line breaks. The first
+// row ends the line the token before the gap is on, the last begins the
+// line of the token after it, and a block comment can make a row of
+// several lines. Only the rows whose lines are all selected are laid
+// out; those at either end that are not are kept byte for byte, line
+// breaks and all, so that nothing changes on a line that is not selected.
 type selection struct {
 	format []bool
+	// head and tail are the numbers of rows kept as they are at the start
+	// and at the end of a formatted gap. They count from the ends, which
+	// stay as they are, and so are the same in a formatting of the file.
+	head, tail []int
 	// trim marks the gaps that are not formatted but begin on a selected
 	// line: the blanks at the end of that line are removed.
 	trim []bool
@@ -22,10 +34,24 @@ type selection struct {
 func (s *selection) has(ord int) bool   { return s == nil || s.format[ord] }
 func (s *selection) trims(ord int) bool { return s != nil && s.trim[ord] }
 
-// selectLines selects the gaps that belong to the given lines: a gap
-// belongs to the line the token after it starts on, and to the comment
-// and blank lines inside it. The gap at the end of the file belongs to
-// the last line of code as well.
+// keepsLine reports whether the line the token after a gap begins on is
+// kept as it is: the gap is not formatted, or its last row is kept.
+func (s *selection) keepsLine(ord int) bool {
+	return s != nil && (!s.format[ord] || s.tail[ord] > 0)
+}
+
+// kept returns the numbers of rows a formatted gap keeps at its start
+// and at its end.
+func (s *selection) kept(ord int) (head, tail int) {
+	if s == nil {
+		return 0, 0
+	}
+	return s.head[ord], s.tail[ord]
+}
+
+// selectLines selects the gaps that belong to the given lines: the rows
+// of a gap whose lines are all selected, when they are one run. The gap
+// at the end of the file is formatted only as a whole.
 func selectLines(f *token.File, lines []LineRange) *selection {
 	// picked[n] is the number of selected lines among lines 1..n.
 	last := len(f.Lines) + 1
@@ -38,24 +64,53 @@ func selectLines(f *token.File, lines []LineRange) *selection {
 	for n := 1; n <= last; n++ {
 		picked[n] += picked[n-1]
 	}
-	in := func(a, b int) bool { return a <= b && picked[b]-picked[a-1] > 0 }
+	all := func(a, b int) bool { return picked[b]-picked[a-1] == b-a+1 }
 
 	s := &selection{}
 	above := 0 // the line the previous significant token ends on
-	for _, t := range f.Tokens {
+	var rows []bool
+	first, end := 1, 1 // the lines of the current row
+	for i, t := range f.Tokens {
 		if t.Kind.IsTrivia() {
+			if t.End > t.Off {
+				end = max(end, f.Pos(t.End-1).Line)
+			}
+			if t.Kind == token.Newline {
+				rows = append(rows, all(first, end))
+				first = end + 1
+				end = first
+			}
 			continue
 		}
 		line := f.Pos(t.Off).Line
-		format := in(line, line) || in(above+1, line-1)
-		if t.Kind == token.EOF {
-			format = in(max(above, 1), line)
+		end = max(end, line)
+		if t.Kind != token.EOF || i == 0 || f.Tokens[i-1].Kind != token.Newline {
+			rows = append(rows, all(first, end))
+		} // else: the file ends with a line break, and the last row is empty
+		head, tail, format := 0, 0, false
+		if h := slices.Index(rows, true); h >= 0 {
+			n := 0
+			for !rows[len(rows)-1-n] {
+				n++
+			}
+			format = !slices.Contains(rows[h:len(rows)-n], false)
+			head, tail = h, n
+		}
+		if t.Kind == token.EOF && (head > 0 || tail > 0) {
+			format = false
+		}
+		if !format {
+			head, tail = 0, 0
 		}
 		s.format = append(s.format, format)
-		s.trim = append(s.trim, !format && above > 0 && in(above, above))
+		s.head = append(s.head, head)
+		s.tail = append(s.tail, tail)
+		s.trim = append(s.trim, !format && above > 0 && all(above, above))
 		if t.End > t.Off {
 			above = f.Pos(t.End - 1).Line
 		}
+		rows = rows[:0]
+		first, end = above, above
 	}
 	return s
 }

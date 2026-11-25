@@ -103,8 +103,9 @@ func TestCorpusFormatGate(t *testing.T) {
 }
 
 // TestCorpusLines formats ranges of lines of every corpus file: the gate
-// must hold for any range, every line as a range gives what Format gives,
-// and a range of a formatted file changes nothing.
+// must hold for any range, its edits must touch only its lines, every line
+// as a range gives what Format gives, and a range of a formatted file
+// changes nothing.
 func TestCorpusLines(t *testing.T) {
 	corpus(t, func(f *token.File) error {
 		whole, err := Format(f, Options{})
@@ -128,11 +129,14 @@ func TestCorpusLines(t *testing.T) {
 			a := 1 + (seed>>(8*i))%n
 			ranges = append(ranges, LineRange{a, a + (seed>>(4*i))%12})
 		}
-		if _, err := Lines(f, Options{}, ranges[:1]); err != nil {
-			return fmt.Errorf("lines %v: %w", ranges[:1], err)
-		}
-		if _, err := Lines(f, Options{}, ranges); err != nil {
-			return fmt.Errorf("lines %v: %w", ranges, err)
+		for _, rs := range [][]LineRange{ranges[:1], ranges} {
+			out, err := Lines(f, Options{}, rs)
+			if err != nil {
+				return fmt.Errorf("lines %v: %w", rs, err)
+			}
+			if err := editsWithin(f, out, rs); err != nil {
+				return err
+			}
 		}
 		g := lexer.Lex(f.Path, whole, f.Dialect)
 		out, err := Lines(g, Options{}, ranges)

@@ -87,8 +87,9 @@ func (p *printer) run() {
 
 // gap writes the trivia between the previous significant token and the
 // one at index next (the EOF token after the last). A gap that is not
-// selected, and the part of any gap that lies in a region the formatter
-// is told to ignore, is copied as it is; the rest is laid out.
+// selected, the rows at either end of one that are not, and the part of
+// any gap that lies in a region the formatter is told to ignore, are
+// copied as they are; the rest is laid out.
 func (p *printer) gap(gap []token.Token, next int) {
 	if !p.sel.has(p.ord) {
 		for _, g := range gap {
@@ -97,10 +98,34 @@ func (p *printer) gap(gap []token.Token, next int) {
 		p.copyGap(gap, next)
 		return
 	}
+	head, tail := p.sel.kept(p.ord)
+	if head > 0 {
+		// Up to the line break that begins the first selected row.
+		k := nthNewline(gap, head)
+		for _, g := range gap[:k+1] {
+			p.toggle(g)
+		}
+		p.raw(gap[:k+1])
+		gap = gap[k+1:]
+	}
+	var rest []token.Token
+	if tail > 0 {
+		// From the line break that ends the last selected row.
+		k := nthNewline(gap, gapNewlines(gap)-tail+1)
+		gap, rest = gap[:k], gap[k:]
+	}
+	defer func() {
+		if rest != nil {
+			for _, g := range rest {
+				p.toggle(g)
+			}
+			p.copyGap(rest, next)
+		}
+	}()
 	// The off region begins after its marker and ends after the marker
 	// that closes it: each comment is laid out, or kept, with the side
-	// it stands on.
-	start, resumed := 0, false
+	// it stands on. Next to rows that are kept, nothing joins lines.
+	start, resumed := 0, head > 0 || tail > 0
 	for k, g := range gap {
 		switch was := p.off; {
 		case p.toggle(g) == was:
@@ -116,7 +141,19 @@ func (p *printer) gap(gap []token.Token, next int) {
 		p.raw(gap[start:])
 		return
 	}
-	p.layout(gap[start:], next, resumed, true)
+	p.layout(gap[start:], next, resumed, rest == nil)
+}
+
+// nthNewline returns the index in gap of its n-th line break, from 1.
+func nthNewline(gap []token.Token, n int) int {
+	for k, g := range gap {
+		if g.Kind == token.Newline {
+			if n--; n == 0 {
+				return k
+			}
+		}
+	}
+	panic("format: a gap has fewer line breaks than its selection says")
 }
 
 // toggle turns the formatter off or on if g is a comment that says so
@@ -150,6 +187,9 @@ func (p *printer) copyGap(gap []token.Token, next int) {
 	for k, g := range gap {
 		if g.Kind == token.Newline {
 			lineStart, trim = k+1, false
+		}
+		if g.Kind == token.BlockComment && bytes.ContainsAny(p.f.Text(g), "\r\n") {
+			trim = false // the selected line has ended inside it
 		}
 		if trim && g.Kind == token.Space && k+1 < len(gap) && gap[k+1].Kind == token.Newline {
 			continue
@@ -265,7 +305,7 @@ func (p *printer) below(i, level int) ([]byte, bool) {
 			if x.flags&head != 0 && x.flags&caseLabel == 0 && int(x.level) < level {
 				return nil, false // the block has ended
 			}
-			if l, ok := p.teaches(j); ok && l == level && lineStart >= 0 && !p.sel.has(ord) {
+			if l, ok := p.teaches(j); ok && l == level && lineStart >= 0 && p.sel.keepsLine(ord) {
 				return p.f.Src[toks[lineStart].Off:t.Off], true
 			}
 			lineStart = -1
@@ -298,8 +338,10 @@ func gapNewlines(gap []token.Token) int {
 // marker leaves to the formatter, in the one style: header plans,
 // cuddling, blank-line capping, spacing normalization, comments kept.
 // resumed says the part follows a comment already written (the marker
-// that turned the formatter back on); tail says it reaches the token at
-// index next, so that the token's indentation or separator is written.
+// that turned the formatter back on) or rows of the gap that are kept,
+// and so must not be joined to what is before it; tail says it reaches
+// the token at index next, so that the token's indentation or separator
+// is written, and otherwise the line breaks it ends with are kept.
 func (p *printer) layout(gap []token.Token, next int, resumed, tail bool) {
 	if p.f.Tokens[next].Kind == token.EOF && tail {
 		p.finish(gap)
@@ -333,14 +375,16 @@ func (p *printer) layout(gap []token.Token, next int, resumed, tail bool) {
 	var pendingNl []token.Token // their tokens, for byte preservation
 	var lastSpace []byte        // space run immediately before a comment
 	wroteComment := resumed
+	// A line is begun already when the rows before are kept.
+	fresh := p.buf.Len() > 0 && p.buf.Bytes()[p.buf.Len()-1] == '\n'
 
 	flushNewlines := func() {
 		if pending == 0 {
 			return
 		}
 		maxN := maxBlankLines + 1
-		if p.buf.Len() == 0 {
-			maxN = maxBlankLines // leading region: no line to end
+		if p.buf.Len() == 0 || fresh {
+			maxN = maxBlankLines // leading region, or a line begun: no line to end
 		}
 		n := min(pending, maxN)
 		for i := 0; i < n; i++ {
@@ -363,9 +407,10 @@ func (p *printer) layout(gap []token.Token, next int, resumed, tail bool) {
 		case token.Space:
 			lastSpace = p.f.Text(g)
 		case token.LineComment, token.BlockComment:
-			if pending > 0 {
+			if pending > 0 || fresh {
 				flushNewlines()
 				p.indent(next, p.commentIndent(next))
+				fresh = false
 			} else if p.buf.Len() > 0 {
 				// Trailing comment: preserve the author's alignment run.
 				if len(lastSpace) > 0 {
@@ -382,8 +427,12 @@ func (p *printer) layout(gap []token.Token, next int, resumed, tail bool) {
 
 	switch {
 	case !tail:
-		// What follows the marker is kept as it is.
-	case pending > 0:
+		// What follows is kept as it is, and so are the line breaks
+		// before it.
+		for _, nl := range pendingNl {
+			p.buf.Write(p.f.Text(nl))
+		}
+	case pending > 0 || fresh:
 		flushNewlines()
 		p.indent(next, p.indentOf(next))
 	case p.buf.Len() == 0:
