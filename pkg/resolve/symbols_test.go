@@ -104,7 +104,7 @@ void dead() {}
 
 // An operator function is named by its operator.
 func TestSymbolsOperator(t *testing.T) {
-	fs := vfs.Mem{"/lib/dgdtools.yml": "", "/lib/obj/v.c": "static object operator+ (object other) { return other; }\nint operator [] (int i) { return i; }\n"}
+	fs := vfs.Mem{"/lib/dgdtools.yml": "root: .\n", "/lib/obj/v.c": "static object operator+ (object other) { return other; }\nint operator [] (int i) { return i; }\n"}
 	assert.Equal(t, []string{
 		`function operator+ (static object (object other)) 1:15 "operator+" [static object operator+ (object other) { return other; }]`,
 		`function operator[] (int (int i)) 2:5 "operator []" [int operator [] (int i) { return i; }]`,

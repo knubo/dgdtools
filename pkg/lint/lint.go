@@ -621,8 +621,7 @@ func (l *Linter) Run(ctx context.Context, req Request) (*Result, error) {
 	res := &Result{Generation: s.Generation()}
 	res.Notes = append(res.Notes, prj.Notes...)
 	if !prj.HasLib() {
-		res.Notes = append(res.Notes, diag.Note{Kind: diag.NoteNoLib,
-			Message: "no dgdtools.yml and no --root: running file-local rules only (cross-file rules need a mudlib root)"})
+		res.Notes = append(res.Notes, diag.Note{Kind: diag.NoteNoLib, Message: prj.NoLib()})
 	}
 	// Rule names and the baseline are checked once, up front.
 	sel, err := l.selection(&req.Options)

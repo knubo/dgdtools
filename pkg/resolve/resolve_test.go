@@ -79,7 +79,8 @@ func (w *world) at(path, at string) string {
 	return out
 }
 
-const config1 = `include_dirs: [/include]
+const config1 = `root: .
+include_dirs: [/include]
 include_file: /include/auto.h
 auto_objects: [/sys/auto]
 conventions:
@@ -487,7 +488,7 @@ func TestNothingToAsk(t *testing.T) {
 // a call does.
 func TestFunctionPointer(t *testing.T) {
 	fs := vfs.Mem{
-		"/lib/dgdtools.yml": "dialect: {closures: true}\nauto_objects: [/sys/auto]\n",
+		"/lib/dgdtools.yml": "root: .\ndialect: {closures: true}\nauto_objects: [/sys/auto]\n",
 		"/lib/sys/auto.c":   "void autof() {}\n",
 		"/lib/obj/a.c":      "int twice(int a) { return a * 2; }\nvoid f() { function g; g = &twice(); g = &autof(); g = &nope(); (*g)(1); }\n",
 	}

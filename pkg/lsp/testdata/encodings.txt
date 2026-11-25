@@ -4,6 +4,7 @@ The line below has characters of two and three bytes (one unit each) and
 one of four (two units) before the finding.
 
 -- lib/dgdtools.yml --
+root: .
 -- lib/obj/a.c --
 void f() { /* blåbær € 😀 */ a == 1; }
 -- script --

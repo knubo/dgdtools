@@ -68,6 +68,18 @@ type Project struct {
 // disk, or part of it is and a profile or a lib path places it.
 func (prj *Project) HasLib() bool { return prj.Root != "" || prj.Partial }
 
+// NoLib says why cross-file analysis is not possible, and how to make it
+// so; "" when it is (HasLib).
+func (prj *Project) NoLib() string {
+	switch {
+	case prj.HasLib():
+		return ""
+	case prj.ConfigPath == "":
+		return "no dgdtools.yml and no --root: running file-local rules only (cross-file rules need a mudlib root)"
+	}
+	return fmt.Sprintf("%s does not say where the mudlib is (root:, profile: or lib_path:): running file-local rules only (`root: .` makes its directory the mudlib's /)", prj.ConfigPath)
+}
+
 // Inputs returns the files the project was resolved from: its config
 // file and the files that extends, the profile, the driver's
 // configuration. When one of them changes the project is another one,
@@ -430,13 +442,17 @@ func (w *Workspace) root(dir string) (string, error) {
 	if r, ok := w.roots[dir]; ok {
 		return r, nil
 	}
-	r, err := rootIn(w.fs, dir)
+	r, k, err := rootIn(w.fs, dir)
 	if err != nil {
 		return "", err
 	}
-	if parent := filepath.Dir(dir); r == "" && parent != dir {
-		if r, err = w.root(parent); err != nil {
+	if parent := filepath.Dir(dir); (r == "" || k == kindSettings) && parent != dir {
+		up, err := w.root(parent)
+		if err != nil {
 			return "", err
+		}
+		if up != "" {
+			r = up // a project above, or an outer file of settings
 		}
 	}
 	w.roots[dir] = r

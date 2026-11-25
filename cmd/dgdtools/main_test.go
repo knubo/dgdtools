@@ -245,7 +245,7 @@ func TestUserLevelConfig(t *testing.T) {
 	write(t, home, map[string]string{".config/dgdtools/dgdtools.yml": "format: {indent_width: 2}\n"})
 	dir := tree(t, map[string]string{
 		"bare/a.c":          messy,
-		"proj/dgdtools.yml": "",
+		"proj/dgdtools.yml": "root: .\n",
 		"proj/b.c":          messy,
 	})
 	// It is the configuration of a path that has no project's...
@@ -267,7 +267,7 @@ func TestUserLevelConfig(t *testing.T) {
 // An interrupted command says so and exits the way a shell reports an
 // interrupt, not as an error of the command.
 func TestInterrupted(t *testing.T) {
-	dir := tree(t, map[string]string{"dgdtools.yml": "", "a.c": "void f() { }\n"})
+	dir := tree(t, map[string]string{"dgdtools.yml": "root: .\n", "a.c": "void f() { }\n"})
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	for _, args := range [][]string{{"lint", dir}, {"format", "--check", dir}} {
@@ -284,9 +284,9 @@ func TestInterrupted(t *testing.T) {
 func TestNestedProject(t *testing.T) {
 	const bare = "int f() {\nreturn 1;\n}\n"
 	dir := tree(t, map[string]string{
-		"dgdtools.yml":     "lint:\n  rules: {missing-visibility: warning}\n",
+		"dgdtools.yml":     "root: .\nlint:\n  rules: {missing-visibility: warning}\n",
 		"a.c":              bare,
-		"own/dgdtools.yml": "lint:\n  rules: {missing-visibility: error}\nformat: {indent_style: tab}\n",
+		"own/dgdtools.yml": "root: .\nlint:\n  rules: {missing-visibility: error}\nformat: {indent_style: tab}\n",
 		"own/b.c":          bare,
 	})
 	own := filepath.Join(dir, "own")

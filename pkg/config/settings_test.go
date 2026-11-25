@@ -160,7 +160,7 @@ func TestScopeValidation(t *testing.T) {
 
 	// What a scope may hold, with a base it shares with others.
 	m := vfs.Mem{
-		"/p/dgdtools.yml":        "format: {indent_width: 8}\n",
+		"/p/dgdtools.yml":        "root: .\nformat: {indent_width: 8}\n",
 		"/p/sub/dgdtools.yml":    "root: false\nextends: ../style.yml\nlint:\n  rules: {syntax: error}\n",
 		"/p/style.yml":           "format: {indent_style: tab}\nlint:\n  overrides:\n    - paths: [\"x/**\"]\n      rules: {all: off}\n",
 		"/p/sub/a.c":             "",
@@ -198,10 +198,10 @@ func TestScopeValidation(t *testing.T) {
 // is not the outer project's, whichever way it is come by.
 func TestNestedProject(t *testing.T) {
 	m := vfs.Mem{
-		"/p/dgdtools.yml":               "format: {indent_width: 8}\n",
+		"/p/dgdtools.yml":               "root: .\nformat: {indent_width: 8}\n",
 		"/p/a.c":                        "",
 		"/p/sub/dgdtools.yml":           "root: false\nformat: {indent_width: 2}\n",
-		"/p/sub/own/dgdtools.yml":       "format: {indent_style: tab}\nconventions: {specifier_macros: [public]}\n",
+		"/p/sub/own/dgdtools.yml":       "root: .\nformat: {indent_style: tab}\nconventions: {specifier_macros: [public]}\n",
 		"/p/sub/own/deep/b.c":           "",
 		"/p/sub/own/deep/.dgdtools.yml": "root: false\nformat: {indent_width: 3}\n",
 	}
@@ -245,7 +245,7 @@ func TestWorkspaceInvalidate(t *testing.T) {
 		"/ws/x.profile":          "dgdtools-profile 1\n{\"name\":\"x\",\"dialect\":{\"driver\":\"dgd\"},\"conventions\":{}}\n",
 		"/ws/lib/a.c":            "",
 		"/ws/lib/sub/b.c":        "",
-		"/ws/other/dgdtools.yml": "",
+		"/ws/other/dgdtools.yml": "root: .\n",
 		"/ws/other/c.c":          "",
 		"/ws/.editorconfig":      "[*]\nend_of_line = lf\n",
 	}
@@ -288,12 +288,13 @@ func TestWorkspaceInvalidate(t *testing.T) {
 
 	// A settings scope appears, then becomes a project of its own.
 	lib = project("/ws/lib/a.c")
-	m["/ws/lib/sub/dgdtools.yml"] = "root: false\nformat:\n  indent_width: 3\n"
+	// One with nothing but settings is a scope without saying root: false.
+	m["/ws/lib/sub/dgdtools.yml"] = "format:\n  indent_width: 3\n"
 	dropped, _ = w.Invalidate("/ws/lib/sub/dgdtools.yml")
 	assert.Equal(t, []*Project{lib}, dropped)
 	assert.Equal(t, 3, width("/ws/lib/sub/b.c"))
 	assert.Equal(t, "/ws/lib/dgdtools.yml", project("/ws/lib/sub/b.c").ConfigPath)
-	m["/ws/lib/sub/dgdtools.yml"] = "format:\n  indent_width: 5\n"
+	m["/ws/lib/sub/dgdtools.yml"] = "root: .\nformat:\n  indent_width: 5\n"
 	w.Invalidate("/ws/lib/sub/dgdtools.yml")
 	assert.Equal(t, 5, width("/ws/lib/sub/b.c"))
 	assert.Equal(t, "/ws/lib/sub/dgdtools.yml", project("/ws/lib/sub/b.c").ConfigPath)
@@ -398,7 +399,7 @@ func TestEditorConfig(t *testing.T) {
 	m := vfs.Mem{
 		"/.editorconfig":         "[*]\nindent_size = 7\nend_of_line = crlf\n",
 		"/mud/.editorconfig":     "root = true\n[*]\nindent_style = tab\nindent_size = tab\ntab_width = 8\nend_of_line = lf\n[*.h]\nindent_style = space\nindent_size = 2\n[legacy/**]\nend_of_line = cr\nindent_size = 99\n",
-		"/mud/dgdtools.yml":      "format: {line_endings: preserve}\n",
+		"/mud/dgdtools.yml":      "root: .\nformat: {line_endings: preserve}\n",
 		"/mud/std/a.c":           "",
 		"/mud/sub/.editorconfig": "[*.c]\nindent_style = space\nindent_size = 3\n",
 		"/mud/sub/dgdtools.yml":  "root: false\nformat: {indent_width: 5}\n",
@@ -458,7 +459,7 @@ func TestUserConfigIsAFallback(t *testing.T) {
 		"/work/mine/a.c":                        "",
 		"/work/mine/sub/dgdtools.yml":           "root: false\nformat: {indent_style: tab}\n",
 		"/work/mine/sub/b.c":                    "",
-		"/proj/dgdtools.yml":                    "format: {line_endings: lf}\n",
+		"/proj/dgdtools.yml":                    "root: .\nformat: {line_endings: lf}\n",
 		"/proj/c.c":                             "",
 	}
 	user := UserConfigPath(m, "", "/home/u")
@@ -555,7 +556,7 @@ func TestContributedValuesAreValidated(t *testing.T) {
 		"/p/dgdtools.yml": "profile: bad.profile\n",
 		"/p/bad.profile":  "dgdtools-profile 1\n{\"name\":\"bad\",\"dialect\":{\"driver\":\"dgd\"},\"relative_object_paths\":\"sideways\",\"conventions\":{}}\n",
 		"/p/a.c":          "",
-		"/q/dgdtools.yml": "profile_build: {driver_config: mud.dgd}\n",
+		"/q/dgdtools.yml": "root: .\nprofile_build: {driver_config: mud.dgd}\n",
 		"/q/mud.dgd":      "typechecking = 7;\n",
 		"/q/a.c":          "",
 	}

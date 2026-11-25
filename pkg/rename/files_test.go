@@ -21,7 +21,7 @@ import (
 // from the lib's root, #include <...> from an include directory.
 func filesLib() vfs.Mem {
 	return vfs.Mem{
-		"/lib/dgdtools.yml":           "include_dirs: [/include]\n",
+		"/lib/dgdtools.yml":           "root: .\ninclude_dirs: [/include]\n",
 		"/lib/include/std.h":          "#define ROOM \"/std/room\"\n",
 		"/lib/include/sub/deep.h":     "#define DEEP 1\n",
 		"/lib/std/room.h":             "#define LIGHT 1\n",

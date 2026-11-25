@@ -311,7 +311,7 @@ func TestRenameProgramOfFiles(t *testing.T) {
 // driver calls in a connection's object is renamed with a warning.
 func TestRenameDriverCalls(t *testing.T) {
 	w := newWorld(t, vfs.Mem{
-		"/lib/dgdtools.yml": "driver_object: /sys/driver\n",
+		"/lib/dgdtools.yml": "root: .\ndriver_object: /sys/driver\n",
 		"/lib/sys/base.c":   "string path_read(string p) { return p; }\n",
 		"/lib/sys/driver.c": "inherit \"/sys/base\";\nstring path_write(string p) { return p; }\n",
 		"/lib/obj/user.c":   "void receive_message(string s) {}\nstring path_write(string p) { return p; }\n",
@@ -332,7 +332,7 @@ func TestRenameDriverCalls(t *testing.T) {
 // name, would name the renamed symbol there.
 func TestClashThroughMacroAcross(t *testing.T) {
 	w := newWorld(t, vfs.Mem{
-		"/lib/dgdtools.yml": "",
+		"/lib/dgdtools.yml": "root: .\n",
 		"/lib/std/room.c":   "int light;\n",
 		"/lib/obj/r.c":      "#define DIM dimness\ninherit \"/std/room\";\nvoid f() { light = DIM; }\n",
 	}, "/lib")

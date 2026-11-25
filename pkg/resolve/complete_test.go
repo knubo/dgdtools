@@ -88,7 +88,8 @@ func item(t *testing.T, c *resolve.Completion, name string, fn bool) resolve.Ite
 	return resolve.Item{}
 }
 
-const completeConfig = `include_dirs: [/include]
+const completeConfig = `root: .
+include_dirs: [/include]
 include_file: /include/auto.h
 auto_objects: [/sys/auto]
 dialect:
@@ -547,7 +548,7 @@ func TestCompleteNoLib(t *testing.T) {
 // More than MaxItems: the best matches of what is written, and the
 // answer says it is not all.
 func TestCompleteCapped(t *testing.T) {
-	fs := vfs.Mem{"/lib/dgdtools.yml": ""}
+	fs := vfs.Mem{"/lib/dgdtools.yml": "root: .\n"}
 	var b strings.Builder
 	for i := range resolve.MaxItems + 200 {
 		fmt.Fprintf(&b, "void fn_%04d() {}\n", i)

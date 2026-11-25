@@ -59,7 +59,7 @@ func start(t testing.TB) *lsptest.Client {
 // lib is a small lib with every kind of edge between its files.
 func lib() map[string]string {
 	return map[string]string{
-		"dgdtools.yml":   "include_dirs: [/include]\ninclude_file: /include/auto.h\nauto_objects: [/sys/auto]\n",
+		"dgdtools.yml":   "root: .\ninclude_dirs: [/include]\ninclude_file: /include/auto.h\nauto_objects: [/sys/auto]\n",
 		"include/auto.h": "#define AUTO 1\n",
 		"include/std.h":  "#define STD \"/std/base\"\n",
 		"sys/auto.c":     "void autof() {}\n",
@@ -391,7 +391,7 @@ func TestWatchedFiles(t *testing.T) {
 	files["dgdtools.yml"] = whole
 
 	c.Idle()
-	write(t, dir, map[string]string{"dgdtools.yml": "lint:\n  rules:\n    no-such-rule: error\n"})
+	write(t, dir, map[string]string{"dgdtools.yml": "root: .\nlint:\n  rules:\n    no-such-rule: error\n"})
 	c.WatchedFiles(2, path("dgdtools.yml"))
 	assert.Empty(t, published(t, c, path("obj/c.c")))
 	shown := c.Received("window/showMessage")
@@ -483,7 +483,7 @@ func (f faulty) WalkDir(root string, fn fs.WalkDirFunc) error { return f.FS.Walk
 // A panic costs the message it happened in, and is logged: a request is
 // answered with an internal error, and the server goes on.
 func TestPanics(t *testing.T) {
-	dir := tree(t, map[string]string{"boom/dgdtools.yml": "", "boom/a.c": "int x;\n", "fine/a.c": "void f() { a == 1; }\n"})
+	dir := tree(t, map[string]string{"boom/dgdtools.yml": "root: .\n", "boom/a.c": "int x;\n", "fine/a.c": "void f() { a == 1; }\n"})
 	var log safeBuffer
 	c := lsptest.Start(t, lsp.Options{FS: faulty{vfs.OS{}}, Debounce: time.Millisecond,
 		Log: slog.New(slog.NewTextHandler(&log, &slog.HandlerOptions{Level: slog.LevelDebug}))})
@@ -558,7 +558,7 @@ func TestSettings(t *testing.T) {
 		"ann/b.c":           "void fn() {}\n",
 		"bob/a.c":           "void f() { \"/players/bob/b\"->nofn(); }\n",
 		"bob/b.c":           "void fn() {}\n",
-		"lib/dgdtools.yml":  "",
+		"lib/dgdtools.yml":  "root: .\n",
 		"lib/players/c.c":   "void f() { \"/players/b\"->nofn(); }\n",
 		"lib/players/b.c":   "void fn() {}\n",
 		"elsewhere/alone.c": "void f() { \"/players/ann/b\"->nofn(); a == 1; }\n",
@@ -743,7 +743,7 @@ func TestLatin1(t *testing.T) {
 		// bytes before the place.
 		user = "void f() { \"/obj/t\"->h(1, 2); }\n"
 	)
-	dir := tree(t, map[string]string{"dgdtools.yml": "", "obj/t.c": disk + "/* \xe5\xe5\xe5 */ void h(int a) {}\n", "obj/u.c": user})
+	dir := tree(t, map[string]string{"dgdtools.yml": "root: .\n", "obj/t.c": disk + "/* \xe5\xe5\xe5 */ void h(int a) {}\n", "obj/u.c": user})
 	path := filepath.Join(dir, "obj/t.c")
 	for _, enc := range [][]string{nil, {lsp.UTF8}} {
 		var found [][]string

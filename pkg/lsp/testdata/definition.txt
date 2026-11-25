@@ -3,6 +3,7 @@ on is declared, with the range of what names it. Nothing for what nothing
 is known of.
 
 -- lib/dgdtools.yml --
+root: .
 include_dirs: [/include]
 auto_objects: [/sys/auto]
 conventions:

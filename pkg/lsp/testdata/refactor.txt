@@ -4,6 +4,7 @@ path of the one file of the lib a missing #include may have meant, a
 quick fix that is not preferred (it may not be the file meant).
 
 -- lib/dgdtools.yml --
+root: .
 include_dirs: [/include]
 -- lib/include/std.h --
 #define STD 1

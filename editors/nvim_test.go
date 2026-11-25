@@ -147,7 +147,7 @@ func nvimRunAs(t *testing.T, files map[string]string, session string, start nvim
 // first editor the server is used from.
 func TestNeovimClient(t *testing.T) {
 	const text = "void f()\n{\n    string s;\n\n    /* blåbær \U0001F600 */ s == \"x\";\n    s = \"one\" \"two\";\n}\n"
-	dir, data, log := nvimRun(t, map[string]string{"lib/dgdtools.yml": "", "lib/obj/a.c": text}, nvimSession)
+	dir, data, log := nvimRun(t, map[string]string{"lib/dgdtools.yml": "root: .\n", "lib/obj/a.c": text}, nvimSession)
 	var got struct {
 		Error, Filetype, Encoding, Root string
 		Server                          struct{ Name string }
@@ -224,7 +224,7 @@ vim.cmd('qall!')
 // file, with characters of several bytes before the names on both sides.
 func TestNeovimDefinition(t *testing.T) {
 	files := map[string]string{
-		"lib/dgdtools.yml":  "include_dirs: [/include]\n",
+		"lib/dgdtools.yml":  "root: .\ninclude_dirs: [/include]\n",
 		"lib/include/std.h": "/* blåbær \U0001F600 */ #define BASE \"/std/base\"\n",
 		"lib/std/base.c":    "int weight;\n/* grøt */ void create() {}\n",
 		"lib/obj/a.c": "#include <std.h>\ninherit BASE;\nvoid later();\n" +
@@ -332,7 +332,7 @@ vim.cmd('qall!')
 // arguments of calls, with characters of several bytes before the names.
 func TestNeovimHover(t *testing.T) {
 	files := map[string]string{
-		"lib/dgdtools.yml":  "include_dirs: [/include]\n",
+		"lib/dgdtools.yml":  "root: .\ninclude_dirs: [/include]\n",
 		"lib/include/std.h": "/* blåbær \U0001F600 */ #define BASE \"/std/base\"\n",
 		"lib/std/base.c":    "int weight;\n/* Sets the weight,\n   in grams. */\nvarargs void set_weight(int grams, string why...) {}\nvoid create() {}\n",
 		"lib/obj/a.c": "#include <std.h>\ninherit BASE;\n" +
@@ -449,7 +449,7 @@ vim.cmd('qall!')
 // characters of several bytes before the names.
 func TestNeovimSymbols(t *testing.T) {
 	files := map[string]string{
-		"lib/dgdtools.yml":  "include_dirs: [/include]\n",
+		"lib/dgdtools.yml":  "root: .\ninclude_dirs: [/include]\n",
 		"lib/include/std.h": "/* blåbær \U0001F600 */ #define BASE \"/std/base\"\n",
 		"lib/std/base.c":    "/* grøt */ int weight;\nvarargs void set_weight(int grams, string why...) {}\nvoid create() {}\n",
 		"lib/obj/a.c": "#include <std.h>\n#define TWICE(x) ((x) + (x))\ninherit BASE;\nprivate int count;\n" +
@@ -542,7 +542,7 @@ vim.cmd('qall!')
 // on a receiver nobody knows.
 func TestNeovimCompletion(t *testing.T) {
 	files := map[string]string{
-		"lib/dgdtools.yml":  "include_dirs: [/include]\n",
+		"lib/dgdtools.yml":  "root: .\ninclude_dirs: [/include]\n",
 		"lib/include/std.h": "/* blåbær \U0001F600 */ #define BASE \"/std/base\"\n",
 		"lib/std/base.c":    "int weight;\nvarargs void set_weight(int grams, string why...) {}\nvoid create() {}\n",
 		"lib/obj/a.c": "#include <std.h>\ninherit BASE;\nvoid later_on(int when) {}\n" +
@@ -658,7 +658,7 @@ vim.cmd('qall!')
 // the names.
 func TestNeovimReferences(t *testing.T) {
 	files := map[string]string{
-		"lib/dgdtools.yml":  "include_dirs: [/include]\n",
+		"lib/dgdtools.yml":  "root: .\ninclude_dirs: [/include]\n",
 		"lib/include/std.h": "#define BASE \"/std/base\"\n",
 		"lib/std/base.c":    "/* grøt */ void set_weight(int grams) {}\n",
 		"lib/obj/b.c":       "#include <std.h>\ninherit BASE;\nvoid reset() { set_weight(2); }\n",
@@ -748,7 +748,7 @@ vim.cmd('qall!')
 // itself (0.11 and later), in full and then as a delta after an edit.
 func TestNeovimTokens(t *testing.T) {
 	files := map[string]string{
-		"lib/dgdtools.yml":  "include_dirs: [/include]\n",
+		"lib/dgdtools.yml":  "root: .\ninclude_dirs: [/include]\n",
 		"lib/include/std.h": "#define BASE \"/std/base\"\n",
 		"lib/std/base.c":    "/* grøt */ void set_weight(int grams) {}\n",
 		"lib/obj/a.c": "#include <std.h>\ninherit BASE;\n" +
@@ -843,7 +843,7 @@ vim.cmd('qall!')
 // function is not renamed.
 func TestNeovimRename(t *testing.T) {
 	files := map[string]string{
-		"lib/dgdtools.yml": "include_dirs: [/include]\n",
+		"lib/dgdtools.yml": "root: .\ninclude_dirs: [/include]\n",
 		"lib/obj/a.c": "private void helper(int n) {}\n" +
 			"void create() {\n    int count;\n    /* først \U0001F600 */ helper(1); count = 1; count++;\n    helper(count);\n}\n" +
 			"void greet() {}\n",
@@ -921,7 +921,7 @@ vim.cmd('qall!')
 // action, and move a file the current one inherits, the inherit edited.
 func TestNeovimRefactor(t *testing.T) {
 	files := map[string]string{
-		"lib/dgdtools.yml": "",
+		"lib/dgdtools.yml": "root: .\n",
 		"lib/std/room.c":   "int light;\n",
 		"lib/obj/a.c":      "inherit \"/std/room\";\nvoid f() { helper(1); }\n\nint helper(int n) { return n; }\n",
 	}
@@ -967,7 +967,7 @@ vim.cmd('qall!')
 // can be run, the one on PATH or the one configured, and not when
 // g:dgdtools_lsp is false (or 0, as a vimrc says it).
 func TestNeovimPlugin(t *testing.T) {
-	files := map[string]string{"lib/dgdtools.yml": "", "lib/obj/a.c": "void create() {}\n"}
+	files := map[string]string{"lib/dgdtools.yml": "root: .\n", "lib/obj/a.c": "void create() {}\n"}
 	configured := "lua vim.lsp.config('dgdtools', { cmd = { vim.env.DGDLPC_BIN, 'lsp' } })"
 	for _, c := range []struct {
 		name    string

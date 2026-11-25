@@ -277,7 +277,7 @@ func TestRuleOptionsAreChecked(t *testing.T) {
 
 	// The same for overrides and for nested configuration files.
 	m := vfs.Mem{
-		"/p/dgdtools.yml":     "lint:\n  overrides:\n    - paths: [\"x/**\"]\n      rules: {lifecycle-chain: {deny: [a]}}\n",
+		"/p/dgdtools.yml":     "root: .\nlint:\n  overrides:\n    - paths: [\"x/**\"]\n      rules: {lifecycle-chain: {deny: [a]}}\n",
 		"/q/dgdtools.yml":     "root: .\n",
 		"/q/sub/dgdtools.yml": "root: false\nlint:\n  rules: {raw-inherit-path: {names: [a]}}\n",
 		"/q/sub/a.c":          "",

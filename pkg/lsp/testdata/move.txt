@@ -7,6 +7,7 @@ macro is not changed, and the user is told. A folder moves with its
 files.
 
 -- lib/dgdtools.yml --
+root: .
 include_dirs: [/include]
 -- lib/include/std.h --
 #define ROOM "/std/room"

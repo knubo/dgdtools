@@ -171,7 +171,7 @@ func TestDefinitionInStub(t *testing.T) {
 // What is asked of a document the server says nothing about, and what
 // is asked badly.
 func TestDefinitionOfNothing(t *testing.T) {
-	dir := tree(t, map[string]string{"dgdtools.yml": "", "obj/a.c": "void f() { f(); }\n"})
+	dir := tree(t, map[string]string{"dgdtools.yml": "root: .\n", "obj/a.c": "void f() { f(); }\n"})
 	c := start(t)
 	c.Initialize(lsptest.Capabilities{}, dir)
 	c.Notify("textDocument/didOpen", lsp.DidOpenTextDocumentParams{TextDocument: lsp.TextDocumentItem{URI: "untitled:Untitled-1", Version: 1, Text: "void f() { f(); }\n"}})

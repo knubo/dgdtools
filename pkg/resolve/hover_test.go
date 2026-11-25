@@ -70,7 +70,8 @@ func (w *world) hover(path, at string) string {
 	return strings.Join(lines, "\n")
 }
 
-const hoverConfig = `include_dirs: [/include]
+const hoverConfig = `root: .
+include_dirs: [/include]
 include_file: /include/auto.h
 auto_objects: [/sys/auto]
 dialect:

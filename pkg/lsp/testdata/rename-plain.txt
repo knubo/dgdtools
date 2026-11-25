@@ -2,6 +2,7 @@ Rename for a client that does not ask first, and reads edits without
 versions.
 
 -- lib/dgdtools.yml --
+root: .
 include_dirs: [/include]
 -- lib/obj/a.c --
 void create() {

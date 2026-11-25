@@ -3,6 +3,7 @@ editor's (the script's requests ask for tabs of eight), as one edit for
 each stretch of whitespace that changes.
 
 -- lib/dgdtools.yml --
+root: .
 format:
   indent_width: 2
 -- lib/obj/a.c --

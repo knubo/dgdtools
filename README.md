@@ -130,7 +130,7 @@ only settings can differ from one directory to the next.
 
 | Key | Purpose |
 |---|---|
-| `root` | The directory that is `/` to the driver; relative to the config file, which is the default. |
+| `root` | The directory that is `/` to the driver, relative to the config file (`root: .` for its own directory). It is never guessed: a config that does not say where the mudlib is (`root`, `profile` or `lib_path`) gets the file-local rules only, and says so. With `profile` or `lib_path` and no `root`, the config's directory is the checkout. |
 | `profile` | The mudlib profile to work against: a name, found as `NAME.profile` next to the config file, in a directory listed in `$DGDTOOLS_PROFILE_PATH`, or in the user config directory (`~/.config/dgdtools/profiles/`); or a path to a profile file. No profile is built in. It supplies the driver settings, the shared headers and the signatures of shared objects, so a wizard needs nothing else. Files on disk always win over the profile. |
 | `lib_path` | The mudlib path of the directory a partial checkout is (`/usr/ann`), when its path on disk does not show it (the profile lists the mudlib's checkout patterns, such as `usr/*`). |
 | `exclude` | Globs, relative to the mudlib root, that directory walks skip. A file named on the command line is always taken. |
@@ -154,10 +154,11 @@ only settings can differ from one directory to the next.
 
 ### Settings per directory
 
-A `dgdtools.yml` further down the tree that says `root: false` is a
-**settings scope**. It adjusts `format:` and `lint:` for the files under
-its directory, belongs to the project above it, and may hold nothing
-else (a project key in it is an error that names the key):
+A `dgdtools.yml` further down the tree that holds nothing but `format:`
+and `lint:` settings, or says `root: false`, is a **settings scope**. It
+adjusts `format:` and `lint:` for the files under its directory, belongs
+to the project above it, and may hold nothing else (a project key in a
+file that says `root: false` is an error that names the key):
 
 ```yaml
 # usr/ann/dgdtools.yml
@@ -191,9 +192,9 @@ settings scope below, and exits 2 with the file, the line and what is
 wrong when a key, a value, a rule name or a rule's option is not one the
 tools know.
 
-A `dgdtools.yml` below a project that does not say `root: false` is a
-project of its own (a wizard's folder with `profile: NAME` in it, inside
-the whole mudlib). Its files are formatted by its own settings, and linted
+A `dgdtools.yml` below a project that has a project key is a project of
+its own (a wizard's folder with `profile: NAME` in it, inside the whole
+mudlib). Its files are formatted by its own settings, and linted
 by naming that folder; a lint of the project above passes over them and
 says so.
 
@@ -400,9 +401,9 @@ concluded from an unknown. `--stats` shows how much was unknown.
 
 **What it needs.** Nothing, for the file-local rules: `dgdtools lint castle.c`
 with no config anywhere reports syntax errors and suspicious constructs.
-Cross-file rules need the mudlib root, which comes from the nearest
-`dgdtools.yml` above the linted path (or `--root`); a root is never
-guessed. A file outside the root gets the file-local rules only.
+Cross-file rules need the mudlib root, which comes from the `root:` of
+the nearest `dgdtools.yml` above the linted path (or `--root`); a root is
+never guessed. A file outside the root gets the file-local rules only.
 
 **The rules** are in four groups, and a rule's code says which:
 

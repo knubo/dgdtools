@@ -28,7 +28,7 @@ var bg = context.Background()
 // through a macro, calls by path, callbacks its inheritors provide.
 func lib() vfs.Mem {
 	return vfs.Mem{
-		"/lib/dgdtools.yml":   "include_dirs: [/include]\ninclude_file: /include/auto.h\nauto_objects: [/sys/auto]\n",
+		"/lib/dgdtools.yml":   "root: .\ninclude_dirs: [/include]\ninclude_file: /include/auto.h\nauto_objects: [/sys/auto]\n",
 		"/lib/include/auto.h": "#define AUTO 1\n",
 		"/lib/include/std.h":  "#define STD \"/std/base\"\n",
 		"/lib/sys/auto.c":     "void autof() {}\n",
@@ -161,7 +161,7 @@ func TestConfigurationChanges(t *testing.T) {
 	m["/lib/obj/dgdtools.yml"] = "root: false\nlint:\n  rules: {missing-visibility: info}\n"
 	assert.True(t, s.DiskChanged("/lib/obj/dgdtools.yml").All)
 	assert.Contains(t, findings(t, s, plain), "info: function 'f' has no visibility specifier")
-	m["/lib/obj/dgdtools.yml"] = "lint:\n  rules: {missing-visibility: warning}\n"
+	m["/lib/obj/dgdtools.yml"] = "root: .\nlint:\n  rules: {missing-visibility: warning}\n"
 	assert.True(t, s.DiskChanged("/lib/obj/dgdtools.yml").All)
 	assert.Contains(t, findings(t, s, plain), "warning: function 'f' has no visibility specifier")
 	prj, err := s.Project(plain)

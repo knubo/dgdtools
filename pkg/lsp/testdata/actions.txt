@@ -2,6 +2,7 @@ Code actions: the fix a finding carries, the comments that suppress it,
 and every safe fix at once.
 
 -- lib/dgdtools.yml --
+root: .
 lint:
   rules:
     unformatted: info

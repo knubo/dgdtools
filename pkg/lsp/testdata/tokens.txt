@@ -9,6 +9,7 @@ the client is asked to ask again when a change to another file changes
 a document's tokens.
 
 -- lib/dgdtools.yml --
+root: .
 include_dirs: [/include]
 auto_objects: [/sys/auto]
 dialect: {closures: true}

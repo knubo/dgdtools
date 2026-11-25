@@ -26,7 +26,9 @@ func TestDiscoverWalksUpFromThePath(t *testing.T) {
 		"/mud/dgdtools.yml":         "root: lib\nprofile_build:\n  driver_config: etc/mud.dgd\n",
 		"/mud/etc/mud.dgd":          driverCfg,
 		"/mud/lib/d/Foo/castle.c":   "",
-		"/other/.dgdtools.yml":      "include_dirs: [/inc]\n",
+		"/other/.dgdtools.yml":      "root: .\ninclude_dirs: [/inc]\n",
+		"/noroot/dgdtools.yml":      "include_dirs: [/inc]\n",
+		"/noroot/lib/w.c":           "",
 		"/other/src/x.c":            "",
 		"/nowhere/deep/down/y.c":    "",
 		"/mud/lib/sub/dgdtools.yml": "root: .\n",
@@ -52,6 +54,13 @@ func TestDiscoverWalksUpFromThePath(t *testing.T) {
 	assert.Equal(t, "/other/.dgdtools.yml", prj.ConfigPath)
 	assert.Equal(t, "/other", prj.Root)
 	assert.Nil(t, prj.Config.Dialect.Typechecking)
+
+	// A config that does not say where the lib is: no root is guessed.
+	prj, err = Discover(m, []string{"/noroot/lib/w.c"}, DiscoverOptions{})
+	require.NoError(t, err)
+	assert.Equal(t, "/noroot/dgdtools.yml", prj.ConfigPath)
+	assert.Empty(t, prj.Root)
+	assert.False(t, prj.HasLib())
 
 	// No config anywhere: no root is invented.
 	prj, err = Discover(m, []string{"/nowhere/deep/down/y.c"}, DiscoverOptions{})
@@ -86,7 +95,7 @@ func TestDiscoverWalksUpFromThePath(t *testing.T) {
 
 func TestExplicitKeysBeatDriverConfig(t *testing.T) {
 	m := vfs.Mem{
-		"/mud/dgdtools.yml": "profile_build:\n  driver_config: mud.dgd\ninclude_dirs: [/mine]\ncreate: init\ndialect: {typechecking: 2}\n",
+		"/mud/dgdtools.yml": "root: .\nprofile_build:\n  driver_config: mud.dgd\ninclude_dirs: [/mine]\ncreate: init\ndialect: {typechecking: 2}\n",
 		"/mud/mud.dgd":      driverCfg,
 		"/mud/a.c":          "",
 	}

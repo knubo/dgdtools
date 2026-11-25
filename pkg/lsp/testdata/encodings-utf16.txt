@@ -3,6 +3,7 @@ code units, as every client can: the finding is six columns further left,
 and the change that mends it is sent in those columns.
 
 -- lib/dgdtools.yml --
+root: .
 -- lib/obj/a.c --
 void f() { /* blåbær € 😀 */ a == 1; }
 -- script --

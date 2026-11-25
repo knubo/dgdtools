@@ -6,6 +6,7 @@ parameter, a call whose receiver nobody knows; then the arguments of
 calls.
 
 -- lib/dgdtools.yml --
+root: .
 include_dirs: [/include]
 auto_objects: [/sys/auto]
 dialect:

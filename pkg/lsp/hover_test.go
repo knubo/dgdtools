@@ -224,7 +224,7 @@ func TestHoverInStub(t *testing.T) {
 // is shown when the call is still the same.
 func TestSignatureRetrigger(t *testing.T) {
 	files := map[string]string{
-		"dgdtools.yml": "",
+		"dgdtools.yml": "root: .\n",
 		"std/a.c":      "void create(int a) {}\n",
 		"std/b.c":      "void create(string b, int c) {}\nvoid other() {}\n",
 		"obj/x.c":      "inherit \"/std/a\";\ninherit \"/std/b\";\nvoid create() { ::create(1, 2); ::other(); }\n",
@@ -276,7 +276,7 @@ func TestSignatureRetrigger(t *testing.T) {
 // What is asked of a document the server says nothing about, and what
 // is asked badly.
 func TestHoverOfNothing(t *testing.T) {
-	dir := tree(t, map[string]string{"dgdtools.yml": "", "obj/a.c": "void f() { f(); }\n"})
+	dir := tree(t, map[string]string{"dgdtools.yml": "root: .\n", "obj/a.c": "void f() { f(); }\n"})
 	c := start(t)
 	c.Initialize(lsptest.Capabilities{}, dir)
 	c.Notify("textDocument/didOpen", lsp.DidOpenTextDocumentParams{TextDocument: lsp.TextDocumentItem{URI: "untitled:Untitled-1", Version: 1, Text: "void f() { f(); }\n"}})

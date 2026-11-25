@@ -5,6 +5,7 @@ there, or why not; a rename that must not be made is an error with the
 reason.
 
 -- lib/dgdtools.yml --
+root: .
 include_dirs: [/include]
 -- lib/include/std.h --
 #define BASE "/std/base"

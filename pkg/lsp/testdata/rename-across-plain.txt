@@ -2,6 +2,7 @@ Rename across files for a client that cannot confirm edits: the certain
 edits only, and the user is told of the possible one left.
 
 -- lib/dgdtools.yml --
+root: .
 include_dirs: [/include]
 -- lib/include/std.h --
 #define LIVING "/std/living"

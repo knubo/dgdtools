@@ -317,7 +317,7 @@ void f(object ob, string s) {
 func TestSignatureOfNothing(t *testing.T) {
 	assert.Nil(t, resolve.New(resolve.File{}).Signature(0))
 	assert.Nil(t, resolve.New(resolve.File{}).Hover(0))
-	w := newWorld(t, vfs.Mem{"/lib/dgdtools.yml": "", "/lib/a.c": "int x;\n", "/lib/b.c": "", "/lib/c.c": "void f() { f(); }"}, "/lib")
+	w := newWorld(t, vfs.Mem{"/lib/dgdtools.yml": "root: .\n", "/lib/a.c": "int x;\n", "/lib/b.c": "", "/lib/c.c": "void f() { f(); }"}, "/lib")
 	for _, path := range []string{"/lib/a.c", "/lib/b.c", "/lib/c.c"} {
 		doc, err := w.l.Lint(context.Background(), path, lint.Options{NoScan: true})
 		require.NoError(t, err)

@@ -276,8 +276,10 @@ need the lib root (the directory that is `/` to the driver).
    `dgdtools lint /any/where/lib/d/Foo/castle.c` works from any
    directory, as with ruff and clang-tidy. The nearest root config
    (`dgdtools.yml` or `.dgdtools.yml` that is not a settings scope,
-   [config.md](config.md) section 3) is the project; `root:` in it
-   (default: the config's directory) is the lib root. With no path
+   [config.md](config.md) section 3) is the project; `root:` in it is
+   the lib root. A config that does not say where the lib is (`root:`,
+   `profile:` or `lib_path:`) has none: its files get the file-local
+   rules, and a note says how to give it one. With no path
    arguments, discovery starts at the cwd and the whole root is linted.
 3. **One project per invocation.** If the arguments discover different
    root configs `dgdtools lint` exits 2 naming both, like `go` and

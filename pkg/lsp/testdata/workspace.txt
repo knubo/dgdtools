@@ -3,6 +3,7 @@ appears and goes, the project's configuration, and the settings an editor
 has for a folder without one.
 
 -- lib/dgdtools.yml --
+root: .
 include_dirs: [/include]
 profile_build:
   driver_config: ../mud.dgd
@@ -39,7 +40,7 @@ write lib/obj/chest.c "void open() {}\n"
 watched created lib/obj/chest.c
 diagnostics lib/obj/a.c
 # The configuration changes: a rule is turned off.
-write lib/dgdtools.yml "include_dirs: [/include]\nlint:\n  rules:\n    target-object-missing: off\n"
+write lib/dgdtools.yml "root: .\ninclude_dirs: [/include]\nlint:\n  rules:\n    target-object-missing: off\n"
 watched changed lib/dgdtools.yml
 diagnostics lib/obj/a.c
 # The project no longer reads the driver's configuration: the watchers
@@ -243,7 +244,7 @@ exit
 <   ]
 < }
 # The configuration changes: a rule is turned off.
-> write lib/dgdtools.yml "include_dirs: [/include]\nlint:\n  rules:\n    target-object-missing: off\n"
+> write lib/dgdtools.yml "root: .\ninclude_dirs: [/include]\nlint:\n  rules:\n    target-object-missing: off\n"
 > watched changed lib/dgdtools.yml
 > diagnostics lib/obj/a.c
 < {"uri": "file://$ROOT/lib/obj/a.c", "version": 1, "diagnostics": []}

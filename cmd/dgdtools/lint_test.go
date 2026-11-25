@@ -76,7 +76,7 @@ func TestLintFromAnywhere(t *testing.T) {
 	assert.Contains(t, errs, "--quiet: no such file or directory")
 
 	// Two projects in one invocation are refused.
-	other := tree(t, map[string]string{"dgdtools.yml": "", "b.c": ""})
+	other := tree(t, map[string]string{"dgdtools.yml": "root: .\n", "b.c": ""})
 	code, _, errs = dgdtools(t, "", "lint", file, filepath.Join(other, "b.c"))
 	assert.Equal(t, 2, code)
 	assert.Contains(t, errs, "dgdtools lint: paths belong to different projects")
@@ -84,7 +84,7 @@ func TestLintFromAnywhere(t *testing.T) {
 
 func TestLintOutputFormats(t *testing.T) {
 	dir := tree(t, map[string]string{
-		"dgdtools.yml": "",
+		"dgdtools.yml": "root: .\n",
 		"a.c":          "void f() {\n write(\"a\" \"b\");\n if (1) {\n}\n",
 	})
 	file := filepath.Join(dir, "a.c")
@@ -173,7 +173,7 @@ func TestLintOutputFormats(t *testing.T) {
 
 func TestLintSelectionAndFailOn(t *testing.T) {
 	dir := tree(t, map[string]string{
-		"dgdtools.yml": "",
+		"dgdtools.yml": "root: .\n",
 		"a.c":          "void f() {\n int x;\n if (x = 1) x == 2;\n}\n",
 	})
 	file := filepath.Join(dir, "a.c")
@@ -187,12 +187,12 @@ func TestLintSelectionAndFailOn(t *testing.T) {
 	code, _, _ = dgdtools(t, "", "lint", "--fail-on", "warning", file)
 	assert.Equal(t, 1, code)
 	// The flag wins over the configuration, either way.
-	write(t, dir, map[string]string{"dgdtools.yml": "lint: {fail_on: warning}\n"})
+	write(t, dir, map[string]string{"dgdtools.yml": "root: .\nlint: {fail_on: warning}\n"})
 	code, _, _ = dgdtools(t, "", "lint", file)
 	assert.Equal(t, 1, code)
 	code, _, _ = dgdtools(t, "", "lint", "--fail-on", "error", file)
 	assert.Equal(t, 0, code)
-	write(t, dir, map[string]string{"dgdtools.yml": ""})
+	write(t, dir, map[string]string{"dgdtools.yml": "root: .\n"})
 
 	_, out, _ = dgdtools(t, "", "lint", "--select", "S002", file)
 	assert.NotContains(t, out, "assignment-in-condition")
@@ -220,7 +220,7 @@ func TestLintSelectionAndFailOn(t *testing.T) {
 func TestLintSettingsScopes(t *testing.T) {
 	const bare = "int f() { return 1; }\n"
 	dir := tree(t, map[string]string{
-		"dgdtools.yml":             "lint:\n  rules: {missing-visibility: warning}\n  fail_on: error\n",
+		"dgdtools.yml":             "root: .\nlint:\n  rules: {missing-visibility: warning}\n  fail_on: error\n",
 		"std/a.c":                  bare,
 		"players/ann/dgdtools.yml": "root: false\nlint:\n  rules: {missing-visibility: error}\n",
 		"players/ann/b.c":          bare,
@@ -252,9 +252,37 @@ func TestLintSettingsScopes(t *testing.T) {
 	assert.Contains(t, errs, "unknown rule \"nope\"")
 }
 
+// A dgdtools.yml that does not say where the mudlib is does not make its
+// directory the root; one of settings only below a project is a scope of
+// that project without saying root: false.
+func TestLintRootIsNeverGuessed(t *testing.T) {
+	dir := tree(t, map[string]string{
+		"dgdtools.yml":      "format: {indent_width: 2}\n",
+		"lib/std/room.c":    "",
+		"lib/obj/hall.c":    "#include <std.h>\ninherit \"/std/room\";\n",
+		"lib/include/std.h": "",
+	})
+	code, out, errs := dgdtools(t, "", "lint", filepath.Join(dir, "lib"))
+	assert.Equal(t, 0, code, out)
+	assert.Empty(t, out)
+	assert.Contains(t, errs, filepath.Join(dir, "dgdtools.yml")+" does not say where the mudlib is (root:, profile: or lib_path:)")
+
+	dir = tree(t, map[string]string{
+		"dgdtools.yml":             "root: lib\n",
+		"lib/std/a.c":              "void f() {}\n",
+		"lib/usr/ann/dgdtools.yml": "lint:\n  rules: {missing-visibility: error}\n",
+		"lib/usr/ann/c.c":          "void g() { \"/std/a\"->f(); }\n",
+	})
+	code, out, errs = dgdtools(t, "", "lint", filepath.Join(dir, "lib/usr/ann/c.c"))
+	assert.Equal(t, 1, code, errs)
+	assert.Contains(t, out, "c.c:1:6: error:")
+	assert.NotContains(t, out, "R004")
+	assert.NotContains(t, out, "R001")
+}
+
 func TestLintBaseline(t *testing.T) {
 	dir := tree(t, map[string]string{
-		"dgdtools.yml": "",
+		"dgdtools.yml": "root: .\n",
 		"old.c":        "void f() {\n a = 1\n b = 2;\n}\n",
 	})
 	code, _, errs := dgdtools(t, "", "lint", "--write-baseline", dir)

@@ -268,6 +268,40 @@ type header struct {
 	Root    yaml.Node  `yaml:"root"`
 }
 
+// The kinds of configuration file, by what the file says.
+const (
+	// kindProject: the file has a project key (projectKeys), itself or
+	// in a file it extends. It is a project's root config wherever it is.
+	kindProject = iota
+	// kindSettings: the file has settings only. Below a project's config
+	// it is a settings scope of that project; with no project above, it
+	// is the config of a project without a lib.
+	kindSettings
+	// kindScope: the file says root: false, a settings scope.
+	kindScope
+)
+
+// kind classifies the configuration file at path.
+func kind(fs vfs.FS, path string) (int, error) {
+	head, _, err := readHeader(fs, path)
+	if err != nil {
+		return 0, err
+	}
+	if scope, err := head.scope(); err != nil {
+		return 0, fmt.Errorf("%s: %w", path, err)
+	} else if scope {
+		return kindScope, nil
+	}
+	c := &Config{}
+	if err := loadInto(fs, path, c, map[string]bool{}); err != nil {
+		return 0, err
+	}
+	if c.projectKey(false) != "" {
+		return kindProject, nil
+	}
+	return kindSettings, nil
+}
+
 // scope reports whether the file says `root: false`. A boolean is told
 // from a directory named like one by how it is written: `root: "false"`
 // is a path.
@@ -468,6 +502,17 @@ const SeverityOff = "off"
 // holds settings; everything else describes the project, of which there
 // is one, or a run.
 func (c *Config) validateScope() error {
+	if k := c.projectKey(true); k != "" {
+		return fmt.Errorf("%s belongs in the project's root config; this file is a settings scope (root: false, or nothing but settings below a project's config) and holds only lint.rules, lint.overrides and format", k)
+	}
+	return nil
+}
+
+// projectKey returns the name of the first key set that says what the
+// project is, or "" when the file has settings only. With run, the
+// settings only a root config may have (lint.fail_on, lint.baseline)
+// count too.
+func (c *Config) projectKey(run bool) string {
 	for _, k := range []struct {
 		name string
 		set  bool
@@ -485,27 +530,38 @@ func (c *Config) validateScope() error {
 		{"relative_object_paths", c.RelativeObjectPaths != ""},
 		{"conventions", !reflect.DeepEqual(c.Conventions, profile.Conventions{})},
 		{"profile_build", !reflect.DeepEqual(c.ProfileBuild, ProfileBuild{})},
-		{"lint.fail_on", c.Lint.FailOn != ""},
-		{"lint.baseline", c.Lint.Baseline != ""},
+		{"lint.fail_on", run && c.Lint.FailOn != ""},
+		{"lint.baseline", run && c.Lint.Baseline != ""},
 	} {
 		if k.set {
-			return fmt.Errorf("%s belongs in the project's root config; this file is a settings scope (root: false) and holds only lint.rules, lint.overrides and format", k.name)
+			return k.name
 		}
 	}
-	return nil
+	return ""
 }
 
-// FindRoot returns the nearest root config at or above dir (an absolute
-// path), or "". Settings scopes on the way are passed over: they belong
-// to whatever project is above them.
+// FindRoot returns the root config of the project dir (an absolute path)
+// belongs to, or "": the nearest configuration file at or above it that
+// places the mudlib (root:, profile: or lib_path:). Settings scopes on the
+// way are passed over: they belong to whatever project is above them. A
+// file that says nothing of the mudlib is a settings scope of a project
+// above it; when there is none, the outermost such file is the config of
+// a project without a lib.
 func FindRoot(fs vfs.FS, dir string) (string, error) {
+	settings := ""
 	for {
-		if p, err := rootIn(fs, dir); p != "" || err != nil {
-			return p, err
+		p, k, err := rootIn(fs, dir)
+		switch {
+		case err != nil:
+			return "", err
+		case p != "" && k == kindProject:
+			return p, nil
+		case p != "":
+			settings = p
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
-			return "", nil
+			return settings, nil
 		}
 		dir = parent
 	}
@@ -521,30 +577,32 @@ func fileIn(fs vfs.FS, dir string) string {
 	return ""
 }
 
-// rootIn returns the root config in dir: its config file, unless that is
-// a settings scope.
-func rootIn(fs vfs.FS, dir string) (string, error) {
+// rootIn returns the config file in dir that may be a project's root
+// config, and its kind (kindProject or kindSettings): "" when there is
+// none or it says root: false.
+func rootIn(fs vfs.FS, dir string) (string, int, error) {
 	p := fileIn(fs, dir)
 	if p == "" {
-		return "", nil
+		return "", 0, nil
 	}
-	head, _, err := readHeader(fs, p)
-	if err != nil {
-		return "", err
+	k, err := kind(fs, p)
+	if err != nil || k == kindScope {
+		return "", 0, err
 	}
-	if scope, err := head.scope(); err != nil {
-		return "", fmt.Errorf("%s: %w", p, err)
-	} else if scope {
-		return "", nil
-	}
-	return p, nil
+	return p, k, nil
 }
 
 // AbsRoot returns the lib root: Root as given when it is absolute, else
-// relative to the config file's directory, which is the default.
+// relative to the config file's directory. Without root: it is the config
+// file's directory when the file places the mudlib by profile: or
+// lib_path:, and "" when the file says nothing of the mudlib: a root is
+// never guessed.
 func (c *Config) AbsRoot() string {
-	if filepath.IsAbs(c.Root) {
+	switch {
+	case filepath.IsAbs(c.Root):
 		return filepath.Clean(c.Root)
+	case c.Root == "" && c.Profile == "" && c.LibPath == "":
+		return ""
 	}
 	return filepath.Join(c.Dir, c.Root)
 }

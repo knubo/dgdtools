@@ -90,9 +90,14 @@ works at any level.
 
 A `dgdtools.yml` is one of two things.
 
-- A **root config** (the default) defines a project. Its directory, or
-  its `root:`, is the lib root.
-- A **settings scope** says `root: false`. It adjusts `lint:` and
+- A **root config** defines a project: it has a project key (`root`,
+  `profile`, `lib_path`, `exclude`, `dialect`, ...). Its `root:` is the
+  lib root. Without `root:` the root is never guessed: with `profile:`
+  or `lib_path:` the config's directory is a checkout, and with neither
+  the project has no lib and gets the file-local rules, with a note
+  that says so (`root: .` makes the config's directory the lib root).
+- A **settings scope** holds nothing but `lint:` and `format:`
+  settings, or says `root: false`. It adjusts `lint:` and
   `format:` for the files under its directory, inside whatever project
   those files belong to. Any other key in it is an error naming the key
   (`usr/ann/dgdtools.yml: exclude belongs in the project's root
@@ -116,7 +121,10 @@ lint:
 
 **Finding the project of a path.** Walk up from the path; the first
 `dgdtools.yml` that is not a settings scope is the project's root
-config. Scopes on the way are skipped, so files under different scopes
+config. A file of settings only is a scope when a root config is above
+it; when none is, the outermost such file is the config of a project
+without a lib, whose settings the files under it are formatted and
+linted by. Scopes on the way are skipped, so files under different scopes
 of one lib are one project, and "one project per invocation" (a lint run
 has exactly one lib) is about root configs only.
 

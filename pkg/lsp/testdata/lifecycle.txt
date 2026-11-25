@@ -2,6 +2,7 @@ The life of a session: nothing before initialize, what the server says it
 can do, a document opened, changed, saved and closed, and the end.
 
 -- lib/dgdtools.yml --
+root: .
 lint:
   rules:
     unused-suppression: warning

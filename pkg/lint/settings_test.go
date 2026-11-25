@@ -123,7 +123,7 @@ func TestUnformattedFollowsTheFormatter(t *testing.T) {
 	const spaces = "void\nf()\n{\n    x = 1;\n}\n"
 	const tabs = "void\nf()\n{\n\tx = 1;\n}\n"
 	m := vfs.Mem{
-		"/lib/dgdtools.yml":            "lint:\n  rules: {unformatted: warning}\n",
+		"/lib/dgdtools.yml":            "root: .\nlint:\n  rules: {unformatted: warning}\n",
 		"/lib/a.c":                     spaces,
 		"/lib/b.c":                     tabs,
 		"/lib/tabs/dgdtools.yml":       "root: false\nformat: {indent_style: tab}\n",

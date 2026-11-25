@@ -5,6 +5,7 @@ several bytes; then names found across the lib, the best match first,
 with the object or the header that declares each.
 
 -- lib/dgdtools.yml --
+root: .
 include_dirs: [/include]
 -- lib/include/std.h --
 /* Grundläggande */ #define BASE "/std/base"

@@ -15,14 +15,16 @@
 #
 # The top-level keys say what the project is. The two sections at the
 # end, `format:` and `lint:`, are settings; a dgdtools.yml further down
-# the tree that says `root: false` can adjust them for its directory
+# the tree that holds only those can adjust them for its directory
 # (see the end of this file).
 
 # extends: ../shared/dgdtools.yml   # start from another file: scalars and
 #                                   # lists replace, maps merge
 
 root: lib                    # filesystem directory that is the lib's "/"
-                             # (default: this file's directory)
+                             # (`.` for this file's directory; never guessed:
+                             # without root, profile or lib_path only the
+                             # file-local rules run)
 
 # profile: NAME              # work against a profile instead: NAME.profile
 #                            # next to this file, in $DGDTOOLS_PROFILE_PATH or
@@ -181,8 +183,9 @@ lint:
 
 # ------------------------------------------------------- a settings scope
 #
-# A dgdtools.yml below this one that says `root: false` adjusts format:
-# and lint: for the files under its directory, and may hold nothing else:
+# A dgdtools.yml below this one that holds nothing but format: and lint:
+# adjusts them for the files under its directory. `root: false` says so
+# explicitly, and makes any other key in it an error:
 #
 #     # usr/name/dgdtools.yml
 #     root: false

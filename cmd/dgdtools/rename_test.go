@@ -15,7 +15,7 @@ import (
 // nobody can tell, a variable save_object writes, a header's macro.
 func renameLib() map[string]string {
 	return map[string]string{
-		"lib/dgdtools.yml":               "include_dirs: [/include]\n",
+		"lib/dgdtools.yml":               "root: .\ninclude_dirs: [/include]\n",
 		"lib/include/std.h":              "#define LIVING \"/std/living\"\n",
 		"lib/std/living.c":               "#include <std.h>\nint hp;\nstring query_name() { return \"x\"; }\n",
 		"lib/obj/monster.c":              "#include <std.h>\ninherit LIVING;\nstring query_name() { return \"m\"; }\n",

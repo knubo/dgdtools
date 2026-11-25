@@ -287,18 +287,28 @@ func (prj *Project) scopesAt(dir string) *scopeList {
 }
 
 // loadScope loads the settings scope at path; nil when the file is a
-// root config, which is not read further: it is another project's.
+// root config, which is not read further: it is another project's. A
+// file that says nothing of the mudlib is a settings scope here, below
+// the project's config, as one that says root: false is.
 func loadScope(fs vfs.FS, path string) (*Config, error) {
-	head, _, err := readHeader(fs, path)
-	if err != nil {
+	k, err := kind(fs, path)
+	switch {
+	case err != nil:
+		return nil, err
+	case k == kindProject:
+		return nil, nil
+	case k == kindScope:
+		return Load(fs, path)
+	}
+	c := &Config{}
+	if err := loadInto(fs, path, c, map[string]bool{}); err != nil {
 		return nil, err
 	}
-	if scope, err := head.scope(); err != nil {
+	c.Dir, c.Path, c.Scope = filepath.Dir(path), path, true
+	if err := c.Validate(); err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
-	} else if !scope {
-		return nil, nil
 	}
-	return Load(fs, path)
+	return c, nil
 }
 
 // top returns the highest directory whose configuration file can apply

@@ -3,6 +3,7 @@ UTF-8 and reads a parameter as its text: the same answers without the
 marks.
 
 -- lib/dgdtools.yml --
+root: .
 include_dirs: [/include]
 -- lib/include/std.h --
 /* Grundläggande */ #define BASE "/std/base"

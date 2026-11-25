@@ -91,7 +91,8 @@ func (w *world) rename(path, at, name string) string {
 	return src
 }
 
-const cfg = `include_dirs: [/include]
+const cfg = `root: .
+include_dirs: [/include]
 auto_objects: [/sys/auto]
 conventions:
   call_registry:

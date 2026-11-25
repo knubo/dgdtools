@@ -103,7 +103,7 @@ func TestTokens(t *testing.T) {
 
 func TestTokensOfEachKind(t *testing.T) {
 	fs := vfs.Mem{
-		"/lib/dgdtools.yml": "dialect: {closures: true}\nauto_objects: [/sys/auto]\nconventions: {specifier_macros: [public]}\n",
+		"/lib/dgdtools.yml": "root: .\ndialect: {closures: true}\nauto_objects: [/sys/auto]\nconventions: {specifier_macros: [public]}\n",
 		"/lib/sys/auto.c":   "void autof() {}\n",
 		"/lib/std/base.c":   "static int hidden;\nint shown;\nstatic void sfn() {}\n",
 		"/lib/obj/a.c": `inherit "/std/base";
