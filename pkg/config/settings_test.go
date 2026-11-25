@@ -348,6 +348,50 @@ func TestLibPathOption(t *testing.T) {
 	assert.Equal(t, "/home/ann/sub", prj.CheckoutDir)
 }
 
+// What an editor's user said of a folder holds for the paths under it
+// that no config file claims, and makes them a project of the folder's.
+func TestFolders(t *testing.T) {
+	m := vfs.Mem{
+		"/home/ann/a.c":              "",
+		"/home/ann/sub/b.c":          "",
+		"/home/ann/lib/dgdtools.yml": "lib_path: /players/ann/lib\n",
+		"/home/ann/lib/c.c":          "",
+		"/home/bob/d.c":              "",
+		"/elsewhere/e.c":             "",
+	}
+	opt := DiscoverOptions{Folders: []Folder{
+		{Dir: "/home/ann", LibPath: "/players/ann"},
+		{Dir: "/home/bob", LibPath: "/players/bob"},
+	}}
+	w := NewWorkspace(m, opt)
+	project := func(path string) *Project {
+		t.Helper()
+		prj, err := w.Project(path)
+		require.NoError(t, err)
+		return prj
+	}
+	ann := project("/home/ann/sub/b.c")
+	assert.Equal(t, "/home/ann", ann.CheckoutDir, "anchored at the folder, whichever file is asked about first")
+	assert.Equal(t, "/players/ann", ann.CheckoutLib)
+	assert.Same(t, ann, project("/home/ann/a.c"))
+	bob := project("/home/bob/d.c")
+	assert.Equal(t, "/home/bob", bob.CheckoutDir)
+	assert.Equal(t, "/players/bob", bob.CheckoutLib)
+	// A config file wins, and a path in no folder is as it ever was.
+	assert.Equal(t, "/players/ann/lib", project("/home/ann/lib/c.c").CheckoutLib)
+	assert.False(t, project("/elsewhere/e.c").HasLib())
+	// A command's one project is found the same way.
+	prj, err := Discover(m, []string{"/home/ann/sub/b.c"}, opt)
+	require.NoError(t, err)
+	assert.Equal(t, "/home/ann", prj.CheckoutDir)
+	// A config file that appears in a folder takes its files from it.
+	m["/home/bob/dgdtools.yml"] = "lib_path: /players/robert\n"
+	dropped, changed := w.Invalidate("/home/bob/dgdtools.yml")
+	assert.True(t, changed)
+	assert.Contains(t, dropped, bob)
+	assert.Equal(t, "/players/robert", project("/home/bob/d.c").CheckoutLib)
+}
+
 func TestEditorConfig(t *testing.T) {
 	m := vfs.Mem{
 		"/.editorconfig":         "[*]\nindent_size = 7\nend_of_line = crlf\n",

@@ -9,7 +9,9 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/mmcdole/dgdtools/pkg/diag"
+	"github.com/mmcdole/dgdtools/pkg/lexer"
 	"github.com/mmcdole/dgdtools/pkg/lint"
+	"github.com/mmcdole/dgdtools/pkg/token"
 )
 
 // suppress lints src with no-effect-statement, sscanf-format and the two
@@ -145,3 +147,85 @@ func TestUnusedSuppressions(t *testing.T) {
 	assert.True(t, strings.HasPrefix(got[0], "2 unused-suppression nothing to ignore: no finding on line 2"), got[0])
 	assert.True(t, strings.HasPrefix(got[1], "2 invalid-suppression unused-suppression is about these comments themselves"), got[1])
 }
+
+// Suppress writes the comment a finding is ignored by: applied, the
+// finding is gone, every other one stands, and no comment is wrong.
+func TestSuppress(t *testing.T) {
+	sources := map[string]string{
+		"plain": "void f() {\n    a == 1;\n\tb == 2; c == 3;\n}\n",
+		// A comment that is about the line already takes the rule too.
+		"merge above":         "void f() {\n    /* dgdtools-ignore lint/sscanf-format: why */\n    a == 1;\n}\n",
+		"merge beside":        "void f() {\n    a == 1; // dgdtools-ignore lint/sscanf-format\n}\n",
+		"crlf":                "void f() {\r\n    a == 1;\r\n}\r\n",
+		"no final line break": "void f() {\n    a == 1; }",
+		// The line break before the finding's line is inside a comment
+		// or a directive: no line can be put there.
+		"in a comment": "void f() { /* one\n two */ a == 1;\n}\n",
+		"in a macro":   "#define F void f() { \\\n    a == 1; }\nF\nvoid g() { b == 2; }\n",
+		"a range ends above": "void f() {\n/* dgdtools-ignore-start lint/no-effect-statement */\n a == 1;\n" +
+			"/* dgdtools-ignore-end lint/no-effect-statement */\n b == 2;\n}\n",
+	}
+	sel := lint.Options{Select: []string{"no-effect-statement", "invalid-suppression", "unused-suppression"}}
+	for name, src := range sources {
+		t.Run(name, func(t *testing.T) {
+			res, before := suppress(t, src, sel)
+			require.NotEmpty(t, before)
+			for _, d := range res.Diagnostics {
+				if d.Rule != "no-effect-statement" {
+					continue
+				}
+				fixes := lint.Suppress(lex(src), d)
+				var titles []string
+				for _, fix := range fixes {
+					titles = append(titles, fix.Title)
+					assert.Equal(t, diag.Unsafe, fix.Applicability)
+					out := src
+					for _, e := range fix.Edits {
+						out = out[:e.Start] + e.NewText + out[e.End:]
+					}
+					_, after := suppress(t, out, sel)
+					byFile := strings.HasSuffix(fix.Title, "this file")
+					var want []string
+					for j, other := range res.Diagnostics {
+						// A comment is about a rule on a line, or in the file.
+						if other.Rule != d.Rule || !(byFile || other.Line == d.Line) {
+							want = append(want, strings.SplitN(before[j], " ", 2)[1])
+						}
+					}
+					var got []string
+					for _, a := range after {
+						got = append(got, strings.SplitN(a, " ", 2)[1])
+					}
+					assert.Equal(t, want, got, "%s:\n%s", fix.Title, out)
+					if strings.Contains(src, "\r\n") {
+						assert.NotContains(t, strings.ReplaceAll(out, "\r\n", ""), "\n", "the file's line breaks")
+					}
+				}
+				switch name {
+				case "in a comment":
+					assert.Equal(t, []string{"Suppress no-effect-statement for this file"}, titles)
+				case "in a macro":
+					if d.Line == 2 {
+						assert.Equal(t, []string{"Suppress no-effect-statement for this file"}, titles)
+					}
+				case "a range ends above":
+					assert.Equal(t, []string{"Suppress no-effect-statement for this line"}, titles)
+				default:
+					assert.Equal(t, []string{"Suppress no-effect-statement for this line", "Suppress no-effect-statement for this file"}, titles)
+				}
+			}
+		})
+	}
+
+	// The comment is indented as the line it is about.
+	src := sources["plain"]
+	res, _ := suppress(t, src, sel)
+	fix := lint.Suppress(lex(src), res.Diagnostics[1])[0]
+	assert.Equal(t, "\t/* dgdtools-ignore lint/no-effect-statement */\n", fix.Edits[0].NewText)
+	// The rules about the comments themselves are not ignored by one.
+	res, _ = suppress(t, "/* dgdtools-ignore lint/nope */\nint x;\n", sel)
+	require.Len(t, res.Diagnostics, 1)
+	assert.Empty(t, lint.Suppress(lex("/* dgdtools-ignore lint/nope */\nint x;\n"), res.Diagnostics[0]))
+}
+
+func lex(src string) *token.File { return lexer.Lex("/lib/obj/t.c", []byte(src), lexer.Default) }

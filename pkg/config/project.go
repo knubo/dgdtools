@@ -109,6 +109,48 @@ type DiscoverOptions struct {
 	// the root config of a path that has no project config. It need not
 	// exist.
 	UserConfig string
+	// Folders are directories somebody has spoken for without writing a
+	// config file: an editor's workspace folders, with the profile and
+	// the lib path their user set for them. They speak only for the
+	// paths under them that have no project config; a config file
+	// always wins. Such paths are a project of their folder's, anchored
+	// there, instead of sharing the one of all paths without a config.
+	Folders []Folder
+}
+
+// Folder is a directory and what is known of it without a config file.
+type Folder struct {
+	// Dir is the directory, an absolute path.
+	Dir string
+	// Profile and LibPath are to the paths under Dir what the options
+	// of the same names are to every path: the profile to work against
+	// and the lib path of Dir. Either may be empty.
+	Profile, LibPath string
+}
+
+// inFolder returns the options for a path in dir that has no project
+// config, and where its project is anchored: when dir lies in one of
+// opt.Folders, the innermost such folder says both.
+func (opt DiscoverOptions) inFolder(dir string) (DiscoverOptions, string, bool) {
+	var in *Folder
+	for i := range opt.Folders {
+		f := &opt.Folders[i]
+		if _, under := fileset.Under(f.Dir, dir); under && (in == nil || len(f.Dir) > len(in.Dir)) {
+			in = f
+		}
+	}
+	if in == nil {
+		return opt, dir, false
+	}
+	// What was said of every path (a flag) is not unsaid by a folder.
+	if opt.Profile == "" {
+		opt.Profile = in.Profile
+	}
+	if opt.LibPath == "" {
+		opt.LibPath = in.LibPath
+	}
+	opt.WorkDir = filepath.Clean(in.Dir)
+	return opt, opt.WorkDir, true
 }
 
 // UserConfigPath returns where the user-level configuration is looked
@@ -184,6 +226,9 @@ func Discover(fs vfs.FS, paths []string, opt DiscoverOptions) (*Project, error) 
 			}
 			found = p
 		}
+	}
+	if found == "" && base != "" {
+		opt, base, _ = opt.inFolder(base)
 	}
 	return resolve(fs, opt, found, base)
 }
@@ -347,7 +392,8 @@ func NewWorkspace(fs vfs.FS, opt DiscoverOptions) *Workspace {
 // Project returns the project of the file or directory at path
 // (absolute): that of the nearest root config at or above it, as
 // Discover finds it. Paths without one share a project, the user-level
-// configuration's when there is one.
+// configuration's when there is one; those under one of the options'
+// Folders are that folder's project.
 func (w *Workspace) Project(path string) (*Project, error) {
 	dir := filepath.Clean(path)
 	if !w.fs.IsDir(dir) {
@@ -362,11 +408,18 @@ func (w *Workspace) Project(path string) (*Project, error) {
 			return nil, err
 		}
 	}
-	f := w.projects[root]
+	key, opt := root, w.opt
+	if root == "" {
+		var in bool
+		if opt, dir, in = opt.inFolder(dir); in {
+			key = "\x00" + dir // no config file's path
+		}
+	}
+	f := w.projects[key]
 	if f == nil {
 		f = &found{}
-		f.prj, f.err = resolve(w.fs, w.opt, root, dir)
-		w.projects[root] = f
+		f.prj, f.err = resolve(w.fs, opt, root, dir)
+		w.projects[key] = f
 	}
 	return f.prj, f.err
 }

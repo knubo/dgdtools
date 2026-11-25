@@ -3,6 +3,7 @@ package lint
 import (
 	"bytes"
 	"fmt"
+	"sort"
 
 	"github.com/mmcdole/dgdtools/pkg/diag"
 	"github.com/mmcdole/dgdtools/pkg/directive"
@@ -48,11 +49,7 @@ func (l *Linter) suppressions(f *token.File) *suppressions {
 	if !bytes.Contains(f.Src, []byte(directive.Prefix)) {
 		return s
 	}
-	// The lines that have code on them.
-	code := map[int]bool{}
-	for _, t := range f.Significant() {
-		code[f.Pos(t.Off).Line] = true
-	}
+	code := codeLines(f)
 	open := map[string]*ignore{} // the ranges not yet ended, by rule
 	formatOff := 0               // the line the formatter was turned off at
 	bad := func(off, end uint32, format string, args ...any) {
@@ -65,13 +62,7 @@ func (l *Linter) suppressions(f *token.File) *suppressions {
 			bad(d.Off, d.End, "%s names nothing to ignore: say lint/RULE or format", d.Form)
 			continue
 		}
-		// The line a plain directive is about.
-		line := to + 1
-		if code[from] {
-			line = from
-		} else if code[to] {
-			line = to
-		}
+		line := lineOf(code, from, to)
 		if d.Form == directive.End && len(d.Targets) == 0 {
 			if len(open) == 0 && formatOff == 0 {
 				bad(d.Off, d.End, "nothing to end: no %s above", directive.Start)
@@ -146,6 +137,105 @@ func (l *Linter) suppressions(f *token.File) *suppressions {
 		}
 	}
 	return s
+}
+
+// codeLines returns the lines of f that have code on them.
+func codeLines(f *token.File) map[int]bool {
+	code := map[int]bool{}
+	for _, t := range f.Significant() {
+		code[f.Pos(t.Off).Line] = true
+	}
+	return code
+}
+
+// lineOf returns the line a plain directive is about, whose comment
+// begins on line from and ends on line to: the line of code it stands
+// on, or the next line when it stands alone.
+func lineOf(code map[int]bool, from, to int) int {
+	switch {
+	case code[from]:
+		return from
+	case code[to]:
+		return to
+	}
+	return to + 1
+}
+
+// Suppress returns the comments that would make the linter say nothing
+// of the finding d of the file f, each as a fix: one for the finding's
+// line, and one for the rule in the whole file. They change what is
+// reported and not what the code does, so nobody applies them unasked
+// (diag.Unsafe). A finding no comment suppresses (Rule.Late) has none,
+// and a line a comment cannot be put above has only the second.
+//
+// A comment that is already about the line is given the rule too, since
+// a second comment above it would be about the first.
+func Suppress(f *token.File, d diag.Diagnostic) []diag.Fix {
+	r := RuleByName(d.Rule)
+	if r == nil || r.Late || d.Line < 1 || d.Line > len(f.Lines) {
+		return nil
+	}
+	target := directive.Lint + "/" + r.Name
+	var fixes []diag.Fix
+	line := func(e diag.TextEdit) {
+		fixes = append(fixes, diag.Fix{Title: "Suppress " + r.Name + " for this line", Edits: []diag.TextEdit{e}})
+	}
+	code, start, ranged := codeLines(f), f.Lines[d.Line-1], false
+	var about *directive.Directive
+	for _, dir := range directive.Scan(f) {
+		for _, t := range dir.Targets {
+			if x := RuleByName(t.Rule); dir.Form == directive.Start && t.Tool == directive.Lint && x != nil && x.Name == r.Name {
+				ranged = true
+			}
+		}
+		if dir.Form == directive.Line && len(dir.Targets) > 0 && lineOf(code, f.Pos(dir.Off).Line, f.Pos(dir.End).Line) == d.Line {
+			about = &dir
+		}
+	}
+	nl := newlineOf(f, d.Line)
+	switch {
+	case about != nil:
+		line(diag.TextEdit{Start: about.Targets[len(about.Targets)-1].End, End: about.Targets[len(about.Targets)-1].End, NewText: ", " + target})
+	case start == 0 || endsLine(f, start):
+		indent := start
+		for int(indent) < len(f.Src) && (f.Src[indent] == ' ' || f.Src[indent] == '\t') {
+			indent++
+		}
+		line(diag.TextEdit{Start: start, End: start,
+			NewText: string(f.Src[start:indent]) + "/* " + directive.Prefix + " " + target + " */" + nl})
+	}
+	// A range that is open twice is an error of its own, so a file that
+	// has one for the rule anywhere is left to whoever wrote it.
+	if !ranged {
+		fixes = append(fixes, diag.Fix{Title: "Suppress " + r.Name + " for this file", Edits: []diag.TextEdit{{
+			NewText: "/* " + directive.Prefix + "-start " + target + " */" + nl}}})
+	}
+	return fixes
+}
+
+// endsLine reports whether a line break of the code ends just before
+// off: one that is no part of a comment, a string or a directive's
+// continued line, so that a line put in there is a line of its own.
+func endsLine(f *token.File, off uint32) bool {
+	i := sort.Search(len(f.Tokens), func(i int) bool { return f.Tokens[i].End >= off })
+	return i < len(f.Tokens) && f.Tokens[i].End == off && f.Tokens[i].Kind == token.Newline
+}
+
+// newlineOf returns the line break of the given line of f, that of the
+// line before when it is the last and has none, "\n" in a file of one
+// line.
+func newlineOf(f *token.File, line int) string {
+	for ; line >= 1; line-- {
+		if line >= len(f.Lines) {
+			continue
+		}
+		end := f.Lines[line]
+		if end >= 2 && f.Src[end-2] == '\r' && f.Src[end-1] == '\n' {
+			return "\r\n"
+		}
+		return string(f.Src[end-1 : end])
+	}
+	return "\n"
 }
 
 // suppressed reports whether a comment covers the rule's finding on the
