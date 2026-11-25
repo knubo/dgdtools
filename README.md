@@ -5,8 +5,9 @@ LPC, in one command:
 
 - **`dgdtools lint`** finds what the driver will reject at load time
   (syntax errors, constructs DGD does not accept, missing includes) and
-  what it will not notice at all (calls to functions and objects that do
-  not exist).
+  what it will not notice at all (calls by name, `ob->fn()`,
+  `call_other` and `call_out`, to functions and objects that do not
+  exist).
 - **`dgdtools format`** is a code formatter in the gofmt tradition: one
   style, no line wrapping, and a proof for every file that only
   whitespace changed.
@@ -416,7 +417,7 @@ never guessed. A file outside the root gets the file-local rules only.
 | Group | Codes | What it finds |
 |---|---|---|
 | `syntax` | `E…` | what the DGD compiler rejects: an object with one does not load |
-| `runtime` | `R…` | code that compiles and then fails or silently returns nil: calls to functions and objects that do not exist |
+| `runtime` | `R…` | code that compiles and then fails or silently returns nil: calls by name (`->`, `call_other`, `call_out`, the lib's registrars) to functions and objects that do not exist |
 | `suspicious` | `S…` | legal constructs that are probably not what was meant |
 | `convention` | `C…` | a mudlib's own policy; off until asked for |
 

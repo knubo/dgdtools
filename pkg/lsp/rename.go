@@ -146,7 +146,7 @@ func (s *server) annotate(plan *rename.Plan, byPath map[string][]edit) map[strin
 
 // planMessage tells the user what the plan has to tell beside its edits
 // (rename.Plan.Notes), in one message: by window/showMessage when there is
-// something to look at (possible places left unchanged, calls that may
+// something to look at (possible places, ticked or not, calls that may
 // call the renamed function, an edited file that is not UTF-8), else only
 // in the log (window/logMessage). annotated says the possible edits are
 // in the edit, unticked; name says how a file is named; notUTF8 are the
@@ -178,7 +178,7 @@ func (s *server) planMessage(plan *rename.Plan, annotated bool, name func(string
 				text += "; `dgdtools rename --include-possible` renames " + verb(possible, "it", "them") + " too"
 			}
 		}
-		look = look || n.Look(false) && !(n.Kind == rename.NotePossible && annotated && len(plan.PossibleEdits) == possible)
+		look = look || n.Look(false)
 		parts = append(parts, text)
 	}
 	if len(notUTF8) > 0 {

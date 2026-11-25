@@ -571,8 +571,8 @@ are of the files as they are, before the move.
   preview, or not renamed, the first few listed with
   `dgdtools rename --include-possible` named), refusals and the
   dynamic calls that may reach the function go to `window/showMessage`;
-  warnings that need no action (inherited base files, files not valid
-  UTF-8 on disk) to `window/logMessage`. A successful rename with
+  so do edits in a file on disk that is not valid UTF-8; warnings that
+  need no action (inherited base files) go to `window/logMessage`. A successful rename with
   nothing to say says nothing. The wording is the library's
   (`rename.Plan`'s summary), the same as the command's.
 
