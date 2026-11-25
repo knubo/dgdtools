@@ -151,6 +151,33 @@ func (u *Unit) Uses(name string) []Use {
 	return out
 }
 
+// UsesWith returns the file's Uses whose Aux is aux (the object a call
+// is made in, the file an #include resolves to, ...), by name and then
+// in the order of the file.
+func (u *Unit) UsesWith(aux string) []Use {
+	us := u.uses
+	if us == nil || aux == "" {
+		return nil
+	}
+	h := unique.Make(aux)
+	var which []uint32
+	for i, a := range us.aux {
+		if a.aux == h {
+			which = append(which, uint32(i+1))
+		}
+	}
+	if which == nil {
+		return nil
+	}
+	var out []Use
+	for i := range us.len() {
+		if slices.Contains(which, us.at(i).aux) {
+			out = append(out, us.use(i))
+		}
+	}
+	return out
+}
+
 // AllUses returns the file's Uses, by name and then in the order of the
 // file.
 func (u *Unit) AllUses() []Use {

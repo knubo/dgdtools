@@ -31,6 +31,7 @@ func filesLib() vfs.Mem {
 		"/lib/obj/c.c":                "void f() { clone_object(\"/std/room\"); clone_object(\"/std/room.c\"); }\n",
 		"/lib/obj/d.c":                "#include \"/std/room.h\"\n#include <sub/deep.h>\nint x;\n",
 		"/lib/obj/e.c":                "inherit \"/obj/a\";\n#include \"../std/room.h\"\n",
+		"/lib/obj/f.c":                "#include <std.h>\nvoid f() { \"/std/room\"->g(); call_other(\"/std/room.c\", \"g\"); ROOM->g(); }\n",
 		"/lib/players/ann/workroom.c": "inherit \"std/room\";\n",
 	}
 }
@@ -97,9 +98,13 @@ func TestFiles(t *testing.T) {
 inherit "/std/place";
 == /lib/obj/c.c
 void f() { clone_object("/std/place"); clone_object("/std/place.c"); }
+== /lib/obj/f.c
+#include <std.h>
+void f() { "/std/place"->g(); call_other("/std/place.c", "g"); ROOM->g(); }
 == /lib/players/ann/workroom.c
 inherit "std/place";
 possible /lib/obj/b.c:2:9 names /std/room.c by the macro ROOM, which other files may use too: not rewritten
+possible /lib/obj/f.c:2:62 names /std/room.c by the macro ROOM, which other files may use too: not rewritten
 ! moved base files: /std/room.c (4 objects inherit it); an object keeps the program it was compiled with, so the move takes effect everywhere at the scheduled reboot
 `,
 	}, {
@@ -109,12 +114,16 @@ possible /lib/obj/b.c:2:9 names /std/room.c by the macro ROOM, which other files
 inherit "/domain/room";
 == /lib/obj/c.c
 void f() { clone_object("/domain/room"); clone_object("/domain/room.c"); }
+== /lib/obj/f.c
+#include <std.h>
+void f() { "/domain/room"->g(); call_other("/domain/room.c", "g"); ROOM->g(); }
 == /lib/players/ann/workroom.c
 inherit "domain/room";
 == /lib/std/room.c
 #include "/std/room.h"
 int light;
 possible /lib/obj/b.c:2:9 names /std/room.c by the macro ROOM, which other files may use too: not rewritten
+possible /lib/obj/f.c:2:62 names /std/room.c by the macro ROOM, which other files may use too: not rewritten
 ! moved base files: /std/room.c (4 objects inherit it); an object keeps the program it was compiled with, so the move takes effect everywhere at the scheduled reboot
 `,
 	}, {
@@ -150,9 +159,13 @@ int x;
 == /lib/obj/e.c
 inherit "/obj/a";
 #include "../base/room.h"
+== /lib/obj/f.c
+#include <std.h>
+void f() { "/base/room"->g(); call_other("/base/room.c", "g"); ROOM->g(); }
 == /lib/players/ann/workroom.c
 inherit "base/room";
 possible /lib/obj/b.c:2:9 names /std/room.c by the macro ROOM, which other files may use too: not rewritten
+possible /lib/obj/f.c:2:62 names /std/room.c by the macro ROOM, which other files may use too: not rewritten
 ! moved base files: /std/room.c (4 objects inherit it); an object keeps the program it was compiled with, so the move takes effect everywhere at the scheduled reboot
 `,
 	}, {

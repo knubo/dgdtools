@@ -14,6 +14,7 @@ import (
 	"github.com/mmcdole/dgdtools/pkg/index"
 	"github.com/mmcdole/dgdtools/pkg/pp"
 	"github.com/mmcdole/dgdtools/pkg/resolve"
+	"github.com/mmcdole/dgdtools/pkg/syntax"
 )
 
 // Move is a file or a directory of the lib that moves (is renamed), by
@@ -127,19 +128,51 @@ func Files(ctx context.Context, snap *index.Snapshot, moves []Move) (*Plan, erro
 				}
 			}
 		}
+		// The calls made in a moved object by its path: the receiver.
+		if len(names) > 1 {
+			for _, u := range units {
+				for _, use := range u.UsesWith(names[1]) {
+					if use.Kind == index.UseFunction && use.Form == index.FormPath {
+						refs = append(refs, ref{u, use})
+					}
+				}
+			}
+		}
 		u := fm.units[m.From]
 		if u == nil {
 			u = snap.UnitAt(m.From)
 		}
 		if u != nil {
 			for _, use := range u.AllUses() {
-				refs = append(refs, ref{u, use})
+				if use.Kind == index.UseObject || use.Kind == index.UseInclude || use.Kind == index.UseFunction && use.Form == index.FormPath {
+					refs = append(refs, ref{u, use})
+				}
 			}
 		}
 	}
 	srcs := map[string][]byte{}
 	seen := map[[2]any]bool{}
+	trees := map[string]*index.Parsed{}
 	for _, r := range refs {
+		if r.use.Kind == index.UseFunction {
+			// The object of a call, by the path it is made in.
+			p, ok := trees[r.unit.Path]
+			if !ok {
+				p, _ = snap.Parse(r.unit.Path)
+				trees[r.unit.Path] = p
+			}
+			use, ok := receiver(p, r.use)
+			if !ok {
+				o := Occurrence{Path: r.unit.Path, Start: r.use.Start, End: r.use.End, Line: r.use.Line, Col: r.use.Col, Class: Possible,
+					Reason: fmt.Sprintf("calls %s in the object %s, whose path is not written here as one string: not rewritten", r.use.Name, r.use.Aux)}
+				if k := [2]any{r.unit.Path, r.use.Start}; !seen[k] {
+					seen[k] = true
+					plan.Occurrences = append(plan.Occurrences, o)
+				}
+				continue
+			}
+			r.use = use
+		}
 		if r.use.Kind != index.UseObject && r.use.Kind != index.UseInclude {
 			continue
 		}
@@ -368,6 +401,36 @@ func relPath(dir, target string) string {
 		i++
 	}
 	return strings.Repeat("../", len(d)-i) + strings.Join(t[i:], "/")
+}
+
+// receiver returns the object a call of the Use (a call in an object by
+// its path) is made in, as a Use of the object: the x of x->fn(), the
+// first argument of call_other; false when that cannot be found in the
+// file's tree.
+func receiver(p *index.Parsed, use index.Use) (index.Use, bool) {
+	if p == nil || p.Tree == nil {
+		return index.Use{}, false
+	}
+	var x syntax.Expr
+	syntax.Inspect(p.Tree, func(n syntax.Node) bool {
+		switch n := n.(type) {
+		case *syntax.ArrowExpr:
+			if n.Name != nil && p.Tree.Off(n.Name) == use.Start {
+				x = n.X
+			}
+		case *syntax.CallExpr:
+			if n.Fun != nil && n.Fun.Name == "call_other" && len(n.Args) > 1 && p.Tree.Off(n.Args[1])+1 == use.Start {
+				x = n.Args[0]
+			}
+		}
+		return x == nil
+	})
+	if x == nil {
+		return index.Use{}, false
+	}
+	start, end := p.Tree.Off(x), p.Tree.End(x)
+	pos := p.Tok.Pos(start)
+	return index.Use{Name: use.Aux, Kind: index.UseObject, Start: start, End: end, Line: uint32(pos.Line), Col: uint32(pos.Col)}, true
 }
 
 // isName reports whether s is an identifier.

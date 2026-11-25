@@ -852,3 +852,70 @@ func TestNeovimRename(t *testing.T) {
 	assert.Contains(t, got.Said[0], "'create' is the function the driver calls by name to initialize every object (create in the configuration)")
 	assert.NotContains(t, log, "level=ERROR")
 }
+
+// nvimRefactor is Neovim with the refactorings: the prototype of a
+// function called before its definition, by vim.lsp.buf.code_action
+// (what gra does) applied at once; and a file moved as a file explorer
+// plugin moves one (oil.nvim, nvim-tree): workspace/willRenameFiles, its
+// edit applied, then vim.lsp.util.rename.
+const nvimRefactor = `
+local dir, out = vim.env.DGDLPC_DIR, {}
+local ok, err = pcall(function()
+  vim.opt.runtimepath:prepend(vim.env.DGDLPC_NVIM)
+  vim.opt.runtimepath:prepend(vim.env.DGDLPC_VIM)
+  vim.cmd('filetype plugin indent on')
+  vim.lsp.config('dgdtools', { cmd = { vim.env.DGDLPC_BIN, 'lsp', '--log', dir .. '/lsp.log' } })
+  vim.lsp.enable('dgdtools')
+  vim.cmd('edit ' .. vim.fn.fnameescape(dir .. '/lib/obj/a.c'))
+  local function wait(what, cond)
+    assert(vim.wait(20000, cond, 20), 'waited in vain for ' .. what)
+  end
+  local client
+  wait('the server', function()
+    client = vim.lsp.get_clients({ bufnr = 0 })[1]
+    return client ~= nil and client.initialized
+  end)
+  local function text(b) return vim.api.nvim_buf_get_lines(b or 0, 0, -1, false) end
+  vim.api.nvim_win_set_cursor(0, { 2, 12 })
+  local before = table.concat(text(), '\n')
+  vim.lsp.buf.code_action({ filter = function(a) return a.kind == 'refactor.rewrite' end, apply = true })
+  wait('the prototype', function() return table.concat(text(), '\n') ~= before end)
+  out.text = text()
+
+  local old, new = dir .. '/lib/std/room.c', dir .. '/lib/std/place.c'
+  local res = client:request_sync('workspace/willRenameFiles',
+    { files = { { oldUri = vim.uri_from_fname(old), newUri = vim.uri_from_fname(new) } } }, 20000)
+  assert(res and not res.err, vim.inspect(res))
+  vim.lsp.util.apply_workspace_edit(res.result, client.offset_encoding)
+  vim.lsp.util.rename(old, new)
+  out.other = text(vim.fn.bufnr(dir .. '/lib/obj/a.c'))
+  out.exists = vim.uv.fs_stat(new) ~= nil
+end)
+if not ok then out.error = tostring(err) end
+vim.fn.writefile({ vim.json.encode(out) }, dir .. '/result.json')
+vim.cmd('qall!')
+`
+
+// TestNeovimRefactor has the Neovim on PATH add a prototype with a code
+// action, and move a file the current one inherits, the inherit edited.
+func TestNeovimRefactor(t *testing.T) {
+	files := map[string]string{
+		"lib/dgdtools.yml": "",
+		"lib/std/room.c":   "int light;\n",
+		"lib/obj/a.c":      "inherit \"/std/room\";\nvoid f() { helper(1); }\n\nint helper(int n) { return n; }\n",
+	}
+	dir, data, log := nvimRun(t, files, nvimRefactor)
+	var got struct {
+		Error  string
+		Text   []string
+		Other  []string
+		Exists bool
+	}
+	require.NoError(t, json.Unmarshal(data, &got), "%s", data)
+	require.Empty(t, got.Error, "the server's log:\n%s", log)
+	assert.Equal(t, []string{"inherit \"/std/room\";", "int helper(int n);", "", "void f() { helper(1); }", "", "int helper(int n) { return n; }"}, got.Text)
+	assert.Equal(t, []string{"inherit \"/std/place\";", "int helper(int n);", "", "void f() { helper(1); }", "", "int helper(int n) { return n; }"}, got.Other)
+	assert.True(t, got.Exists)
+	assert.NoFileExists(t, filepath.Join(dir, "lib/std/room.c"))
+	assert.NotContains(t, log, "level=ERROR")
+}
