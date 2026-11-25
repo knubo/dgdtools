@@ -40,13 +40,26 @@ type ChainVar struct {
 
 // Chain returns the flattened chain for a lib path.
 func (s *Snapshot) Chain(libPath string) *Chain {
-	ch, _ := s.chain(libPath, map[string]bool{})
+	ch, _ := s.chain(libPath, map[string]bool{}, true)
+	return ch
+}
+
+// ownChain is Chain for the lint of the object at libPath: the chain is
+// made for it, and kept for the snapshot only if it is kept already or
+// as the chain of what an object inherits. A run over a whole lib lints
+// every object, most of which nothing inherits, and keeping each one's
+// chain kept a map of its functions for every object of the lib: half
+// the heap, on the VikingMUD lib.
+func (s *Snapshot) ownChain(libPath string) *Chain {
+	ch, _ := s.chain(libPath, map[string]bool{}, false)
 	return ch
 }
 
 // chain also reports whether an inheritance cycle was met below libPath;
-// results computed inside a cycle are not memoized.
-func (s *Snapshot) chain(libPath string, visiting map[string]bool) (*Chain, bool) {
+// results computed inside a cycle are not memoized. Without keep, the
+// chain made for libPath itself is not kept (ownChain); those of what it
+// inherits are.
+func (s *Snapshot) chain(libPath string, visiting map[string]bool, keep bool) (*Chain, bool) {
 	if ch, ok := s.chains.get(libPath); ok {
 		return ch, false
 	}
@@ -58,7 +71,7 @@ func (s *Snapshot) chain(libPath string, visiting map[string]bool) (*Chain, bool
 	u := s.Unit(libPath)
 	if u == nil {
 		ch.Partial, ch.Unseen = true, true
-		return s.storeChain(libPath, ch), false
+		return s.storeChain(libPath, ch, keep), false
 	}
 	cyc := false
 	if u.Partial {
@@ -70,7 +83,7 @@ func (s *Snapshot) chain(libPath string, visiting map[string]bool) (*Chain, bool
 			ch.Partial, ch.Unseen = true, true
 			continue
 		}
-		sub, c := s.chain(ref.Path, visiting)
+		sub, c := s.chain(ref.Path, visiting, true)
 		cyc = cyc || c
 		if sub.Partial {
 			ch.Partial = true
@@ -121,7 +134,7 @@ func (s *Snapshot) chain(libPath string, visiting map[string]bool) (*Chain, bool
 	if cyc && len(visiting) > 0 {
 		return ch, true
 	}
-	return s.storeChain(libPath, ch), false
+	return s.storeChain(libPath, ch, keep), false
 }
 
 // ChainFunc returns the function called name of the chain of the object
@@ -222,8 +235,12 @@ func (s *Snapshot) ChainUnseen(libPath string) bool {
 	return false
 }
 
-// storeChain keeps ch as libPath's chain unless one was stored meanwhile.
-func (s *Snapshot) storeChain(libPath string, ch *Chain) *Chain {
+// storeChain keeps ch as libPath's chain, with keep, unless one was
+// stored meanwhile.
+func (s *Snapshot) storeChain(libPath string, ch *Chain, keep bool) *Chain {
+	if !keep {
+		return ch
+	}
 	return s.chains.getOrPut(libPath, func() *Chain { return ch })
 }
 
@@ -404,6 +421,10 @@ const maxUserChains = 20
 // usersFunc answers usersOf, or declines to.
 type usersFunc func(ctx context.Context, libPath string) ([]string, bool)
 
+// chainFunc returns the chain of the object at a lib path, as Chain
+// does (Query.chain).
+type chainFunc func(libPath string) *Chain
+
 // lookupCallable resolves function name fn in the object at target.
 //
 // self says the receiver is this_object() in code that lives in target:
@@ -414,11 +435,11 @@ type usersFunc func(ctx context.Context, libPath string) ([]string, bool)
 // itself ("/path"->fn()), only its own chain counts.
 //
 // A lookup made after ctx was cancelled reads nothing and is unknown.
-func (s *Snapshot) lookupCallable(ctx context.Context, target, fn string, self bool, usersOf usersFunc) Lookup {
+func (s *Snapshot) lookupCallable(ctx context.Context, target, fn string, self bool, usersOf usersFunc, chainOf chainFunc) Lookup {
 	if !s.HasLib() || target == "" || ctx.Err() != nil {
 		return Lookup{State: LookupUnknown}
 	}
-	ch := s.Chain(target)
+	ch := chainOf(target)
 	if f, ok := ch.Funcs[fn]; ok {
 		return Lookup{State: LookupFound, Fn: *f}
 	}
@@ -464,7 +485,7 @@ func (s *Snapshot) lookupCallable(ctx context.Context, target, fn string, self b
 		if checked >= maxUserChains {
 			return Lookup{State: LookupUnknown} // bounded: cannot verify
 		}
-		uch := s.Chain(u)
+		uch := chainOf(u)
 		checked++
 		if uch.Partial {
 			return Lookup{State: LookupUnknown}
@@ -479,7 +500,7 @@ func (s *Snapshot) lookupCallable(ctx context.Context, target, fn string, self b
 // providedByUsers reports whether any inheritor/includer of libPath
 // supplies a real definition of fn. It returns true (assume provided)
 // whenever the bounded search cannot decide.
-func (s *Snapshot) providedByUsers(ctx context.Context, libPath, fn string, usersOf usersFunc) bool {
+func (s *Snapshot) providedByUsers(ctx context.Context, libPath, fn string, usersOf usersFunc, chainOf chainFunc) bool {
 	users, ok := usersOf(ctx, libPath)
 	if !ok {
 		return true
@@ -499,7 +520,7 @@ func (s *Snapshot) providedByUsers(ctx context.Context, libPath, fn string, user
 		if checked >= maxUserChains {
 			return true
 		}
-		uch := s.Chain(u)
+		uch := chainOf(u)
 		checked++
 		if uch.Partial {
 			return true

@@ -21,6 +21,9 @@ type Query struct {
 	askedAbout map[string]struct{}
 	// users is the answer to "who inherits the file", once asked.
 	users *usersAnswer
+	// own is the file's chain, which the snapshot does not keep
+	// (Snapshot.ownChain).
+	own *Chain
 }
 
 type usersAnswer struct {
@@ -108,7 +111,19 @@ func (q *Query) ObjectExists(libPath string) bool {
 // Chain returns the flattened inherit chain of the object at libPath.
 func (q *Query) Chain(libPath string) *Chain {
 	q.about(libPath)
-	return q.s.Chain(libPath)
+	return q.chain(libPath)
+}
+
+// chain returns the chain of the object at libPath; the file's own is
+// made once for the query.
+func (q *Query) chain(libPath string) *Chain {
+	if libPath != q.unit.LibPath || libPath == "" {
+		return q.s.Chain(libPath)
+	}
+	if q.own == nil {
+		q.own = q.s.ownChain(libPath)
+	}
+	return q.own
 }
 
 // LookupCallable resolves function fn in the object at target. With
@@ -117,14 +132,14 @@ func (q *Query) Chain(libPath string) *Chain {
 // file.
 func (q *Query) LookupCallable(ctx context.Context, target, fn string, self bool) Lookup {
 	q.about(target)
-	return q.s.lookupCallable(ctx, target, fn, self, q.usersOf)
+	return q.s.lookupCallable(ctx, target, fn, self, q.usersOf, q.chain)
 }
 
 // ProvidedByUsers reports whether an object that inherits or includes
 // the file supplies a real definition of fn. It reports true (assume
 // provided) whenever that cannot be decided.
 func (q *Query) ProvidedByUsers(ctx context.Context, fn string) bool {
-	return q.s.providedByUsers(ctx, q.unit.LibPath, fn, q.usersOf)
+	return q.s.providedByUsers(ctx, q.unit.LibPath, fn, q.usersOf, q.chain)
 }
 
 // IncludeDeclares reports whether the file one of the file's #includes

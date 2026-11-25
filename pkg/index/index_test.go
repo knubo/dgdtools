@@ -410,7 +410,7 @@ func TestCrashIsRecorded(t *testing.T) {
 
 	assert.Nil(t, s.Unit("/std/base"))
 	assert.True(t, s.Chain("/obj/a").Partial, "nothing is concluded from a parent that could not be analyzed")
-	assert.Equal(t, LookupUnknown, s.lookupCallable(context.Background(), "/obj/a", "nowhere", false, s.usersOf).State)
+	assert.Equal(t, LookupUnknown, s.lookupCallable(context.Background(), "/obj/a", "nowhere", false, s.usersOf, s.Chain).State)
 	require.Len(t, s.Crashed(), 1)
 	assert.Equal(t, "/lib/std/base.c", s.Crashed()[0].Path)
 
@@ -549,14 +549,14 @@ func TestLookupCallable(t *testing.T) {
 	})
 	s := l.ix.Snapshot()
 	state := func(target, fn string, self bool) LookupState {
-		return s.lookupCallable(bg, target, fn, self, s.usersOf).State
+		return s.lookupCallable(bg, target, fn, self, s.usersOf, s.Chain).State
 	}
 
-	lk := s.lookupCallable(bg, "/std/mod", "here", false, s.usersOf)
+	lk := s.lookupCallable(bg, "/std/mod", "here", false, s.usersOf, s.Chain)
 	assert.Equal(t, LookupFound, lk.State)
 	assert.Equal(t, "/std/mod", lk.Fn.DefinedIn)
 	assert.Equal(t, LookupFound, state("/obj/leaf", "here", false), "through the chain")
-	assert.True(t, s.lookupCallable(bg, "/std/mod", "quiet", false, s.usersOf).Fn.Static)
+	assert.True(t, s.lookupCallable(bg, "/std/mod", "quiet", false, s.usersOf, s.Chain).Fn.Static)
 	assert.Equal(t, LookupFound, state("/obj/alone", "object_name", false), "from the auto object")
 	assert.Equal(t, LookupFound, state("/obj/alone", "in_base", false), "from the auto object's parent")
 	assert.Equal(t, LookupFound, state("/obj/alone", "in_code", false), "from code the auto object includes")
@@ -569,13 +569,13 @@ func TestLookupCallable(t *testing.T) {
 	// this_object() in a module may be any inheritor.
 	assert.Equal(t, LookupFoundInUser, state("/std/mod", "cb", true))
 	assert.Equal(t, LookupFoundInUser, state("/std/mod", "deep_cb", true), "an indirect inheritor")
-	lk = s.lookupCallable(bg, "/std/mod", "nowhere", true, s.usersOf)
+	lk = s.lookupCallable(bg, "/std/mod", "nowhere", true, s.usersOf, s.Chain)
 	assert.Equal(t, LookupMissing, lk.State)
 	assert.Equal(t, SearchedUsers, lk.Searched)
 	assert.Equal(t, 2, lk.Users)
-	lk = s.lookupCallable(bg, "/obj/alone", "nowhere", true, s.usersOf)
+	lk = s.lookupCallable(bg, "/obj/alone", "nowhere", true, s.usersOf, s.Chain)
 	assert.Equal(t, Lookup{State: LookupMissing, Searched: SearchedUsers}, lk, "nobody inherits it")
-	assert.Equal(t, SearchedChain, s.lookupCallable(bg, "/obj/alone", "nowhere", false, s.usersOf).Searched)
+	assert.Equal(t, SearchedChain, s.lookupCallable(bg, "/obj/alone", "nowhere", false, s.usersOf, s.Chain).Searched)
 
 	// Code in the auto object's chain runs as every object.
 	assert.Equal(t, LookupUnknown, state("/sys/auto", "nowhere", true))
@@ -586,9 +586,9 @@ func TestLookupCallable(t *testing.T) {
 	assert.Equal(t, LookupFoundInUser, state("/std/code", "provided", true))
 	assert.Equal(t, LookupFoundInUser, state("/std/code", "inherited_cb", true))
 
-	assert.True(t, s.providedByUsers(bg, "/std/mod", "decl", s.usersOf), "leaf defines what mod declares")
-	assert.False(t, s.providedByUsers(bg, "/std/mod", "nowhere", s.usersOf))
-	assert.False(t, s.providedByUsers(bg, "/obj/alone", "f", s.usersOf), "nobody inherits it")
+	assert.True(t, s.providedByUsers(bg, "/std/mod", "decl", s.usersOf, s.Chain), "leaf defines what mod declares")
+	assert.False(t, s.providedByUsers(bg, "/std/mod", "nowhere", s.usersOf, s.Chain))
+	assert.False(t, s.providedByUsers(bg, "/obj/alone", "f", s.usersOf, s.Chain), "nobody inherits it")
 
 	users, ok := s.usersOf(bg, "/std/mod")
 	require.True(t, ok)
@@ -609,13 +609,34 @@ func TestNoLib(t *testing.T) {
 	assert.Equal(t, []string{"/any/a.c", "/any/b.h"}, u.Deps, "a relative include still resolves")
 	assert.False(t, u.Inherits[0].Resolved)
 	assert.Nil(t, s.Unit("/std/x"))
-	assert.Equal(t, LookupUnknown, s.lookupCallable(bg, "/std/x", "f", false, s.usersOf).State)
+	assert.Equal(t, LookupUnknown, s.lookupCallable(bg, "/std/x", "f", false, s.usersOf, s.Chain).State)
 	assert.False(t, s.Scan(bg))
 	_, ok := s.usersOf(bg, "/std/x")
 	assert.False(t, ok)
 }
 
 // ------------------------------------------------------- generations
+
+// The chain a lint makes of its own file is not kept for the snapshot,
+// which would keep one for every object of a run over the whole lib;
+// those of what it inherits are.
+func TestOwnChainIsNotKept(t *testing.T) {
+	l := newLib(t, map[string]string{
+		"std/base.c": "void create() { }\n",
+		"obj/a.c":    "inherit \"/std/base\";\nvoid a() { }\n",
+	})
+	s := l.ix.Snapshot()
+	q := s.Query(s.Unit("/obj/a"), false)
+	ch := q.Chain("/obj/a")
+	assert.Contains(t, ch.Funcs, "create")
+	assert.Same(t, ch, q.Chain("/obj/a"), "made once for the query")
+	assert.Equal(t, LookupFound, q.LookupCallable(bg, "/obj/a", "a", true).State)
+	_, kept := s.chains.get("/obj/a")
+	assert.False(t, kept)
+	_, kept = s.chains.get("/std/base")
+	assert.True(t, kept)
+	assert.Equal(t, ch, s.Chain("/obj/a"))
+}
 
 func TestGenerationsShareWhatDidNotChange(t *testing.T) {
 	l := newLib(t, map[string]string{
@@ -1175,7 +1196,7 @@ func TestStubsAndCheckout(t *testing.T) {
 	assert.False(t, s.ObjectExists("/std/nothing"))
 	assert.Nil(t, s.Unit("/players/ann/nothing"), "the checkout alone speaks for its directory")
 
-	lk := s.lookupCallable(bg, "/std/room", "hidden", false, s.usersOf)
+	lk := s.lookupCallable(bg, "/std/room", "hidden", false, s.usersOf, s.Chain)
 	assert.Equal(t, LookupMissing, lk.State)
 	assert.Equal(t, SearchedStub, lk.Searched)
 
@@ -1183,7 +1204,7 @@ func TestStubsAndCheckout(t *testing.T) {
 	users, ok := s.usersOf(bg, "/players/ann/hall")
 	require.True(t, ok)
 	assert.Equal(t, []string{"/players/ann/sub/closet"}, users)
-	lk = s.lookupCallable(bg, "/players/ann/sub/closet", "nowhere", true, s.usersOf)
+	lk = s.lookupCallable(bg, "/players/ann/sub/closet", "nowhere", true, s.usersOf, s.Chain)
 	assert.Equal(t, LookupMissing, lk.State)
 	assert.Equal(t, SearchedCheckout, lk.Searched)
 }
