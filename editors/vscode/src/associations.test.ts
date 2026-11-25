@@ -3,7 +3,7 @@ import { test } from 'node:test';
 
 import { parse } from 'jsonc-parser';
 
-import { add, addUnwanted, empty, has, outermost, patterns, remove, removeUnwanted, unwanted } from './associations.ts';
+import { add, addUnwanted, anyIn, empty, has, outermost, patterns, remove, removeUnwanted, unwanted } from './associations.ts';
 
 test('patterns', () => {
   // The one folder of a workspace: its settings are its own, and a
@@ -43,6 +43,21 @@ test('remove takes out what add put in, and nothing else', () => {
   const other = patterns(['lib'], 'mud', true);
   const both = add(add(undefined, pats), other);
   assert.deepEqual(remove(both, other), { '*.c': 'dgdlpc', '*.h': 'dgdlpc' });
+});
+
+test('anyIn: what is left of one workspace folder', () => {
+  // The workspace is one folder: every pattern is its own.
+  assert.equal(anyIn(add(undefined, patterns(['lib'], 'mud', true)), 'mud', true), true);
+  assert.equal(anyIn({ '*.c': 'c' }, 'mud', true), false);
+  assert.equal(anyIn(undefined, 'mud', true), false);
+  // Several folders: B's patterns say nothing of A, nor of a folder
+  // whose name begins like A's.
+  const both = add(add(undefined, patterns([], 'a', false)), patterns(['lib'], 'b', false));
+  const left = remove(both, patterns([], 'a', false));
+  assert.equal(anyIn(left, 'a', false), false);
+  assert.equal(anyIn(left, 'b', false), true);
+  assert.equal(anyIn(add(undefined, patterns([], 'ab', false)), 'a', false), false);
+  assert.equal(anyIn(add(undefined, patterns(['lib'], 'a', false)), 'a', false), true);
 });
 
 test('outermost', () => {

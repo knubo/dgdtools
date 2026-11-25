@@ -145,7 +145,8 @@ func TestVSCodeClient(t *testing.T) {
 
 	// The names the three sides share.
 	assert.Contains(t, associations, "export const language = 'dgdlpc';")
-	assert.Contains(t, extension, "documentSelector: [{ language: associations.language }]")
+	assert.Contains(t, extension, "{ scheme: 'file', language: associations.language }")
+	assert.Contains(t, extension, "{ scheme: stubScheme, language: associations.language }")
 	assert.Contains(t, extension, "const stubScheme = '"+profile.Scheme+"';")
 	assert.Contains(t, server, "const args = ['lsp'];")
 	assert.Contains(t, server, "args.push('--log', log);")

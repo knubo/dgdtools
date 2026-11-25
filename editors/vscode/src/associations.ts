@@ -62,6 +62,16 @@ export function remove(current: Associations | undefined, pats: readonly string[
 }
 
 /**
+ * Whether any folder of the workspace folder `name` is still `dgdlpc`
+ * in `current`, by the patterns `patterns` makes for it: in a workspace
+ * of several folders the setting holds those of the others too.
+ */
+export function anyIn(current: Associations | undefined, name: string, alone: boolean): boolean {
+  const prefix = alone ? '' : `**/${name}/`;
+  return Object.entries(current ?? {}).some(([p, lang]) => lang === language && p.startsWith(prefix));
+}
+
+/**
  * Of some directories, those that lie under none of the others: the
  * outermost of each nest. Paths are compared as given, by segment.
  */

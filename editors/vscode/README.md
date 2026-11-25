@@ -122,12 +122,13 @@ does not recommend them for its `.c` files. The inverse command takes
 out what the first put in and nothing else, and deletes a file it leaves
 empty.
 
-Word-based suggestions are off for `dgdlpc` by default
-(`editor.wordBasedSuggestions`): the server's completion knows the
-names.
-
-A mudlib whose files are Latin-1 should say that too, or saving a file
-opened as UTF-8 damages it:
+Two settings have other defaults for `dgdlpc`: word-based suggestions
+are off (`editor.wordBasedSuggestions`), since the server's completion
+knows the names, and `files.autoGuessEncoding` is on, so that a file
+that is not UTF-8 (many old mudlibs are Latin-1) is opened as what it
+is rather than with its accented letters replaced. A guess can be
+wrong for a short file; a mudlib whose files are all Latin-1 should say
+so, or saving a file opened as UTF-8 damages it:
 
 ```json
 {

@@ -78,7 +78,13 @@ async function start(): Promise<void> {
   const args = serverArgs(config.get<string>('logFile', ''), home);
   const serverOptions: ServerOptions = { command: server.path, args, transport: TransportKind.stdio };
   const clientOptions: LanguageClientOptions = {
-    documentSelector: [{ language: associations.language }],
+    // Files on disk, which the server reads, and the profile's stubs,
+    // which it serves: an untitled or a git: document has no path, and
+    // the server would neither check nor format it.
+    documentSelector: [
+      { scheme: 'file', language: associations.language },
+      { scheme: stubScheme, language: associations.language },
+    ],
     // The server asks for the section, for each folder; this has it told
     // when the section changes, so that it asks again.
     synchronize: { configurationSection: 'dgdtools' },
@@ -208,7 +214,7 @@ async function setAssociation(context: vscode.ExtensionContext, uri: vscode.Uri 
   try {
     if (on) {
       await unwantC(context, where.folder);
-    } else if (!Object.values(next ?? {}).includes(associations.language)) {
+    } else if (!associations.anyIn(next, path.basename(where.folder.uri.fsPath), where.alone)) {
       await wantC(context, where.folder);
       if (where.alone) {
         // VS Code leaves `{}` where the last setting was.

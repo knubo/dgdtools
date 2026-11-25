@@ -8,7 +8,7 @@
 //   node scripts/vsix.mts --binary FILE [--target T] [--version V] [--out DIR]
 //       one package with that program in it, for this machine or for T
 //   node scripts/vsix.mts --publishable
-//       says why the extension cannot be published yet, and fails; or nothing
+//       says why the extension could not be published, and fails; or nothing
 //
 // The packing is vsce's, the one package-lock.json pins. V is the
 // version the packages say they are (a release's tag, with or without
@@ -109,13 +109,13 @@ export function packageArgs(o: { version: string; out: string; target?: string; 
 export function unpublishable(manifest: { private?: boolean; publisher?: string }, files: string[]): string[] {
   const why: string[] = [];
   if (manifest.private) {
-    why.push('package.json is still "private": true. The owner removes it, and sets "publisher" to the account the extension is published under, when it is to be published.');
+    why.push('package.json says "private": true.');
   }
   if (!manifest.publisher) {
     why.push('package.json has no "publisher".');
   }
   if (!files.some((f) => /^LICENSE(\.md|\.txt)?$/i.test(f))) {
-    why.push('there is no LICENSE in the folder: it is to be the repository\'s, which has none yet.');
+    why.push('there is no LICENSE in the folder.');
   }
   return why;
 }
