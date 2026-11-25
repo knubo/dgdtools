@@ -861,7 +861,7 @@ func TestCorpusHover(t *testing.T) {
 		}
 		return n
 	}
-	t.Logf("kfuns called: %d calls of %d of the table's %d: %s", sum(kfunCalls), len(kfunCalls), len(kfuns.Names()), top(kfunCalls, 200))
+	t.Logf("kfuns called: %d calls of %d of the project's %d: %s", sum(kfunCalls), len(kfunCalls), len(kfuns.Names()), top(kfunCalls, 200))
 	t.Logf("called in a program all of which is known, and neither a function of the lib nor in the kfun table: %d calls of %d names: %s",
 		sum(unknownCalls), len(unknownCalls), top(unknownCalls, 200))
 	t.Logf("not judged, the program having an object nobody sees: %d calls", unjudged)

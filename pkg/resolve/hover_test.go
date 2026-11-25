@@ -286,6 +286,20 @@ func TestHoverPartialCheckout(t *testing.T) {
 	} {
 		assert.Equal(t, want, w.hover("/home/ann/hall.c", at), "at %q", at)
 	}
+	// And what the calls take: a stub's declaration is one like another.
+	for at, want := range map[string]string{
+		"::create(|)":        "create #0 `void create()` @ profile mini, /std/object.c",
+		"set_short(|\"x\")":  "set_short #0 `void set_short(string s)` [string s] @ profile mini, /std/room.c",
+		"write(|\"x\")":      "write #0 `static void write(string s)` [string s] @ auto object, profile mini, /sys/auto.c",
+		"rusage(|)":          "rusage #0 `int *rusage()` @ kfun, declared by the project (dialect.kfuns)",
+		"strlen(|\"x\")":     "strlen #0 `int strlen(string)` [string] @ kfun, DGD 1.7.9 // return the length of a string",
+		"other\"->there(|)":  "there #0 `void there()` @ /players/ann/other.c:2 // Where.",
+		"bob/x\"->enter(|)":  "nothing",
+		"square\"->enter(|)": "nothing",
+		"ob->enter(|)":       "nothing",
+	} {
+		assert.Equal(t, want, w.sig("/home/ann/hall.c", at), "at %q", at)
+	}
 }
 
 func TestComment(t *testing.T) {
