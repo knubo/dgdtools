@@ -1,0 +1,28 @@
+>/*
+#^^ comment.block.dgdlpc punctuation.definition.comment.begin.dgdlpc
+> * Tokens the lexer has that only a macro body can hold: outside a
+#^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ comment.block.dgdlpc
+> * directive they are tokens still, and no valid file has them.
+#^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ comment.block.dgdlpc
+> */
+# ^^ comment.block.dgdlpc punctuation.definition.comment.end.dgdlpc
+>static void
+#^^^^^^ storage.modifier.dgdlpc
+#       ^^^^ storage.type.dgdlpc
+>stray()
+#^^^^^ entity.name.function.definition.dgdlpc
+#     ^ punctuation.section.parens.begin.dgdlpc
+#      ^ punctuation.section.parens.end.dgdlpc
+>{
+#^ punctuation.section.block.begin.dgdlpc
+>    a . b;
+#      ^ punctuation.separator.dot.dgdlpc
+#         ^ punctuation.terminator.statement.dgdlpc
+>    a # b;
+#      ^ keyword.operator.preprocessor.dgdlpc
+#         ^ punctuation.terminator.statement.dgdlpc
+>    a ## b;
+#      ^^ keyword.operator.preprocessor.dgdlpc
+#          ^ punctuation.terminator.statement.dgdlpc
+>}
+#^ punctuation.section.block.end.dgdlpc

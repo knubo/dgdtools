@@ -1,0 +1,641 @@
+>/*
+#^^ comment.block.dgdlpc punctuation.definition.comment.begin.dgdlpc
+> * The tokens of DGD LPC, one class at a time: a sample for the grammar
+#^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ comment.block.dgdlpc
+> * tests under editors/, not an object anybody should compile.
+#^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ comment.block.dgdlpc
+> */
+# ^^ comment.block.dgdlpc punctuation.definition.comment.end.dgdlpc
+>
+>inherit "/lib/base";
+#^^^^^^^ keyword.other.inherit.dgdlpc
+#        ^ string.quoted.double.dgdlpc punctuation.definition.string.begin.dgdlpc
+#         ^^^^^^^^^ string.quoted.double.dgdlpc
+#                  ^ string.quoted.double.dgdlpc punctuation.definition.string.end.dgdlpc
+#                   ^ punctuation.terminator.statement.dgdlpc
+>inherit room "/std/room";
+#^^^^^^^ keyword.other.inherit.dgdlpc
+#        ^^^^ entity.name.namespace.dgdlpc
+#             ^ string.quoted.double.dgdlpc punctuation.definition.string.begin.dgdlpc
+#              ^^^^^^^^^ string.quoted.double.dgdlpc
+#                       ^ string.quoted.double.dgdlpc punctuation.definition.string.end.dgdlpc
+#                        ^ punctuation.terminator.statement.dgdlpc
+>private inherit util UTIL_PATH;
+#^^^^^^^ storage.modifier.dgdlpc
+#        ^^^^^^^ keyword.other.inherit.dgdlpc
+#                ^^^^ entity.name.namespace.dgdlpc
+#                     ^^^^^^^^^ constant.other.caps.dgdlpc
+#                              ^ punctuation.terminator.statement.dgdlpc
+>
+>// A line comment (dialect.slash_slash) ends with its line, whatever \
+#^^ comment.line.double-slash.dgdlpc punctuation.definition.comment.dgdlpc
+#  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ comment.line.double-slash.dgdlpc
+>static int after_the_comment;
+#^^^^^^ storage.modifier.dgdlpc
+#       ^^^ storage.type.dgdlpc
+#                            ^ punctuation.terminator.statement.dgdlpc
+>
+>/* A block comment keeps "this" and // this and 'x' and #if to itself,
+#^^ comment.block.dgdlpc punctuation.definition.comment.begin.dgdlpc
+#  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ comment.block.dgdlpc
+>   over as many lines as it takes. */
+#^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ comment.block.dgdlpc
+#                                   ^^ comment.block.dgdlpc punctuation.definition.comment.end.dgdlpc
+>
+>private static mapping exits;
+#^^^^^^^ storage.modifier.dgdlpc
+#        ^^^^^^ storage.modifier.dgdlpc
+#               ^^^^^^^ storage.type.dgdlpc
+#                            ^ punctuation.terminator.statement.dgdlpc
+>static nomask atomic varargs mixed *table;
+#^^^^^^ storage.modifier.dgdlpc
+#       ^^^^^^ storage.modifier.dgdlpc
+#              ^^^^^^ storage.modifier.dgdlpc
+#                     ^^^^^^^ storage.modifier.dgdlpc
+#                             ^^^^^ storage.type.dgdlpc
+#                                   ^ keyword.operator.arithmetic.dgdlpc
+#                                         ^ punctuation.terminator.statement.dgdlpc
+>object owner; float weight; string name; int count;
+#^^^^^^ storage.type.dgdlpc
+#            ^ punctuation.terminator.statement.dgdlpc
+#              ^^^^^ storage.type.dgdlpc
+#                          ^ punctuation.terminator.statement.dgdlpc
+#                            ^^^^^^ storage.type.dgdlpc
+#                                       ^ punctuation.terminator.statement.dgdlpc
+#                                         ^^^ storage.type.dgdlpc
+#                                                  ^ punctuation.terminator.statement.dgdlpc
+>
+>static mixed
+#^^^^^^ storage.modifier.dgdlpc
+#       ^^^^^ storage.type.dgdlpc
+>literals(string str, int *arr)
+#^^^^^^^^ entity.name.function.definition.dgdlpc
+#        ^ punctuation.section.parens.begin.dgdlpc
+#         ^^^^^^ storage.type.dgdlpc
+#                   ^ punctuation.separator.comma.dgdlpc
+#                     ^^^ storage.type.dgdlpc
+#                         ^ keyword.operator.arithmetic.dgdlpc
+#                             ^ punctuation.section.parens.end.dgdlpc
+>{
+#^ punctuation.section.block.begin.dgdlpc
+>    float f;
+#    ^^^^^ storage.type.dgdlpc
+#           ^ punctuation.terminator.statement.dgdlpc
+>    int i;
+#    ^^^ storage.type.dgdlpc
+#         ^ punctuation.terminator.statement.dgdlpc
+>
+>    f = 1.0 + 1. + .5 + 1e10 + 1.5e-3 + 2E+4 + 0.25;
+#      ^ keyword.operator.assignment.dgdlpc
+#        ^^^ constant.numeric.float.dgdlpc
+#            ^ keyword.operator.arithmetic.dgdlpc
+#              ^^ constant.numeric.float.dgdlpc
+#                 ^ keyword.operator.arithmetic.dgdlpc
+#                   ^^ constant.numeric.float.dgdlpc
+#                      ^ keyword.operator.arithmetic.dgdlpc
+#                        ^^^^ constant.numeric.float.dgdlpc
+#                             ^ keyword.operator.arithmetic.dgdlpc
+#                               ^^^^^^ constant.numeric.float.dgdlpc
+#                                      ^ keyword.operator.arithmetic.dgdlpc
+#                                        ^^^^ constant.numeric.float.dgdlpc
+#                                             ^ keyword.operator.arithmetic.dgdlpc
+#                                               ^^^^ constant.numeric.float.dgdlpc
+#                                                   ^ punctuation.terminator.statement.dgdlpc
+>    i = 0 + 7 + 42 + 0x1f + 0XFF + 017;
+#      ^ keyword.operator.assignment.dgdlpc
+#        ^ constant.numeric.integer.decimal.dgdlpc
+#          ^ keyword.operator.arithmetic.dgdlpc
+#            ^ constant.numeric.integer.decimal.dgdlpc
+#              ^ keyword.operator.arithmetic.dgdlpc
+#                ^^ constant.numeric.integer.decimal.dgdlpc
+#                   ^ keyword.operator.arithmetic.dgdlpc
+#                     ^^^^ constant.numeric.integer.hexadecimal.dgdlpc
+#                          ^ keyword.operator.arithmetic.dgdlpc
+#                            ^^^^ constant.numeric.integer.hexadecimal.dgdlpc
+#                                 ^ keyword.operator.arithmetic.dgdlpc
+#                                   ^^^ constant.numeric.integer.decimal.dgdlpc
+#                                      ^ punctuation.terminator.statement.dgdlpc
+>    i = 'a' + '\n' + '\'' + '\\' + '\101' + '\x41' + '"' + '/';
+#      ^ keyword.operator.assignment.dgdlpc
+#        ^ string.quoted.single.dgdlpc punctuation.definition.string.begin.dgdlpc
+#         ^ string.quoted.single.dgdlpc
+#          ^ string.quoted.single.dgdlpc punctuation.definition.string.end.dgdlpc
+#            ^ keyword.operator.arithmetic.dgdlpc
+#              ^ string.quoted.single.dgdlpc punctuation.definition.string.begin.dgdlpc
+#               ^^ string.quoted.single.dgdlpc constant.character.escape.dgdlpc
+#                 ^ string.quoted.single.dgdlpc punctuation.definition.string.end.dgdlpc
+#                   ^ keyword.operator.arithmetic.dgdlpc
+#                     ^ string.quoted.single.dgdlpc punctuation.definition.string.begin.dgdlpc
+#                      ^^ string.quoted.single.dgdlpc constant.character.escape.dgdlpc
+#                        ^ string.quoted.single.dgdlpc punctuation.definition.string.end.dgdlpc
+#                          ^ keyword.operator.arithmetic.dgdlpc
+#                            ^ string.quoted.single.dgdlpc punctuation.definition.string.begin.dgdlpc
+#                             ^^ string.quoted.single.dgdlpc constant.character.escape.dgdlpc
+#                               ^ string.quoted.single.dgdlpc punctuation.definition.string.end.dgdlpc
+#                                 ^ keyword.operator.arithmetic.dgdlpc
+#                                   ^ string.quoted.single.dgdlpc punctuation.definition.string.begin.dgdlpc
+#                                    ^^^^ string.quoted.single.dgdlpc constant.character.escape.dgdlpc
+#                                        ^ string.quoted.single.dgdlpc punctuation.definition.string.end.dgdlpc
+#                                          ^ keyword.operator.arithmetic.dgdlpc
+#                                            ^ string.quoted.single.dgdlpc punctuation.definition.string.begin.dgdlpc
+#                                             ^^^^ string.quoted.single.dgdlpc constant.character.escape.dgdlpc
+#                                                 ^ string.quoted.single.dgdlpc punctuation.definition.string.end.dgdlpc
+#                                                   ^ keyword.operator.arithmetic.dgdlpc
+#                                                     ^ string.quoted.single.dgdlpc punctuation.definition.string.begin.dgdlpc
+#                                                      ^ string.quoted.single.dgdlpc
+#                                                       ^ string.quoted.single.dgdlpc punctuation.definition.string.end.dgdlpc
+#                                                         ^ keyword.operator.arithmetic.dgdlpc
+#                                                           ^ string.quoted.single.dgdlpc punctuation.definition.string.begin.dgdlpc
+#                                                            ^ string.quoted.single.dgdlpc
+#                                                             ^ string.quoted.single.dgdlpc punctuation.definition.string.end.dgdlpc
+#                                                              ^ punctuation.terminator.statement.dgdlpc
+>    str = "plain" + "esc \n \t \" \\ \101 \x41 \q" + "" + "/* no comment */";
+#        ^ keyword.operator.assignment.dgdlpc
+#          ^ string.quoted.double.dgdlpc punctuation.definition.string.begin.dgdlpc
+#           ^^^^^ string.quoted.double.dgdlpc
+#                ^ string.quoted.double.dgdlpc punctuation.definition.string.end.dgdlpc
+#                  ^ keyword.operator.arithmetic.dgdlpc
+#                    ^ string.quoted.double.dgdlpc punctuation.definition.string.begin.dgdlpc
+#                     ^^^^ string.quoted.double.dgdlpc
+#                         ^^ string.quoted.double.dgdlpc constant.character.escape.dgdlpc
+#                            ^^ string.quoted.double.dgdlpc constant.character.escape.dgdlpc
+#                               ^^ string.quoted.double.dgdlpc constant.character.escape.dgdlpc
+#                                  ^^ string.quoted.double.dgdlpc constant.character.escape.dgdlpc
+#                                     ^^^^ string.quoted.double.dgdlpc constant.character.escape.dgdlpc
+#                                          ^^^^ string.quoted.double.dgdlpc constant.character.escape.dgdlpc
+#                                               ^^ string.quoted.double.dgdlpc constant.character.escape.dgdlpc
+#                                                 ^ string.quoted.double.dgdlpc punctuation.definition.string.end.dgdlpc
+#                                                   ^ keyword.operator.arithmetic.dgdlpc
+#                                                     ^ string.quoted.double.dgdlpc punctuation.definition.string.begin.dgdlpc
+#                                                      ^ string.quoted.double.dgdlpc punctuation.definition.string.end.dgdlpc
+#                                                        ^ keyword.operator.arithmetic.dgdlpc
+#                                                          ^ string.quoted.double.dgdlpc punctuation.definition.string.begin.dgdlpc
+#                                                           ^^^^^^^^^^^^^^^^ string.quoted.double.dgdlpc
+#                                                                           ^ string.quoted.double.dgdlpc punctuation.definition.string.end.dgdlpc
+#                                                                            ^ punctuation.terminator.statement.dgdlpc
+>    str = "continued \
+#        ^ keyword.operator.assignment.dgdlpc
+#          ^ string.quoted.double.dgdlpc punctuation.definition.string.begin.dgdlpc
+#           ^^^^^^^^^^ string.quoted.double.dgdlpc
+#                     ^ string.quoted.double.dgdlpc constant.character.escape.line-continuation.dgdlpc
+>on the next line" + "// no comment";
+#^^^^^^^^^^^^^^^^ string.quoted.double.dgdlpc
+#                ^ string.quoted.double.dgdlpc punctuation.definition.string.end.dgdlpc
+#                  ^ keyword.operator.arithmetic.dgdlpc
+#                    ^ string.quoted.double.dgdlpc punctuation.definition.string.begin.dgdlpc
+#                     ^^^^^^^^^^^^^ string.quoted.double.dgdlpc
+#                                  ^ string.quoted.double.dgdlpc punctuation.definition.string.end.dgdlpc
+#                                   ^ punctuation.terminator.statement.dgdlpc
+>    arr = arr[1..2] + arr[..3] + arr[i..] + arr[0 .. 1] + arr[i + 1 ..];
+#        ^ keyword.operator.assignment.dgdlpc
+#             ^ meta.brackets.dgdlpc punctuation.section.brackets.begin.dgdlpc
+#              ^ meta.brackets.dgdlpc constant.numeric.integer.decimal.dgdlpc
+#               ^^ meta.brackets.dgdlpc keyword.operator.range.dgdlpc
+#                 ^ meta.brackets.dgdlpc constant.numeric.integer.decimal.dgdlpc
+#                  ^ meta.brackets.dgdlpc punctuation.section.brackets.end.dgdlpc
+#                    ^ keyword.operator.arithmetic.dgdlpc
+#                         ^ meta.brackets.dgdlpc punctuation.section.brackets.begin.dgdlpc
+#                          ^^ meta.brackets.dgdlpc keyword.operator.range.dgdlpc
+#                            ^ meta.brackets.dgdlpc constant.numeric.integer.decimal.dgdlpc
+#                             ^ meta.brackets.dgdlpc punctuation.section.brackets.end.dgdlpc
+#                               ^ keyword.operator.arithmetic.dgdlpc
+#                                    ^ meta.brackets.dgdlpc punctuation.section.brackets.begin.dgdlpc
+#                                     ^ meta.brackets.dgdlpc
+#                                      ^^ meta.brackets.dgdlpc keyword.operator.range.dgdlpc
+#                                        ^ meta.brackets.dgdlpc punctuation.section.brackets.end.dgdlpc
+#                                          ^ keyword.operator.arithmetic.dgdlpc
+#                                               ^ meta.brackets.dgdlpc punctuation.section.brackets.begin.dgdlpc
+#                                                ^ meta.brackets.dgdlpc constant.numeric.integer.decimal.dgdlpc
+#                                                  ^^ meta.brackets.dgdlpc keyword.operator.range.dgdlpc
+#                                                     ^ meta.brackets.dgdlpc constant.numeric.integer.decimal.dgdlpc
+#                                                      ^ meta.brackets.dgdlpc punctuation.section.brackets.end.dgdlpc
+#                                                        ^ keyword.operator.arithmetic.dgdlpc
+#                                                             ^ meta.brackets.dgdlpc punctuation.section.brackets.begin.dgdlpc
+#                                                              ^ meta.brackets.dgdlpc
+#                                                                ^ meta.brackets.dgdlpc keyword.operator.arithmetic.dgdlpc
+#                                                                  ^ meta.brackets.dgdlpc constant.numeric.integer.decimal.dgdlpc
+#                                                                    ^^ meta.brackets.dgdlpc keyword.operator.range.dgdlpc
+#                                                                      ^ meta.brackets.dgdlpc punctuation.section.brackets.end.dgdlpc
+#                                                                       ^ punctuation.terminator.statement.dgdlpc
+>    return ({ str, f, i, nil, ([ "a": 1, "b": ({ 2, 3 }), arr[0]: arr[1] ]) });
+#    ^^^^^^ keyword.control.dgdlpc
+#           ^^ meta.array.dgdlpc punctuation.definition.array.begin.dgdlpc
+#              ^^^ meta.array.dgdlpc
+#                 ^ meta.array.dgdlpc punctuation.separator.comma.dgdlpc
+#                   ^ meta.array.dgdlpc
+#                    ^ meta.array.dgdlpc punctuation.separator.comma.dgdlpc
+#                      ^ meta.array.dgdlpc
+#                       ^ meta.array.dgdlpc punctuation.separator.comma.dgdlpc
+#                         ^^^ meta.array.dgdlpc constant.language.nil.dgdlpc
+#                            ^ meta.array.dgdlpc punctuation.separator.comma.dgdlpc
+#                              ^^ meta.array.dgdlpc meta.mapping.dgdlpc punctuation.definition.mapping.begin.dgdlpc
+#                                 ^ meta.array.dgdlpc meta.mapping.dgdlpc string.quoted.double.dgdlpc punctuation.definition.string.begin.dgdlpc
+#                                  ^ meta.array.dgdlpc meta.mapping.dgdlpc string.quoted.double.dgdlpc
+#                                   ^ meta.array.dgdlpc meta.mapping.dgdlpc string.quoted.double.dgdlpc punctuation.definition.string.end.dgdlpc
+#                                    ^ meta.array.dgdlpc meta.mapping.dgdlpc punctuation.separator.colon.dgdlpc
+#                                      ^ meta.array.dgdlpc meta.mapping.dgdlpc constant.numeric.integer.decimal.dgdlpc
+#                                       ^ meta.array.dgdlpc meta.mapping.dgdlpc punctuation.separator.comma.dgdlpc
+#                                         ^ meta.array.dgdlpc meta.mapping.dgdlpc string.quoted.double.dgdlpc punctuation.definition.string.begin.dgdlpc
+#                                          ^ meta.array.dgdlpc meta.mapping.dgdlpc string.quoted.double.dgdlpc
+#                                           ^ meta.array.dgdlpc meta.mapping.dgdlpc string.quoted.double.dgdlpc punctuation.definition.string.end.dgdlpc
+#                                            ^ meta.array.dgdlpc meta.mapping.dgdlpc punctuation.separator.colon.dgdlpc
+#                                              ^^ meta.array.dgdlpc meta.mapping.dgdlpc meta.array.dgdlpc punctuation.definition.array.begin.dgdlpc
+#                                                 ^ meta.array.dgdlpc meta.mapping.dgdlpc meta.array.dgdlpc constant.numeric.integer.decimal.dgdlpc
+#                                                  ^ meta.array.dgdlpc meta.mapping.dgdlpc meta.array.dgdlpc punctuation.separator.comma.dgdlpc
+#                                                    ^ meta.array.dgdlpc meta.mapping.dgdlpc meta.array.dgdlpc constant.numeric.integer.decimal.dgdlpc
+#                                                      ^^ meta.array.dgdlpc meta.mapping.dgdlpc meta.array.dgdlpc punctuation.definition.array.end.dgdlpc
+#                                                        ^ meta.array.dgdlpc meta.mapping.dgdlpc punctuation.separator.comma.dgdlpc
+#                                                          ^^^ meta.array.dgdlpc meta.mapping.dgdlpc
+#                                                             ^ meta.array.dgdlpc meta.mapping.dgdlpc meta.brackets.dgdlpc punctuation.section.brackets.begin.dgdlpc
+#                                                              ^ meta.array.dgdlpc meta.mapping.dgdlpc meta.brackets.dgdlpc constant.numeric.integer.decimal.dgdlpc
+#                                                               ^ meta.array.dgdlpc meta.mapping.dgdlpc meta.brackets.dgdlpc punctuation.section.brackets.end.dgdlpc
+#                                                                ^ meta.array.dgdlpc meta.mapping.dgdlpc punctuation.separator.colon.dgdlpc
+#                                                                  ^^^ meta.array.dgdlpc meta.mapping.dgdlpc
+#                                                                     ^ meta.array.dgdlpc meta.mapping.dgdlpc meta.brackets.dgdlpc punctuation.section.brackets.begin.dgdlpc
+#                                                                      ^ meta.array.dgdlpc meta.mapping.dgdlpc meta.brackets.dgdlpc constant.numeric.integer.decimal.dgdlpc
+#                                                                       ^ meta.array.dgdlpc meta.mapping.dgdlpc meta.brackets.dgdlpc punctuation.section.brackets.end.dgdlpc
+#                                                                         ^^ meta.array.dgdlpc meta.mapping.dgdlpc punctuation.definition.mapping.end.dgdlpc
+#                                                                            ^^ meta.array.dgdlpc punctuation.definition.array.end.dgdlpc
+#                                                                              ^ punctuation.terminator.statement.dgdlpc
+>}
+#^ punctuation.section.block.end.dgdlpc
+>
+>static int
+#^^^^^^ storage.modifier.dgdlpc
+#       ^^^ storage.type.dgdlpc
+>operators(int a, int b, object ob, mixed args...)
+#^^^^^^^^^ entity.name.function.definition.dgdlpc
+#         ^ punctuation.section.parens.begin.dgdlpc
+#          ^^^ storage.type.dgdlpc
+#               ^ punctuation.separator.comma.dgdlpc
+#                 ^^^ storage.type.dgdlpc
+#                      ^ punctuation.separator.comma.dgdlpc
+#                        ^^^^^^ storage.type.dgdlpc
+#                                 ^ punctuation.separator.comma.dgdlpc
+#                                   ^^^^^ storage.type.dgdlpc
+#                                             ^^^ keyword.operator.ellipsis.dgdlpc
+#                                                ^ punctuation.section.parens.end.dgdlpc
+>{
+#^ punctuation.section.block.begin.dgdlpc
+>    a = b; a += b; a -= b; a *= b; a /= b; a %= b;
+#      ^ keyword.operator.assignment.dgdlpc
+#         ^ punctuation.terminator.statement.dgdlpc
+#             ^^ keyword.operator.assignment.compound.dgdlpc
+#                 ^ punctuation.terminator.statement.dgdlpc
+#                     ^^ keyword.operator.assignment.compound.dgdlpc
+#                         ^ punctuation.terminator.statement.dgdlpc
+#                             ^^ keyword.operator.assignment.compound.dgdlpc
+#                                 ^ punctuation.terminator.statement.dgdlpc
+#                                     ^^ keyword.operator.assignment.compound.dgdlpc
+#                                         ^ punctuation.terminator.statement.dgdlpc
+#                                             ^^ keyword.operator.assignment.compound.dgdlpc
+#                                                 ^ punctuation.terminator.statement.dgdlpc
+>    a &= b; a |= b; a ^= b; a <<= b; a >>= b;
+#      ^^ keyword.operator.assignment.compound.dgdlpc
+#          ^ punctuation.terminator.statement.dgdlpc
+#              ^^ keyword.operator.assignment.compound.dgdlpc
+#                  ^ punctuation.terminator.statement.dgdlpc
+#                      ^^ keyword.operator.assignment.compound.dgdlpc
+#                          ^ punctuation.terminator.statement.dgdlpc
+#                              ^^^ keyword.operator.assignment.compound.dgdlpc
+#                                   ^ punctuation.terminator.statement.dgdlpc
+#                                       ^^^ keyword.operator.assignment.compound.dgdlpc
+#                                            ^ punctuation.terminator.statement.dgdlpc
+>    a = a + b - a * b / a % b;
+#      ^ keyword.operator.assignment.dgdlpc
+#          ^ keyword.operator.arithmetic.dgdlpc
+#              ^ keyword.operator.arithmetic.dgdlpc
+#                  ^ keyword.operator.arithmetic.dgdlpc
+#                      ^ keyword.operator.arithmetic.dgdlpc
+#                          ^ keyword.operator.arithmetic.dgdlpc
+#                             ^ punctuation.terminator.statement.dgdlpc
+>    a = a & b | a ^ ~b;
+#      ^ keyword.operator.assignment.dgdlpc
+#          ^ keyword.operator.bitwise.dgdlpc
+#              ^ keyword.operator.bitwise.dgdlpc
+#                  ^ keyword.operator.bitwise.dgdlpc
+#                    ^ keyword.operator.bitwise.dgdlpc
+#                      ^ punctuation.terminator.statement.dgdlpc
+>    a = a << 2 >> 1;
+#      ^ keyword.operator.assignment.dgdlpc
+#          ^^ keyword.operator.bitwise.shift.dgdlpc
+#             ^ constant.numeric.integer.decimal.dgdlpc
+#               ^^ keyword.operator.bitwise.shift.dgdlpc
+#                  ^ constant.numeric.integer.decimal.dgdlpc
+#                   ^ punctuation.terminator.statement.dgdlpc
+>    a = a == b || a != b && a < b || a > b && a <= b || a >= b || !a;
+#      ^ keyword.operator.assignment.dgdlpc
+#          ^^ keyword.operator.comparison.dgdlpc
+#               ^^ keyword.operator.logical.dgdlpc
+#                    ^^ keyword.operator.comparison.dgdlpc
+#                         ^^ keyword.operator.logical.dgdlpc
+#                              ^ keyword.operator.comparison.dgdlpc
+#                                  ^^ keyword.operator.logical.dgdlpc
+#                                       ^ keyword.operator.comparison.dgdlpc
+#                                           ^^ keyword.operator.logical.dgdlpc
+#                                                ^^ keyword.operator.comparison.dgdlpc
+#                                                     ^^ keyword.operator.logical.dgdlpc
+#                                                          ^^ keyword.operator.comparison.dgdlpc
+#                                                               ^^ keyword.operator.logical.dgdlpc
+#                                                                  ^ keyword.operator.logical.dgdlpc
+#                                                                    ^ punctuation.terminator.statement.dgdlpc
+>    a++; b--; ++a; --b;
+#     ^^ keyword.operator.increment-decrement.dgdlpc
+#       ^ punctuation.terminator.statement.dgdlpc
+#          ^^ keyword.operator.increment-decrement.dgdlpc
+#            ^ punctuation.terminator.statement.dgdlpc
+#              ^^ keyword.operator.increment-decrement.dgdlpc
+#                 ^ punctuation.terminator.statement.dgdlpc
+#                   ^^ keyword.operator.increment-decrement.dgdlpc
+#                      ^ punctuation.terminator.statement.dgdlpc
+>    a = a ? b : -a;
+#      ^ keyword.operator.assignment.dgdlpc
+#          ^ keyword.operator.ternary.dgdlpc
+#              ^ punctuation.separator.colon.dgdlpc
+#                ^ keyword.operator.arithmetic.dgdlpc
+#                  ^ punctuation.terminator.statement.dgdlpc
+>    a = ob <- "/std/room";
+#      ^ keyword.operator.assignment.dgdlpc
+#           ^^ keyword.operator.instance.dgdlpc
+#              ^ string.quoted.double.dgdlpc punctuation.definition.string.begin.dgdlpc
+#               ^^^^^^^^^ string.quoted.double.dgdlpc
+#                        ^ string.quoted.double.dgdlpc punctuation.definition.string.end.dgdlpc
+#                         ^ punctuation.terminator.statement.dgdlpc
+>    ob->call(a, b, args...);
+#      ^^ keyword.operator.arrow.dgdlpc
+#        ^^^^ entity.name.function.call.dgdlpc
+#            ^ punctuation.section.parens.begin.dgdlpc
+#              ^ punctuation.separator.comma.dgdlpc
+#                 ^ punctuation.separator.comma.dgdlpc
+#                       ^^^ keyword.operator.ellipsis.dgdlpc
+#                          ^ punctuation.section.parens.end.dgdlpc
+#                           ^ punctuation.terminator.statement.dgdlpc
+>    ob = new object "/data/thing";
+#       ^ keyword.operator.assignment.dgdlpc
+#         ^^^ keyword.operator.new.dgdlpc
+#             ^^^^^^ storage.type.dgdlpc
+#                    ^ string.quoted.double.dgdlpc punctuation.definition.string.begin.dgdlpc
+#                     ^^^^^^^^^^^ string.quoted.double.dgdlpc
+#                                ^ string.quoted.double.dgdlpc punctuation.definition.string.end.dgdlpc
+#                                 ^ punctuation.terminator.statement.dgdlpc
+>    room::create();
+#    ^^^^ entity.name.namespace.dgdlpc
+#        ^^ keyword.operator.scope.dgdlpc
+#          ^^^^^^ entity.name.function.call.dgdlpc
+#                ^ punctuation.section.parens.begin.dgdlpc
+#                 ^ punctuation.section.parens.end.dgdlpc
+#                  ^ punctuation.terminator.statement.dgdlpc
+>    ::create();
+#    ^^ keyword.operator.scope.dgdlpc
+#      ^^^^^^ entity.name.function.call.dgdlpc
+#            ^ punctuation.section.parens.begin.dgdlpc
+#             ^ punctuation.section.parens.end.dgdlpc
+#              ^ punctuation.terminator.statement.dgdlpc
+>    return f(a[i]) + g(([ ]), ({ }), ([ a: b[0] ])[a]) + sizeof(({ a, b }));
+#    ^^^^^^ keyword.control.dgdlpc
+#           ^ entity.name.function.call.dgdlpc
+#            ^ punctuation.section.parens.begin.dgdlpc
+#              ^ meta.brackets.dgdlpc punctuation.section.brackets.begin.dgdlpc
+#               ^ meta.brackets.dgdlpc
+#                ^ meta.brackets.dgdlpc punctuation.section.brackets.end.dgdlpc
+#                 ^ punctuation.section.parens.end.dgdlpc
+#                   ^ keyword.operator.arithmetic.dgdlpc
+#                     ^ entity.name.function.call.dgdlpc
+#                      ^ punctuation.section.parens.begin.dgdlpc
+#                       ^^ meta.mapping.dgdlpc punctuation.definition.mapping.begin.dgdlpc
+#                          ^^ meta.mapping.dgdlpc punctuation.definition.mapping.end.dgdlpc
+#                            ^ punctuation.separator.comma.dgdlpc
+#                              ^^ meta.array.dgdlpc punctuation.definition.array.begin.dgdlpc
+#                                 ^^ meta.array.dgdlpc punctuation.definition.array.end.dgdlpc
+#                                   ^ punctuation.separator.comma.dgdlpc
+#                                     ^^ meta.mapping.dgdlpc punctuation.definition.mapping.begin.dgdlpc
+#                                        ^ meta.mapping.dgdlpc
+#                                         ^ meta.mapping.dgdlpc punctuation.separator.colon.dgdlpc
+#                                           ^ meta.mapping.dgdlpc
+#                                            ^ meta.mapping.dgdlpc meta.brackets.dgdlpc punctuation.section.brackets.begin.dgdlpc
+#                                             ^ meta.mapping.dgdlpc meta.brackets.dgdlpc constant.numeric.integer.decimal.dgdlpc
+#                                              ^ meta.mapping.dgdlpc meta.brackets.dgdlpc punctuation.section.brackets.end.dgdlpc
+#                                                ^^ meta.mapping.dgdlpc punctuation.definition.mapping.end.dgdlpc
+#                                                  ^ meta.brackets.dgdlpc punctuation.section.brackets.begin.dgdlpc
+#                                                   ^ meta.brackets.dgdlpc
+#                                                    ^ meta.brackets.dgdlpc punctuation.section.brackets.end.dgdlpc
+#                                                     ^ punctuation.section.parens.end.dgdlpc
+#                                                       ^ keyword.operator.arithmetic.dgdlpc
+#                                                         ^^^^^^ entity.name.function.call.dgdlpc
+#                                                               ^ punctuation.section.parens.begin.dgdlpc
+#                                                                ^^ meta.array.dgdlpc punctuation.definition.array.begin.dgdlpc
+#                                                                   ^ meta.array.dgdlpc
+#                                                                    ^ meta.array.dgdlpc punctuation.separator.comma.dgdlpc
+#                                                                      ^ meta.array.dgdlpc
+#                                                                        ^^ meta.array.dgdlpc punctuation.definition.array.end.dgdlpc
+#                                                                          ^ punctuation.section.parens.end.dgdlpc
+#                                                                           ^ punctuation.terminator.statement.dgdlpc
+>}
+#^ punctuation.section.block.end.dgdlpc
+>
+>static void
+#^^^^^^ storage.modifier.dgdlpc
+#       ^^^^ storage.type.dgdlpc
+>keywords(int n, string function)
+#^^^^^^^^ entity.name.function.definition.dgdlpc
+#        ^ punctuation.section.parens.begin.dgdlpc
+#         ^^^ storage.type.dgdlpc
+#              ^ punctuation.separator.comma.dgdlpc
+#                ^^^^^^ storage.type.dgdlpc
+#                               ^ punctuation.section.parens.end.dgdlpc
+>{
+#^ punctuation.section.block.begin.dgdlpc
+>    int i;
+#    ^^^ storage.type.dgdlpc
+#         ^ punctuation.terminator.statement.dgdlpc
+>
+>    if (n)
+#    ^^ keyword.control.dgdlpc
+#       ^ punctuation.section.parens.begin.dgdlpc
+#         ^ punctuation.section.parens.end.dgdlpc
+>        n = 1;
+#          ^ keyword.operator.assignment.dgdlpc
+#            ^ constant.numeric.integer.decimal.dgdlpc
+#             ^ punctuation.terminator.statement.dgdlpc
+>    else if (!n) {
+#    ^^^^ keyword.control.dgdlpc
+#         ^^ keyword.control.dgdlpc
+#            ^ punctuation.section.parens.begin.dgdlpc
+#             ^ keyword.operator.logical.dgdlpc
+#               ^ punctuation.section.parens.end.dgdlpc
+#                 ^ punctuation.section.block.begin.dgdlpc
+>        n = 2;
+#          ^ keyword.operator.assignment.dgdlpc
+#            ^ constant.numeric.integer.decimal.dgdlpc
+#             ^ punctuation.terminator.statement.dgdlpc
+>    } else
+#    ^ punctuation.section.block.end.dgdlpc
+#      ^^^^ keyword.control.dgdlpc
+>        return;
+#        ^^^^^^ keyword.control.dgdlpc
+#              ^ punctuation.terminator.statement.dgdlpc
+>    for (i = 0; i < n; i++)
+#    ^^^ keyword.control.dgdlpc
+#        ^ punctuation.section.parens.begin.dgdlpc
+#           ^ keyword.operator.assignment.dgdlpc
+#             ^ constant.numeric.integer.decimal.dgdlpc
+#              ^ punctuation.terminator.statement.dgdlpc
+#                  ^ keyword.operator.comparison.dgdlpc
+#                     ^ punctuation.terminator.statement.dgdlpc
+#                        ^^ keyword.operator.increment-decrement.dgdlpc
+#                          ^ punctuation.section.parens.end.dgdlpc
+>        continue;
+#        ^^^^^^^^ keyword.control.dgdlpc
+#                ^ punctuation.terminator.statement.dgdlpc
+>    while (n--)
+#    ^^^^^ keyword.control.dgdlpc
+#          ^ punctuation.section.parens.begin.dgdlpc
+#            ^^ keyword.operator.increment-decrement.dgdlpc
+#              ^ punctuation.section.parens.end.dgdlpc
+>        break;
+#        ^^^^^ keyword.control.dgdlpc
+#             ^ punctuation.terminator.statement.dgdlpc
+>    do {
+#    ^^ keyword.control.dgdlpc
+#       ^ punctuation.section.block.begin.dgdlpc
+>        n++;
+#         ^^ keyword.operator.increment-decrement.dgdlpc
+#           ^ punctuation.terminator.statement.dgdlpc
+>    } while (n < 10);
+#    ^ punctuation.section.block.end.dgdlpc
+#      ^^^^^ keyword.control.dgdlpc
+#            ^ punctuation.section.parens.begin.dgdlpc
+#               ^ keyword.operator.comparison.dgdlpc
+#                 ^^ constant.numeric.integer.decimal.dgdlpc
+#                   ^ punctuation.section.parens.end.dgdlpc
+#                    ^ punctuation.terminator.statement.dgdlpc
+>    switch (n) {
+#    ^^^^^^ keyword.control.dgdlpc
+#           ^ punctuation.section.parens.begin.dgdlpc
+#             ^ punctuation.section.parens.end.dgdlpc
+#               ^ punctuation.section.block.begin.dgdlpc
+>    case 1:
+#    ^^^^ keyword.control.dgdlpc
+#         ^ constant.numeric.integer.decimal.dgdlpc
+#          ^ punctuation.separator.colon.dgdlpc
+>    case 2..3:
+#    ^^^^ keyword.control.dgdlpc
+#         ^ constant.numeric.integer.decimal.dgdlpc
+#          ^^ keyword.operator.range.dgdlpc
+#            ^ constant.numeric.integer.decimal.dgdlpc
+#             ^ punctuation.separator.colon.dgdlpc
+>        break;
+#        ^^^^^ keyword.control.dgdlpc
+#             ^ punctuation.terminator.statement.dgdlpc
+>    case 'a':
+#    ^^^^ keyword.control.dgdlpc
+#         ^ string.quoted.single.dgdlpc punctuation.definition.string.begin.dgdlpc
+#          ^ string.quoted.single.dgdlpc
+#           ^ string.quoted.single.dgdlpc punctuation.definition.string.end.dgdlpc
+#            ^ punctuation.separator.colon.dgdlpc
+>        goto out;
+#        ^^^^ keyword.control.dgdlpc
+#                ^ punctuation.terminator.statement.dgdlpc
+>    default:
+#    ^^^^^^^ keyword.control.dgdlpc
+#           ^ punctuation.separator.colon.dgdlpc
+>        return;
+#        ^^^^^^ keyword.control.dgdlpc
+#              ^ punctuation.terminator.statement.dgdlpc
+>    }
+#    ^ punctuation.section.block.end.dgdlpc
+>    catch {
+#    ^^^^^ keyword.control.dgdlpc
+#          ^ punctuation.section.block.begin.dgdlpc
+>        n = 1 / 0;
+#          ^ keyword.operator.assignment.dgdlpc
+#            ^ constant.numeric.integer.decimal.dgdlpc
+#              ^ keyword.operator.arithmetic.dgdlpc
+#                ^ constant.numeric.integer.decimal.dgdlpc
+#                 ^ punctuation.terminator.statement.dgdlpc
+>    } : {
+#    ^ punctuation.section.block.end.dgdlpc
+#      ^ punctuation.separator.colon.dgdlpc
+#        ^ punctuation.section.block.begin.dgdlpc
+>        n = 0;
+#          ^ keyword.operator.assignment.dgdlpc
+#            ^ constant.numeric.integer.decimal.dgdlpc
+#             ^ punctuation.terminator.statement.dgdlpc
+>    }
+#    ^ punctuation.section.block.end.dgdlpc
+>    try {
+#    ^^^ keyword.control.dgdlpc
+#        ^ punctuation.section.block.begin.dgdlpc
+>        n = 1;
+#          ^ keyword.operator.assignment.dgdlpc
+#            ^ constant.numeric.integer.decimal.dgdlpc
+#             ^ punctuation.terminator.statement.dgdlpc
+>    } catch (err) {
+#    ^ punctuation.section.block.end.dgdlpc
+#      ^^^^^ keyword.control.dgdlpc
+#            ^ punctuation.section.parens.begin.dgdlpc
+#                ^ punctuation.section.parens.end.dgdlpc
+#                  ^ punctuation.section.block.begin.dgdlpc
+>        n = 2;
+#          ^ keyword.operator.assignment.dgdlpc
+#            ^ constant.numeric.integer.decimal.dgdlpc
+#             ^ punctuation.terminator.statement.dgdlpc
+>    }
+#    ^ punctuation.section.block.end.dgdlpc
+>    rlimits (10; 1000) {
+#    ^^^^^^^ keyword.control.dgdlpc
+#            ^ punctuation.section.parens.begin.dgdlpc
+#             ^^ constant.numeric.integer.decimal.dgdlpc
+#               ^ punctuation.terminator.statement.dgdlpc
+#                 ^^^^ constant.numeric.integer.decimal.dgdlpc
+#                     ^ punctuation.section.parens.end.dgdlpc
+#                       ^ punctuation.section.block.begin.dgdlpc
+>        function = catch(call_other(this_object(), function, n));
+#                 ^ keyword.operator.assignment.dgdlpc
+#                   ^^^^^ keyword.control.dgdlpc
+#                        ^ punctuation.section.parens.begin.dgdlpc
+#                         ^^^^^^^^^^ entity.name.function.call.dgdlpc
+#                                   ^ punctuation.section.parens.begin.dgdlpc
+#                                    ^^^^^^^^^^^ entity.name.function.call.dgdlpc
+#                                               ^ punctuation.section.parens.begin.dgdlpc
+#                                                ^ punctuation.section.parens.end.dgdlpc
+#                                                 ^ punctuation.separator.comma.dgdlpc
+#                                                           ^ punctuation.separator.comma.dgdlpc
+#                                                              ^ punctuation.section.parens.end.dgdlpc
+#                                                               ^ punctuation.section.parens.end.dgdlpc
+#                                                                ^ punctuation.terminator.statement.dgdlpc
+>    }
+#    ^ punctuation.section.block.end.dgdlpc
+>out:
+#   ^ punctuation.separator.colon.dgdlpc
+>    NAME = MAX_COUNT + __DGD__ + _x + X + T1;
+#    ^^^^ constant.other.caps.dgdlpc
+#         ^ keyword.operator.assignment.dgdlpc
+#           ^^^^^^^^^ constant.other.caps.dgdlpc
+#                     ^ keyword.operator.arithmetic.dgdlpc
+#                       ^^^^^^^ constant.other.caps.dgdlpc
+#                               ^ keyword.operator.arithmetic.dgdlpc
+#                                    ^ keyword.operator.arithmetic.dgdlpc
+#                                        ^ keyword.operator.arithmetic.dgdlpc
+#                                          ^^ constant.other.caps.dgdlpc
+#                                            ^ punctuation.terminator.statement.dgdlpc
+>}
+#^ punctuation.section.block.end.dgdlpc
+>
+>static int
+#^^^^^^ storage.modifier.dgdlpc
+#       ^^^ storage.type.dgdlpc
+>operator+ (int n)
+#^^^^^^^^ keyword.other.operator.dgdlpc
+#        ^ keyword.operator.arithmetic.dgdlpc
+#          ^ punctuation.section.parens.begin.dgdlpc
+#           ^^^ storage.type.dgdlpc
+#                ^ punctuation.section.parens.end.dgdlpc
+>{
+#^ punctuation.section.block.begin.dgdlpc
+>    return count + n;
+#    ^^^^^^ keyword.control.dgdlpc
+#                 ^ keyword.operator.arithmetic.dgdlpc
+#                    ^ punctuation.terminator.statement.dgdlpc
+>}
+#^ punctuation.section.block.end.dgdlpc

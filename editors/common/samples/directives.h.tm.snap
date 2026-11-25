@@ -1,0 +1,264 @@
+>/*
+#^^ comment.block.dgdlpc punctuation.definition.comment.begin.dgdlpc
+> * Preprocessor directives: '#' first on its line, to the end of the
+#^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ comment.block.dgdlpc
+> * logical line.
+#^^^^^^^^^^^^^^^^ comment.block.dgdlpc
+> */
+# ^^ comment.block.dgdlpc punctuation.definition.comment.end.dgdlpc
+>#ifndef SAMPLE_H
+#^ meta.preprocessor.conditional.dgdlpc keyword.control.directive.conditional.dgdlpc punctuation.definition.directive.dgdlpc
+# ^^^^^^ meta.preprocessor.conditional.dgdlpc keyword.control.directive.conditional.dgdlpc
+#        ^^^^^^^^ meta.preprocessor.conditional.dgdlpc constant.other.caps.dgdlpc
+># define SAMPLE_H
+#^ meta.preprocessor.macro.dgdlpc keyword.control.directive.define.dgdlpc punctuation.definition.directive.dgdlpc
+# ^^^^^^^ meta.preprocessor.macro.dgdlpc keyword.control.directive.define.dgdlpc
+#         ^^^^^^^^ meta.preprocessor.macro.dgdlpc entity.name.function.preprocessor.dgdlpc
+>
+>#include <std.h>
+#^ meta.preprocessor.include.dgdlpc keyword.control.directive.include.dgdlpc punctuation.definition.directive.dgdlpc
+# ^^^^^^^ meta.preprocessor.include.dgdlpc keyword.control.directive.include.dgdlpc
+#         ^ meta.preprocessor.include.dgdlpc string.quoted.other.lt-gt.include.dgdlpc punctuation.definition.string.begin.dgdlpc
+#          ^^^^^ meta.preprocessor.include.dgdlpc string.quoted.other.lt-gt.include.dgdlpc
+#               ^ meta.preprocessor.include.dgdlpc string.quoted.other.lt-gt.include.dgdlpc punctuation.definition.string.end.dgdlpc
+># include "local.h"	/* a comment after it */
+#^ meta.preprocessor.include.dgdlpc keyword.control.directive.include.dgdlpc punctuation.definition.directive.dgdlpc
+# ^^^^^^^^ meta.preprocessor.include.dgdlpc keyword.control.directive.include.dgdlpc
+#          ^ meta.preprocessor.include.dgdlpc string.quoted.double.include.dgdlpc punctuation.definition.string.begin.dgdlpc
+#           ^^^^^^^ meta.preprocessor.include.dgdlpc string.quoted.double.include.dgdlpc
+#                  ^ meta.preprocessor.include.dgdlpc string.quoted.double.include.dgdlpc punctuation.definition.string.end.dgdlpc
+#                   	^^ meta.preprocessor.include.dgdlpc comment.block.dgdlpc punctuation.definition.comment.begin.dgdlpc
+#                   	  ^^^^^^^^^^^^^^^^^^^^ meta.preprocessor.include.dgdlpc comment.block.dgdlpc
+#                   	                      ^^ meta.preprocessor.include.dgdlpc comment.block.dgdlpc punctuation.definition.comment.end.dgdlpc
+>#include "/include/config.h" // and a line comment
+#^ meta.preprocessor.include.dgdlpc keyword.control.directive.include.dgdlpc punctuation.definition.directive.dgdlpc
+# ^^^^^^^ meta.preprocessor.include.dgdlpc keyword.control.directive.include.dgdlpc
+#         ^ meta.preprocessor.include.dgdlpc string.quoted.double.include.dgdlpc punctuation.definition.string.begin.dgdlpc
+#          ^^^^^^^^^^^^^^^^^ meta.preprocessor.include.dgdlpc string.quoted.double.include.dgdlpc
+#                           ^ meta.preprocessor.include.dgdlpc string.quoted.double.include.dgdlpc punctuation.definition.string.end.dgdlpc
+#                             ^^ meta.preprocessor.include.dgdlpc comment.line.double-slash.dgdlpc punctuation.definition.comment.dgdlpc
+#                               ^^^^^^^^^^^^^^^^^^^ meta.preprocessor.include.dgdlpc comment.line.double-slash.dgdlpc
+>#include SAMPLE_PATH
+#^ meta.preprocessor.include.dgdlpc keyword.control.directive.include.dgdlpc punctuation.definition.directive.dgdlpc
+# ^^^^^^^ meta.preprocessor.include.dgdlpc keyword.control.directive.include.dgdlpc
+#         ^^^^^^^^^^^ meta.preprocessor.include.dgdlpc constant.other.caps.dgdlpc
+>
+>#define LIMIT 10
+#^ meta.preprocessor.macro.dgdlpc keyword.control.directive.define.dgdlpc punctuation.definition.directive.dgdlpc
+# ^^^^^^ meta.preprocessor.macro.dgdlpc keyword.control.directive.define.dgdlpc
+#        ^^^^^ meta.preprocessor.macro.dgdlpc entity.name.function.preprocessor.dgdlpc
+#              ^^ meta.preprocessor.macro.dgdlpc constant.numeric.integer.decimal.dgdlpc
+>#define EMPTY
+#^ meta.preprocessor.macro.dgdlpc keyword.control.directive.define.dgdlpc punctuation.definition.directive.dgdlpc
+# ^^^^^^ meta.preprocessor.macro.dgdlpc keyword.control.directive.define.dgdlpc
+#        ^^^^^ meta.preprocessor.macro.dgdlpc entity.name.function.preprocessor.dgdlpc
+>#define MAX(a, b) ((a) > (b) ? (a) : (b))
+#^ meta.preprocessor.macro.dgdlpc keyword.control.directive.define.dgdlpc punctuation.definition.directive.dgdlpc
+# ^^^^^^ meta.preprocessor.macro.dgdlpc keyword.control.directive.define.dgdlpc
+#        ^^^ meta.preprocessor.macro.dgdlpc entity.name.function.preprocessor.dgdlpc
+#           ^ meta.preprocessor.macro.dgdlpc punctuation.definition.parameters.begin.dgdlpc
+#            ^ meta.preprocessor.macro.dgdlpc variable.parameter.preprocessor.dgdlpc
+#             ^ meta.preprocessor.macro.dgdlpc punctuation.separator.parameters.dgdlpc
+#               ^ meta.preprocessor.macro.dgdlpc variable.parameter.preprocessor.dgdlpc
+#                ^ meta.preprocessor.macro.dgdlpc punctuation.definition.parameters.end.dgdlpc
+#                  ^ meta.preprocessor.macro.dgdlpc punctuation.section.parens.begin.dgdlpc
+#                   ^ meta.preprocessor.macro.dgdlpc punctuation.section.parens.begin.dgdlpc
+#                    ^ meta.preprocessor.macro.dgdlpc
+#                     ^ meta.preprocessor.macro.dgdlpc punctuation.section.parens.end.dgdlpc
+#                       ^ meta.preprocessor.macro.dgdlpc keyword.operator.comparison.dgdlpc
+#                         ^ meta.preprocessor.macro.dgdlpc punctuation.section.parens.begin.dgdlpc
+#                          ^ meta.preprocessor.macro.dgdlpc
+#                           ^ meta.preprocessor.macro.dgdlpc punctuation.section.parens.end.dgdlpc
+#                             ^ meta.preprocessor.macro.dgdlpc keyword.operator.ternary.dgdlpc
+#                               ^ meta.preprocessor.macro.dgdlpc punctuation.section.parens.begin.dgdlpc
+#                                ^ meta.preprocessor.macro.dgdlpc
+#                                 ^ meta.preprocessor.macro.dgdlpc punctuation.section.parens.end.dgdlpc
+#                                   ^ meta.preprocessor.macro.dgdlpc punctuation.separator.colon.dgdlpc
+#                                     ^ meta.preprocessor.macro.dgdlpc punctuation.section.parens.begin.dgdlpc
+#                                      ^ meta.preprocessor.macro.dgdlpc
+#                                       ^ meta.preprocessor.macro.dgdlpc punctuation.section.parens.end.dgdlpc
+#                                        ^ meta.preprocessor.macro.dgdlpc punctuation.section.parens.end.dgdlpc
+>#define STR(x) #x
+#^ meta.preprocessor.macro.dgdlpc keyword.control.directive.define.dgdlpc punctuation.definition.directive.dgdlpc
+# ^^^^^^ meta.preprocessor.macro.dgdlpc keyword.control.directive.define.dgdlpc
+#        ^^^ meta.preprocessor.macro.dgdlpc entity.name.function.preprocessor.dgdlpc
+#           ^ meta.preprocessor.macro.dgdlpc punctuation.definition.parameters.begin.dgdlpc
+#            ^ meta.preprocessor.macro.dgdlpc variable.parameter.preprocessor.dgdlpc
+#             ^ meta.preprocessor.macro.dgdlpc punctuation.definition.parameters.end.dgdlpc
+#               ^ meta.preprocessor.macro.dgdlpc keyword.operator.preprocessor.dgdlpc
+#                ^ meta.preprocessor.macro.dgdlpc
+>#define PASTE(a, b) a ## b
+#^ meta.preprocessor.macro.dgdlpc keyword.control.directive.define.dgdlpc punctuation.definition.directive.dgdlpc
+# ^^^^^^ meta.preprocessor.macro.dgdlpc keyword.control.directive.define.dgdlpc
+#        ^^^^^ meta.preprocessor.macro.dgdlpc entity.name.function.preprocessor.dgdlpc
+#             ^ meta.preprocessor.macro.dgdlpc punctuation.definition.parameters.begin.dgdlpc
+#              ^ meta.preprocessor.macro.dgdlpc variable.parameter.preprocessor.dgdlpc
+#               ^ meta.preprocessor.macro.dgdlpc punctuation.separator.parameters.dgdlpc
+#                 ^ meta.preprocessor.macro.dgdlpc variable.parameter.preprocessor.dgdlpc
+#                  ^ meta.preprocessor.macro.dgdlpc punctuation.definition.parameters.end.dgdlpc
+#                    ^ meta.preprocessor.macro.dgdlpc
+#                      ^^ meta.preprocessor.macro.dgdlpc keyword.operator.preprocessor.dgdlpc
+#                         ^ meta.preprocessor.macro.dgdlpc
+>#define DIRS ({ "north", "south" })
+#^ meta.preprocessor.macro.dgdlpc keyword.control.directive.define.dgdlpc punctuation.definition.directive.dgdlpc
+# ^^^^^^ meta.preprocessor.macro.dgdlpc keyword.control.directive.define.dgdlpc
+#        ^^^^ meta.preprocessor.macro.dgdlpc entity.name.function.preprocessor.dgdlpc
+#             ^^ meta.preprocessor.macro.dgdlpc meta.array.dgdlpc punctuation.definition.array.begin.dgdlpc
+#                ^ meta.preprocessor.macro.dgdlpc meta.array.dgdlpc string.quoted.double.dgdlpc punctuation.definition.string.begin.dgdlpc
+#                 ^^^^^ meta.preprocessor.macro.dgdlpc meta.array.dgdlpc string.quoted.double.dgdlpc
+#                      ^ meta.preprocessor.macro.dgdlpc meta.array.dgdlpc string.quoted.double.dgdlpc punctuation.definition.string.end.dgdlpc
+#                       ^ meta.preprocessor.macro.dgdlpc meta.array.dgdlpc punctuation.separator.comma.dgdlpc
+#                         ^ meta.preprocessor.macro.dgdlpc meta.array.dgdlpc string.quoted.double.dgdlpc punctuation.definition.string.begin.dgdlpc
+#                          ^^^^^ meta.preprocessor.macro.dgdlpc meta.array.dgdlpc string.quoted.double.dgdlpc
+#                               ^ meta.preprocessor.macro.dgdlpc meta.array.dgdlpc string.quoted.double.dgdlpc punctuation.definition.string.end.dgdlpc
+#                                 ^^ meta.preprocessor.macro.dgdlpc meta.array.dgdlpc punctuation.definition.array.end.dgdlpc
+>#define EXITS ([ "north": "/room/hall", \
+#^ meta.preprocessor.macro.dgdlpc keyword.control.directive.define.dgdlpc punctuation.definition.directive.dgdlpc
+# ^^^^^^ meta.preprocessor.macro.dgdlpc keyword.control.directive.define.dgdlpc
+#        ^^^^^ meta.preprocessor.macro.dgdlpc entity.name.function.preprocessor.dgdlpc
+#              ^^ meta.preprocessor.macro.dgdlpc meta.mapping.dgdlpc punctuation.definition.mapping.begin.dgdlpc
+#                 ^ meta.preprocessor.macro.dgdlpc meta.mapping.dgdlpc string.quoted.double.dgdlpc punctuation.definition.string.begin.dgdlpc
+#                  ^^^^^ meta.preprocessor.macro.dgdlpc meta.mapping.dgdlpc string.quoted.double.dgdlpc
+#                       ^ meta.preprocessor.macro.dgdlpc meta.mapping.dgdlpc string.quoted.double.dgdlpc punctuation.definition.string.end.dgdlpc
+#                        ^ meta.preprocessor.macro.dgdlpc meta.mapping.dgdlpc punctuation.separator.colon.dgdlpc
+#                          ^ meta.preprocessor.macro.dgdlpc meta.mapping.dgdlpc string.quoted.double.dgdlpc punctuation.definition.string.begin.dgdlpc
+#                           ^^^^^^^^^^ meta.preprocessor.macro.dgdlpc meta.mapping.dgdlpc string.quoted.double.dgdlpc
+#                                     ^ meta.preprocessor.macro.dgdlpc meta.mapping.dgdlpc string.quoted.double.dgdlpc punctuation.definition.string.end.dgdlpc
+#                                      ^ meta.preprocessor.macro.dgdlpc meta.mapping.dgdlpc punctuation.separator.comma.dgdlpc
+#                                        ^ meta.preprocessor.macro.dgdlpc meta.mapping.dgdlpc constant.character.escape.line-continuation.dgdlpc
+>                 "south": DIRS[1] ])
+#                 ^ meta.preprocessor.macro.dgdlpc meta.mapping.dgdlpc string.quoted.double.dgdlpc punctuation.definition.string.begin.dgdlpc
+#                  ^^^^^ meta.preprocessor.macro.dgdlpc meta.mapping.dgdlpc string.quoted.double.dgdlpc
+#                       ^ meta.preprocessor.macro.dgdlpc meta.mapping.dgdlpc string.quoted.double.dgdlpc punctuation.definition.string.end.dgdlpc
+#                        ^ meta.preprocessor.macro.dgdlpc meta.mapping.dgdlpc punctuation.separator.colon.dgdlpc
+#                          ^^^^ meta.preprocessor.macro.dgdlpc meta.mapping.dgdlpc constant.other.caps.dgdlpc
+#                              ^ meta.preprocessor.macro.dgdlpc meta.mapping.dgdlpc meta.brackets.dgdlpc punctuation.section.brackets.begin.dgdlpc
+#                               ^ meta.preprocessor.macro.dgdlpc meta.mapping.dgdlpc meta.brackets.dgdlpc constant.numeric.integer.decimal.dgdlpc
+#                                ^ meta.preprocessor.macro.dgdlpc meta.mapping.dgdlpc meta.brackets.dgdlpc punctuation.section.brackets.end.dgdlpc
+#                                  ^^ meta.preprocessor.macro.dgdlpc meta.mapping.dgdlpc punctuation.definition.mapping.end.dgdlpc
+>#define LONG_TEXT "one line\n\
+#^ meta.preprocessor.macro.dgdlpc keyword.control.directive.define.dgdlpc punctuation.definition.directive.dgdlpc
+# ^^^^^^ meta.preprocessor.macro.dgdlpc keyword.control.directive.define.dgdlpc
+#        ^^^^^^^^^ meta.preprocessor.macro.dgdlpc entity.name.function.preprocessor.dgdlpc
+#                  ^ meta.preprocessor.macro.dgdlpc string.quoted.double.dgdlpc punctuation.definition.string.begin.dgdlpc
+#                   ^^^^^^^^ meta.preprocessor.macro.dgdlpc string.quoted.double.dgdlpc
+#                           ^^ meta.preprocessor.macro.dgdlpc string.quoted.double.dgdlpc constant.character.escape.dgdlpc
+#                             ^ meta.preprocessor.macro.dgdlpc string.quoted.double.dgdlpc constant.character.escape.line-continuation.dgdlpc
+>another line\n"
+#^^^^^^^^^^^^ meta.preprocessor.macro.dgdlpc string.quoted.double.dgdlpc
+#            ^^ meta.preprocessor.macro.dgdlpc string.quoted.double.dgdlpc constant.character.escape.dgdlpc
+#              ^ meta.preprocessor.macro.dgdlpc string.quoted.double.dgdlpc punctuation.definition.string.end.dgdlpc
+>#define OPEN ([
+#^ meta.preprocessor.macro.dgdlpc keyword.control.directive.define.dgdlpc punctuation.definition.directive.dgdlpc
+# ^^^^^^ meta.preprocessor.macro.dgdlpc keyword.control.directive.define.dgdlpc
+#        ^^^^ meta.preprocessor.macro.dgdlpc entity.name.function.preprocessor.dgdlpc
+#             ^^ meta.preprocessor.macro.dgdlpc meta.mapping.dgdlpc punctuation.definition.mapping.begin.dgdlpc
+>#define CLOSE ])
+#^ meta.preprocessor.macro.dgdlpc keyword.control.directive.define.dgdlpc punctuation.definition.directive.dgdlpc
+# ^^^^^^ meta.preprocessor.macro.dgdlpc keyword.control.directive.define.dgdlpc
+#        ^^^^^ meta.preprocessor.macro.dgdlpc entity.name.function.preprocessor.dgdlpc
+#              ^ meta.preprocessor.macro.dgdlpc punctuation.section.brackets.end.dgdlpc
+#               ^ meta.preprocessor.macro.dgdlpc punctuation.section.parens.end.dgdlpc
+>#define MULTI(x) do { \
+#^ meta.preprocessor.macro.dgdlpc keyword.control.directive.define.dgdlpc punctuation.definition.directive.dgdlpc
+# ^^^^^^ meta.preprocessor.macro.dgdlpc keyword.control.directive.define.dgdlpc
+#        ^^^^^ meta.preprocessor.macro.dgdlpc entity.name.function.preprocessor.dgdlpc
+#             ^ meta.preprocessor.macro.dgdlpc punctuation.definition.parameters.begin.dgdlpc
+#              ^ meta.preprocessor.macro.dgdlpc variable.parameter.preprocessor.dgdlpc
+#               ^ meta.preprocessor.macro.dgdlpc punctuation.definition.parameters.end.dgdlpc
+#                 ^^ meta.preprocessor.macro.dgdlpc keyword.control.dgdlpc
+#                    ^ meta.preprocessor.macro.dgdlpc punctuation.section.block.begin.dgdlpc
+#                      ^ meta.preprocessor.macro.dgdlpc constant.character.escape.line-continuation.dgdlpc
+>        x; /* a comment that
+#        ^ meta.preprocessor.macro.dgdlpc
+#         ^ meta.preprocessor.macro.dgdlpc punctuation.terminator.statement.dgdlpc
+#           ^^ meta.preprocessor.macro.dgdlpc comment.block.dgdlpc punctuation.definition.comment.begin.dgdlpc
+#             ^^^^^^^^^^^^^^^ meta.preprocessor.macro.dgdlpc comment.block.dgdlpc
+>              goes on */ \
+#^^^^^^^^^^^^^^^^^^^^^^ meta.preprocessor.macro.dgdlpc comment.block.dgdlpc
+#                      ^^ meta.preprocessor.macro.dgdlpc comment.block.dgdlpc punctuation.definition.comment.end.dgdlpc
+#                         ^ meta.preprocessor.macro.dgdlpc constant.character.escape.line-continuation.dgdlpc
+>    } while (0)
+#    ^ meta.preprocessor.macro.dgdlpc punctuation.section.block.end.dgdlpc
+#      ^^^^^ meta.preprocessor.macro.dgdlpc keyword.control.dgdlpc
+#            ^ meta.preprocessor.macro.dgdlpc punctuation.section.parens.begin.dgdlpc
+#             ^ meta.preprocessor.macro.dgdlpc constant.numeric.integer.decimal.dgdlpc
+#              ^ meta.preprocessor.macro.dgdlpc punctuation.section.parens.end.dgdlpc
+>
+>#if defined(__DGD__) && LIMIT > 0x10 || !defined(OTHER)
+#^ meta.preprocessor.conditional.dgdlpc keyword.control.directive.conditional.dgdlpc punctuation.definition.directive.dgdlpc
+# ^^ meta.preprocessor.conditional.dgdlpc keyword.control.directive.conditional.dgdlpc
+#    ^^^^^^^ meta.preprocessor.conditional.dgdlpc keyword.control.directive.defined.dgdlpc
+#           ^ meta.preprocessor.conditional.dgdlpc punctuation.section.parens.begin.dgdlpc
+#            ^^^^^^^ meta.preprocessor.conditional.dgdlpc constant.other.caps.dgdlpc
+#                   ^ meta.preprocessor.conditional.dgdlpc punctuation.section.parens.end.dgdlpc
+#                     ^^ meta.preprocessor.conditional.dgdlpc keyword.operator.logical.dgdlpc
+#                        ^^^^^ meta.preprocessor.conditional.dgdlpc constant.other.caps.dgdlpc
+#                              ^ meta.preprocessor.conditional.dgdlpc keyword.operator.comparison.dgdlpc
+#                                ^^^^ meta.preprocessor.conditional.dgdlpc constant.numeric.integer.hexadecimal.dgdlpc
+#                                     ^^ meta.preprocessor.conditional.dgdlpc keyword.operator.logical.dgdlpc
+#                                        ^ meta.preprocessor.conditional.dgdlpc keyword.operator.logical.dgdlpc
+#                                         ^^^^^^^ meta.preprocessor.conditional.dgdlpc keyword.control.directive.defined.dgdlpc
+#                                                ^ meta.preprocessor.conditional.dgdlpc punctuation.section.parens.begin.dgdlpc
+#                                                 ^^^^^ meta.preprocessor.conditional.dgdlpc constant.other.caps.dgdlpc
+#                                                      ^ meta.preprocessor.conditional.dgdlpc punctuation.section.parens.end.dgdlpc
+># undef LIMIT
+#^ meta.preprocessor.dgdlpc keyword.control.directive.dgdlpc punctuation.definition.directive.dgdlpc
+# ^^^^^^ meta.preprocessor.dgdlpc keyword.control.directive.dgdlpc
+#        ^^^^^ meta.preprocessor.dgdlpc constant.other.caps.dgdlpc
+>#elif LIMIT == 3
+#^ meta.preprocessor.conditional.dgdlpc keyword.control.directive.conditional.dgdlpc punctuation.definition.directive.dgdlpc
+# ^^^^ meta.preprocessor.conditional.dgdlpc keyword.control.directive.conditional.dgdlpc
+#      ^^^^^ meta.preprocessor.conditional.dgdlpc constant.other.caps.dgdlpc
+#            ^^ meta.preprocessor.conditional.dgdlpc keyword.operator.comparison.dgdlpc
+#               ^ meta.preprocessor.conditional.dgdlpc constant.numeric.integer.decimal.dgdlpc
+># line 100 "sample.h"
+#^ meta.preprocessor.dgdlpc keyword.control.directive.dgdlpc punctuation.definition.directive.dgdlpc
+# ^^^^^ meta.preprocessor.dgdlpc keyword.control.directive.dgdlpc
+#       ^^^ meta.preprocessor.dgdlpc constant.numeric.integer.decimal.dgdlpc
+#           ^ meta.preprocessor.dgdlpc string.quoted.double.dgdlpc punctuation.definition.string.begin.dgdlpc
+#            ^^^^^^^^ meta.preprocessor.dgdlpc string.quoted.double.dgdlpc
+#                    ^ meta.preprocessor.dgdlpc string.quoted.double.dgdlpc punctuation.definition.string.end.dgdlpc
+># pragma unconstrained_float
+#^ meta.preprocessor.dgdlpc keyword.control.directive.dgdlpc punctuation.definition.directive.dgdlpc
+# ^^^^^^^ meta.preprocessor.dgdlpc keyword.control.directive.dgdlpc
+#         ^^^^^^^^^^^^^^^^^^^ meta.preprocessor.dgdlpc
+>#else
+#^ meta.preprocessor.conditional.dgdlpc keyword.control.directive.conditional.dgdlpc punctuation.definition.directive.dgdlpc
+# ^^^^ meta.preprocessor.conditional.dgdlpc keyword.control.directive.conditional.dgdlpc
+># error this can't be right: "unbalanced
+#^ meta.preprocessor.error.dgdlpc keyword.control.directive.error.dgdlpc punctuation.definition.directive.dgdlpc
+# ^^^^^^ meta.preprocessor.error.dgdlpc keyword.control.directive.error.dgdlpc
+#       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ meta.preprocessor.error.dgdlpc
+>#endif
+#^ meta.preprocessor.conditional.dgdlpc keyword.control.directive.conditional.dgdlpc punctuation.definition.directive.dgdlpc
+# ^^^^^ meta.preprocessor.conditional.dgdlpc keyword.control.directive.conditional.dgdlpc
+>
+>#ifdef OTHER
+#^ meta.preprocessor.conditional.dgdlpc keyword.control.directive.conditional.dgdlpc punctuation.definition.directive.dgdlpc
+# ^^^^^ meta.preprocessor.conditional.dgdlpc keyword.control.directive.conditional.dgdlpc
+#       ^^^^^ meta.preprocessor.conditional.dgdlpc constant.other.caps.dgdlpc
+>int after_a_directive;
+#^^^ storage.type.dgdlpc
+#                     ^ punctuation.terminator.statement.dgdlpc
+>#endif
+#^ meta.preprocessor.conditional.dgdlpc keyword.control.directive.conditional.dgdlpc punctuation.definition.directive.dgdlpc
+# ^^^^^ meta.preprocessor.conditional.dgdlpc keyword.control.directive.conditional.dgdlpc
+>  #define INDENTED 1
+#  ^ meta.preprocessor.macro.dgdlpc keyword.control.directive.define.dgdlpc punctuation.definition.directive.dgdlpc
+#   ^^^^^^ meta.preprocessor.macro.dgdlpc keyword.control.directive.define.dgdlpc
+#          ^^^^^^^^ meta.preprocessor.macro.dgdlpc entity.name.function.preprocessor.dgdlpc
+#                   ^ meta.preprocessor.macro.dgdlpc constant.numeric.integer.decimal.dgdlpc
+>#unknown directive
+#^ meta.preprocessor.dgdlpc punctuation.definition.directive.dgdlpc
+# ^^^^^^^ meta.preprocessor.dgdlpc
+#         ^^^^^^^^^ meta.preprocessor.dgdlpc
+>#
+#^ meta.preprocessor.dgdlpc punctuation.definition.directive.dgdlpc
+>
+>#endif /* SAMPLE_H */
+#^ meta.preprocessor.conditional.dgdlpc keyword.control.directive.conditional.dgdlpc punctuation.definition.directive.dgdlpc
+# ^^^^^ meta.preprocessor.conditional.dgdlpc keyword.control.directive.conditional.dgdlpc
+#       ^^ meta.preprocessor.conditional.dgdlpc comment.block.dgdlpc punctuation.definition.comment.begin.dgdlpc
+#         ^^^^^^^^^^ meta.preprocessor.conditional.dgdlpc comment.block.dgdlpc
+#                   ^^ meta.preprocessor.conditional.dgdlpc comment.block.dgdlpc punctuation.definition.comment.end.dgdlpc
