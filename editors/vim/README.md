@@ -201,6 +201,40 @@ With [coc.nvim](https://github.com/neoclide/coc.nvim), in
 }
 ```
 
+A folder without a `dgdtools.yml` (a wizard's checkout of a lib, say)
+needs the server told its profile and its lib path, as Neovim's
+`settings` above tell it. Every client can give them as initialization
+options, which hold for the root it starts the server in; that root
+must then be the checkout's directory, not the file's (`root_uri` in
+vim-lsp, `project_root` in ALE, `rootPatterns` in coc). In vim-lsp's
+`lsp#register_server({...})` and in ALE's `ale#linter#Define(...)`
+above:
+
+```vim
+      \ 'initialization_options': {'profile': 'mylib', 'libPath': '/players/me'},
+```
+
+In coc's `dgdtools` entry:
+
+```json
+"initializationOptions": { "profile": "mylib", "libPath": "/players/me" }
+```
+
+A client that answers the server's questions about its settings can
+give them for each folder instead, under the section `dgdtools`
+(vim-lsp's `workspace_config`, coc's `settings`).
+
+### Files changed outside the editor
+
+The server learns of a file changed on disk when the client tells it.
+vim-lsp and ALE do not; coc.nvim does where watchman is installed, and
+Neovim where it watches files (not by default on Linux). With a client
+that does not, a file changed outside the editor (by `git pull`, or by
+`dgdtools rename --write`) is seen when it is opened in the editor or
+the server restarts; until then what the server says of the files that
+use it may be out of date. The server says so once in its log when the
+client does not watch files.
+
 ## Tests
 
 `go test ./editors` runs these files in the `vim` and `nvim` on `PATH`,

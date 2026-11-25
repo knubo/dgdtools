@@ -52,7 +52,8 @@ the linter and formatter for it:
   the name typed (the name would hide another or be hidden, a variable
   `save_object` writes, the create function), the editor says why before
   anything changes; a message says what else to know (edited files other
-  objects inherit, which take effect at the scheduled reboot).
+  objects inherit, which must be recompiled for the rename to take
+  effect).
 - **Files moved**: rename or move a `.c` or `.h` file or a folder in the
   explorer, and the `inherit` and `#include` lines and object paths that
   name it are rewritten with it; a path made by a macro is left, and a

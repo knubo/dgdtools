@@ -146,8 +146,8 @@ and what it formats is what `dgdtools format` writes. What it does:
   --force` renames it), a name in code that is not compiled or does not
   parse. A new name that would hide another, be hidden, or take the
   place of a function or a macro is refused, naming it. A message says
-  what to know beside: the edited files other objects inherit (the
-  rename takes effect everywhere at the scheduled reboot), a checkout
+  what to know beside: the edited files other objects inherit (those
+  objects must be recompiled for the rename to take effect), a checkout
   whose rest of the mudlib is not renamed, the calls that make a
   function's name when they run. DGD calls no private function by name,
   so the string of `call_out("fn")` for a private `fn` is no call of
