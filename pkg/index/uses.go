@@ -132,10 +132,10 @@ func (u *Unit) Uses(name string) []Use {
 	if !found {
 		return nil
 	}
-	i := sort.Search(len(us.recs), func(i int) bool { return us.recs[i].name >= uint32(n) })
+	i := sort.Search(us.len(), func(i int) bool { return us.nameAt(i) >= n })
 	var out []Use
-	for ; i < len(us.recs) && us.recs[i].name == uint32(n); i++ {
-		out = append(out, us.use(&us.recs[i]))
+	for ; i < us.len() && us.nameAt(i) == n; i++ {
+		out = append(out, us.use(i))
 	}
 	return out
 }
@@ -147,9 +147,9 @@ func (u *Unit) AllUses() []Use {
 	if us == nil {
 		return nil
 	}
-	out := make([]Use, len(us.recs))
-	for i := range us.recs {
-		out[i] = us.use(&us.recs[i])
+	out := make([]Use, us.len())
+	for i := range out {
+		out[i] = us.use(i)
 	}
 	return out
 }
@@ -158,15 +158,19 @@ func (u *Unit) AllUses() []Use {
 // extractor, and the file is not a profile's stub.
 func (u *Unit) HasUses() bool { return u.uses != nil }
 
-// uses are a unit's Uses as kept: a whole lib has millions, so a Use is
-// a record of 28 bytes, its name and its Aux by number.
+// uses are a unit's Uses as kept. A whole lib has millions, so a Use is
+// a record of 16 bytes (useRec), its name and its Aux by number, its
+// line, column and length in 16 bits each; a file with a Use that does
+// not fit has records of 28 bytes (wideRec) instead.
 type uses struct {
 	// names are the names used, sorted; recs refer to them by index.
 	names []unique.Handle[string]
 	// aux are the distinct Aux and Off of the Uses; a rec refers to one
 	// by index plus one, 0 being none.
-	aux  []useAux
+	aux []useAux
+	// recs, or wide where one does not fit, sorted by name and place.
 	recs []useRec
+	wide []wideRec
 }
 
 type useAux struct {
@@ -174,10 +178,21 @@ type useAux struct {
 	off uint32
 }
 
+// useRec is a Use in 16 bytes: End is Start+n; line and col are 0 where
+// they do not fit, and Line and Col are then not kept.
 type useRec struct {
+	start        uint32
+	line, col, n uint16
+	name, aux    uint16
+	kind         uint8 // UseKind | UseForm<<3
+	flags        uint8
+}
+
+// wideRec is a Use as useRec has it, without the limits of 16 bits.
+type wideRec struct {
 	start, end, line uint32
 	name, aux        uint32
-	col              uint16 // 0: more than a uint16 holds; Line and Col are then not kept
+	col              uint32 // 0: Line and Col are not kept
 	kind             UseKind
 	form             UseForm
 	flags            uint8
@@ -188,11 +203,32 @@ const (
 	recASCII
 )
 
-func (us *uses) use(r *useRec) Use {
+func (us *uses) len() int { return len(us.recs) + len(us.wide) }
+
+// nameAt returns the index in names of the name of the i'th record.
+func (us *uses) nameAt(i int) int {
+	if us.wide != nil {
+		return int(us.wide[i].name)
+	}
+	return int(us.recs[i].name)
+}
+
+// at returns the i'th record, wide.
+func (us *uses) at(i int) wideRec {
+	if us.wide != nil {
+		return us.wide[i]
+	}
+	r := &us.recs[i]
+	return wideRec{start: r.start, end: r.start + uint32(r.n), line: uint32(r.line), col: uint32(r.col),
+		name: uint32(r.name), aux: uint32(r.aux), kind: UseKind(r.kind & 7), form: UseForm(r.kind >> 3), flags: r.flags}
+}
+
+func (us *uses) use(i int) Use {
+	r := us.at(i)
 	u := Use{Name: us.names[r.name].Value(), Start: r.start, End: r.end, Kind: r.kind, Form: r.form,
 		Decl: r.flags&recDecl != 0, ASCII: r.flags&recASCII != 0}
 	if r.col != 0 {
-		u.Line, u.Col = r.line, uint32(r.col)
+		u.Line, u.Col = r.line, r.col
 	}
 	if r.aux > 0 {
 		a := us.aux[r.aux-1]
@@ -211,23 +247,35 @@ func (u *Unit) setUses(in []Use) {
 	in = slices.CompactFunc(in, func(a, b Use) bool {
 		return a.Name == b.Name && a.Start == b.Start && a.End == b.End && a.Kind == b.Kind
 	})
-	us := &uses{recs: make([]useRec, 0, len(in))}
+	us, ok := keepUses(in, false)
+	if !ok {
+		us, _ = keepUses(in, true)
+	}
+	u.uses = us
+}
+
+// keepUses makes the records of the sorted Uses in: of 16 bytes, or
+// false when one does not fit; wide ones if wide.
+func keepUses(in []Use, wide bool) (*uses, bool) {
+	us := &uses{}
+	if wide {
+		us.wide = make([]wideRec, 0, len(in))
+	} else {
+		us.recs = make([]useRec, 0, len(in))
+	}
 	auxes := map[useAux]uint32{}
 	for _, x := range in {
 		if len(us.names) == 0 || us.names[len(us.names)-1].Value() != x.Name {
 			us.names = append(us.names, unique.Make(x.Name))
 		}
-		r := useRec{start: x.Start, end: x.End, line: x.Line, name: uint32(len(us.names) - 1),
-			kind: x.Kind, form: x.Form}
-		if x.Col <= 0xffff {
-			r.col = uint16(x.Col)
-		}
+		var flags uint8
 		if x.Decl {
-			r.flags |= recDecl
+			flags |= recDecl
 		}
-		if x.ASCII && r.col != 0 {
-			r.flags |= recASCII
+		if x.ASCII && x.Col != 0 {
+			flags |= recASCII
 		}
+		var aux uint32
 		if x.Aux != "" || x.Off != 0 {
 			a := useAux{aux: unique.Make(x.Aux), off: x.Off}
 			i, ok := auxes[a]
@@ -236,13 +284,29 @@ func (u *Unit) setUses(in []Use) {
 				i = uint32(len(us.aux))
 				auxes[a] = i
 			}
-			r.aux = i
+			aux = i
+		}
+		name := uint32(len(us.names) - 1)
+		if wide {
+			us.wide = append(us.wide, wideRec{start: x.Start, end: x.End, line: x.Line, col: x.Col,
+				name: name, aux: aux, kind: x.Kind, form: x.Form, flags: flags})
+			continue
+		}
+		if x.End-x.Start > 0xffff || name > 0xffff || aux > 0xffff {
+			return nil, false
+		}
+		r := useRec{start: x.Start, n: uint16(x.End - x.Start), name: uint16(name), aux: uint16(aux),
+			kind: uint8(x.Kind) | uint8(x.Form)<<3, flags: flags}
+		if x.Line <= 0xffff && x.Col <= 0xffff {
+			r.line, r.col = uint16(x.Line), uint16(x.Col)
+		} else {
+			r.flags &^= recASCII
 		}
 		us.recs = append(us.recs, r)
 	}
 	us.names = slices.Clip(us.names)
 	us.aux = slices.Clip(us.aux)
-	u.uses = us
+	return us, true
 }
 
 // useScope is the units a search for the references of a name looks
