@@ -170,7 +170,38 @@ type ServerCapabilities struct {
 			ChangeNotifications bool `json:"changeNotifications"`
 		} `json:"workspaceFolders"`
 		TextDocumentContent TextDocumentContentOptions `json:"textDocumentContent"`
+		FileOperations      *FileOperationOptions      `json:"fileOperations,omitempty"`
 	} `json:"workspace"`
+}
+
+// FileOperationOptions are the files and folders whose renaming the
+// server is told of before it is made (workspace/willRenameFiles).
+type FileOperationOptions struct {
+	WillRename FileOperationRegistrationOptions `json:"willRename"`
+}
+
+type FileOperationRegistrationOptions struct {
+	Filters []FileOperationFilter `json:"filters"`
+}
+
+type FileOperationFilter struct {
+	Scheme  string               `json:"scheme,omitempty"`
+	Pattern FileOperationPattern `json:"pattern"`
+}
+
+// FileOperationPattern is a glob, of files or of folders (Matches).
+type FileOperationPattern struct {
+	Glob    string `json:"glob"`
+	Matches string `json:"matches,omitempty"`
+}
+
+type RenameFilesParams struct {
+	Files []FileRename `json:"files"`
+}
+
+type FileRename struct {
+	OldURI string `json:"oldUri"`
+	NewURI string `json:"newUri"`
 }
 
 // TextDocumentContentOptions names the URI schemes of the documents

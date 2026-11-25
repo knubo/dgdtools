@@ -466,6 +466,12 @@ func (s *server) request(ctx context.Context, method string, params json.RawMess
 			return nil, err
 		}
 		result, err = s.rename(ctx, &p)
+	case "workspace/willRenameFiles":
+		var p RenameFilesParams
+		if err := unmarshal(params, &p); err != nil {
+			return nil, err
+		}
+		result, err = s.willRenameFiles(ctx, &p)
 	case "textDocument/formatting":
 		var p DocumentFormattingParams
 		if err := unmarshal(params, &p); err != nil {
@@ -665,6 +671,13 @@ func (s *server) initialize(params json.RawMessage) (any, error) {
 	// that knows the request shows them, read-only, when asked to go to
 	// one.
 	res.Capabilities.Workspace.TextDocumentContent.Schemes = []string{profile.Scheme}
+	// A file or a folder renamed or moved in the editor: the inherit
+	// statements, #includes and object paths that name it are edited.
+	res.Capabilities.Workspace.FileOperations = &FileOperationOptions{WillRename: FileOperationRegistrationOptions{
+		Filters: []FileOperationFilter{
+			{Scheme: "file", Pattern: FileOperationPattern{Glob: "**/*.{c,h}", Matches: "file"}},
+			{Scheme: "file", Pattern: FileOperationPattern{Glob: "**", Matches: "folder"}},
+		}}}
 	s.log.Info("initialized", "encoding", s.caps.encoding(), "folders", len(s.folders))
 	return res, nil
 }

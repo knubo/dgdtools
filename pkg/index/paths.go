@@ -107,6 +107,10 @@ func (l *lib) IsVirtual(libPath string) bool {
 	return l.virtual.Match(strings.TrimPrefix(libPath, "/"))
 }
 
+// IncludeDirs are the lib directories an #include searches, in order
+// (the configuration's include_dirs).
+func (l *lib) IncludeDirs() []string { return l.cfg.IncludeDirs }
+
 // ObjectPath turns an object path as written in fromLib into an absolute
 // lib path. A path without a leading slash is resolved from the lib root
 // unless the config says the lib resolves it from the file

@@ -134,14 +134,19 @@ func (s *Snapshot) ReadFile(p string) ([]byte, error) { return s.fs.ReadFile(s.c
 // changes the answer. When nothing has the file the path is where it
 // would be on disk ("" if no directory on disk could hold it).
 func (s *Snapshot) locate(libFile string) (p string, absent []string) {
+	return s.locateIn(libFile, s.exists)
+}
+
+// locateIn is locate in a lib whose files exists says.
+func (s *Snapshot) locateIn(libFile string, exists func(string) bool) (p string, absent []string) {
 	disk, onDisk := s.diskPath(libFile)
-	if onDisk && (s.lay.Stubs == "" || s.inCheckout(libFile) || s.exists(disk)) {
+	if onDisk && (s.lay.Stubs == "" || s.inCheckout(libFile) || exists(disk)) {
 		return disk, nil
 	}
 	if onDisk {
 		absent = []string{disk}
 	}
-	if stub := s.lay.Stubs + libFile; s.lay.Stubs != "" && !s.inCheckout(libFile) && (!onDisk || s.exists(stub)) {
+	if stub := s.lay.Stubs + libFile; s.lay.Stubs != "" && !s.inCheckout(libFile) && (!onDisk || exists(stub)) {
 		return stub, absent
 	}
 	return disk, absent
@@ -177,13 +182,32 @@ func (s *Snapshot) ResolveInclude(from string, inc pp.Include) (string, bool) {
 	return p, p != ""
 }
 
+// ResolveIncludeIf is ResolveInclude in the lib as it would be after
+// its files changed (moved, created, removed): exists says whether there
+// is a file at a path, and decided false leaves the answer to the lib
+// as it is. from need not exist.
+func (s *Snapshot) ResolveIncludeIf(from string, inc pp.Include, exists func(p string) (is, decided bool)) (string, bool) {
+	p, _ := s.resolveIncludeIn(from, inc, func(p string) bool {
+		if is, decided := exists(p); decided {
+			return is
+		}
+		return s.exists(p)
+	})
+	return p, p != ""
+}
+
 // resolveInclude also returns the places that were tried before the hit
 // (all of them on a miss).
 func (s *Snapshot) resolveInclude(from string, inc pp.Include) (hit string, absent []string) {
+	return s.resolveIncludeIn(from, inc, s.exists)
+}
+
+// resolveIncludeIn is resolveInclude in a lib whose files exists says.
+func (s *Snapshot) resolveIncludeIn(from string, inc pp.Include, exists func(string) bool) (hit string, absent []string) {
 	try := func(libFile string) bool {
-		p, miss := s.locate(path.Clean(libFile))
+		p, miss := s.locateIn(path.Clean(libFile), exists)
 		absent = append(absent, miss...)
-		if s.exists(p) {
+		if exists(p) {
 			hit = p
 			return true
 		}
@@ -204,7 +228,7 @@ func (s *Snapshot) resolveInclude(from string, inc pp.Include) (hit string, abse
 			}
 		default:
 			p := filepath.Join(filepath.Dir(from), filepath.FromSlash(inc.Name))
-			if s.exists(p) {
+			if exists(p) {
 				return p, absent
 			}
 			absent = append(absent, p)

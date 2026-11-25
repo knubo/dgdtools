@@ -1,0 +1,159 @@
+Files moved in the editor (workspace/willRenameFiles): the inherit
+statements, #includes and object paths that name a moved file are
+edited before the move, each as it was written, in documents open (for
+their version) and files not open (for no version); a moved file's own
+#include that names a file beside it is edited too. A path made by a
+macro is not changed, and the user is told. A folder moves with its
+files.
+
+-- lib/dgdtools.yml --
+include_dirs: [/include]
+-- lib/include/std.h --
+#define ROOM "/std/room"
+-- lib/std/room.h --
+#define LIGHT 1
+-- lib/std/room.c --
+#include "room.h"
+int light;
+-- lib/obj/a.c --
+inherit "/std/room";
+void f() { clone_object("/std/room"); }
+-- lib/obj/b.c --
+#include <std.h>
+inherit ROOM;
+-- lib/obj/c.c --
+#include "/std/room.h"
+-- script --
+initialize lib
+open lib/obj/a.c
+move lib/std/room.c lib/domain/room.c
+received window/showMessage
+move lib/std lib/base
+text lib/obj/a.c
+shutdown
+exit
+-- transcript --
+> initialize lib
+< {
+<   "capabilities": {
+<     "positionEncoding": "utf-16",
+<     "textDocumentSync": {"openClose": true, "change": 2},
+<     "codeActionProvider": {"codeActionKinds": ["quickfix", "source.fixAll.dgdtools"]},
+<     "completionProvider": {"triggerCharacters": [">", ":", "\"", "/", "<"], "resolveProvider": true},
+<     "definitionProvider": true,
+<     "referencesProvider": true,
+<     "documentHighlightProvider": true,
+<     "hoverProvider": true,
+<     "signatureHelpProvider": {"triggerCharacters": ["(", ","], "retriggerCharacters": [")"]},
+<     "documentSymbolProvider": true,
+<     "workspaceSymbolProvider": true,
+<     "documentFormattingProvider": true,
+<     "documentRangeFormattingProvider": true,
+<     "semanticTokensProvider": {
+<       "legend": {
+<         "tokenTypes": [
+<           "namespace",
+<           "type",
+<           "parameter",
+<           "variable",
+<           "function",
+<           "method",
+<           "macro",
+<           "keyword",
+<           "modifier"
+<         ],
+<         "tokenModifiers": ["declaration", "definition", "static", "defaultLibrary", "inherited", "local", "macro"]
+<       },
+<       "range": true,
+<       "full": {"delta": true}
+<     },
+<     "renameProvider": {"prepareProvider": true},
+<     "workspace": {
+<       "workspaceFolders": {"supported": true, "changeNotifications": true},
+<       "textDocumentContent": {"schemes": ["dgdtools-profile"]},
+<       "fileOperations": {
+<         "willRename": {
+<           "filters": [
+<             {"scheme": "file", "pattern": {"glob": "**/*.{c,h}", "matches": "file"}},
+<             {"scheme": "file", "pattern": {"glob": "**", "matches": "folder"}}
+<           ]
+<         }
+<       }
+<     }
+<   },
+<   "serverInfo": {"name": "dgdtools", "version": "test"}
+< }
+> open lib/obj/a.c
+> move lib/std/room.c lib/domain/room.c
+< {
+<   "documentChanges": [
+<     {
+<       "textDocument": {"uri": "file://$ROOT/lib/obj/a.c", "version": 1},
+<       "edits": [
+<         {
+<           "range": {"start": {"line": 0, "character": 9}, "end": {"line": 0, "character": 18}},
+<           "newText": "/domain/room"
+<         },
+<         {
+<           "range": {"start": {"line": 1, "character": 25}, "end": {"line": 1, "character": 34}},
+<           "newText": "/domain/room"
+<         }
+<       ]
+<     },
+<     {
+<       "textDocument": {"uri": "file://$ROOT/lib/std/room.c", "version": null},
+<       "edits": [
+<         {
+<           "range": {"start": {"line": 0, "character": 10}, "end": {"line": 0, "character": 16}},
+<           "newText": "/std/room.h"
+<         }
+<       ]
+<     }
+<   ]
+< }
+~ lib/obj/a.c
+| inherit \"/domain/room\";\n
+| void f() { clone_object(\"/domain/room\"); }\n
+~ lib/std/room.c
+| #include \"/std/room.h\"\n
+| int light;\n
+> received window/showMessage
+< {
+<   "message": "move /std/room.c to /domain/room.c: 1 place that may name a moved file was not changed: /obj/b.c:2 (names /std/room.c by the macro ROOM, which other files may use too: not rewritten); moved base files: /std/room.c (2 objects inherit it); an object keeps the program it was compiled with, so the move takes effect everywhere at the scheduled reboot",
+<   "type": 2
+< }
+> move lib/std lib/base
+< {
+<   "documentChanges": [
+<     {
+<       "textDocument": {"uri": "file://$ROOT/lib/domain/room.c", "version": null},
+<       "edits": [
+<         {
+<           "range": {"start": {"line": 0, "character": 10}, "end": {"line": 0, "character": 21}},
+<           "newText": "/base/room.h"
+<         }
+<       ]
+<     },
+<     {
+<       "textDocument": {"uri": "file://$ROOT/lib/obj/c.c", "version": null},
+<       "edits": [
+<         {
+<           "range": {"start": {"line": 0, "character": 10}, "end": {"line": 0, "character": 21}},
+<           "newText": "/base/room.h"
+<         }
+<       ]
+<     }
+<   ]
+< }
+~ lib/domain/room.c
+| #include \"/base/room.h\"\n
+| int light;\n
+~ lib/obj/c.c
+| #include \"/base/room.h\"\n
+> text lib/obj/a.c
+| inherit \"/domain/room\";\n
+| void f() { clone_object(\"/domain/room\"); }\n
+> shutdown
+< null
+> exit
+< "the server exited after shutdown"

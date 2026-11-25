@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"io"
 	"maps"
+	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -25,6 +27,7 @@ import (
 )
 
 const renameUsage = `usage: dgdtools rename [flags] SYMBOL NEW
+       dgdtools rename [flags] FILE NEW
 
 Renames SYMBOL to NEW in every file of the mudlib that names it: a
 function with its redefinitions in the objects that inherit it and those
@@ -46,6 +49,14 @@ SYMBOL is one of:
                             reports them): how a local, a parameter or a
                             label is named
 
+FILE is a file of the mudlib by its mudlib path, /std/room.c or
+/include/std.h, and NEW its new mudlib path (or a name, for the same
+directory): the file is moved, and every inherit statement, #include and
+object path handed to a function (clone_object, a call's receiver) that
+names it is rewritten as it was written, as are the moved file's own
+paths that name a file from where it was. A path made by a macro or an
+expression is possible, and not changed.
+
 Every place the old name stands is certain (the symbol), possible (it may
 be, and nobody can tell: a call on an object that cannot be told, a name
 in a macro's body, code that is not compiled or does not parse) or
@@ -57,6 +68,8 @@ grouped by owner (a wizard's or a domain's tree, by the checkout patterns
 of profile_build, players/* and d/* when none are set; "other" for the
 rest), and a summary goes to standard error. --write writes the files,
 each replaced as a whole.
+
+--write writes the files, and moves the FILE last.
 
 A variable that save_object writes is refused: renamed, the values saved
 under the old name are no longer restored. --force renames it all the
@@ -105,6 +118,9 @@ func renameCmd(ctx context.Context, args []string, _ io.Reader, stdout, stderr i
 		return fail(err)
 	}
 	sym, newName := pos[0], pos[1]
+	if isFileArg(sym) {
+		return moveCmd(ctx, p, &project, sym, newName, write, includePossible, quiet, format, stdout, stderr)
+	}
 	where := symbolPlace(p, sym)
 	if where.err != nil {
 		return fail(where.err)
@@ -137,7 +153,12 @@ func renameCmd(ctx context.Context, args []string, _ io.Reader, stdout, stderr i
 	if err != nil {
 		return refused(stderr, err)
 	}
-	r := &renamer{process: p, l: l, plan: plan, possible: includePossible, stdout: stdout, stderr: stderr}
+	return newRenamer(p, l, plan, includePossible, stdout, stderr).finish(write, quiet, format)
+}
+
+// newRenamer is the run of `dgdtools rename` of a plan.
+func newRenamer(p process, l *lint.Linter, plan *rename.Plan, possible bool, stdout, stderr io.Writer) *renamer {
+	r := &renamer{process: p, l: l, plan: plan, possible: possible, stdout: stdout, stderr: stderr}
 	r.checkouts = l.Project().Config.ProfileBuild.Checkouts
 	if len(r.checkouts) == 0 && l.Project().Profile != nil {
 		r.checkouts = l.Project().Profile.Checkouts
@@ -145,6 +166,14 @@ func renameCmd(ctx context.Context, args []string, _ io.Reader, stdout, stderr i
 	if len(r.checkouts) == 0 {
 		r.checkouts = []string{"players/*", "d/*"}
 	}
+	return r
+}
+
+// finish shows the plan, or writes it, and returns the exit code: the
+// files edited, and for a plan of moved files the files moved, last.
+func (r *renamer) finish(write, quiet bool, format string) int {
+	plan, stderr := r.plan, r.stderr
+	fail := func(err error) int { return failure(stderr, "rename", err) }
 	files, err := r.files()
 	if err != nil {
 		return fail(err)
@@ -160,6 +189,12 @@ func renameCmd(ctx context.Context, args []string, _ io.Reader, stdout, stderr i
 			}
 			written++
 		}
+		for _, m := range plan.Moves {
+			if err := moveFile(m.From, m.To); err != nil {
+				return fail(fmt.Errorf("%s written, and %s not moved: %w", plural(written, "file"), r.name(m.From), err))
+			}
+		}
+		r.moved = plan.Moves != nil
 	}
 	switch {
 	case format == "json":
@@ -174,10 +209,77 @@ func renameCmd(ctx context.Context, args []string, _ io.Reader, stdout, stderr i
 	if !quiet && format == "human" {
 		r.summary(files, written)
 	}
-	if len(plan.PossibleEdits) > 0 && !includePossible {
+	if len(plan.PossibleEdits) > 0 && !r.possible || plan.Moves != nil && plan.Count(rename.Possible) > 0 {
 		return 1
 	}
 	return 0
+}
+
+// isFileArg reports whether SYMBOL is a FILE: a path of the mudlib with
+// the extension of a source file, and nothing after it.
+func isFileArg(sym string) bool {
+	if strings.Contains(sym, "::") || placeRE.MatchString(sym) {
+		return false
+	}
+	ext := path.Ext(sym)
+	return ext == ".c" || ext == ".h"
+}
+
+// moveCmd is `dgdtools rename FILE NEW`: pkg/rename's plan of the file
+// moved (rename.Files).
+func moveCmd(ctx context.Context, p process, project *projectFlags, file, to string, write, possible, quiet bool, format string, stdout, stderr io.Writer) int {
+	fail := func(err error) int { return failure(stderr, "rename", err) }
+	from := "/" + strings.TrimPrefix(filepath.ToSlash(file), "/")
+	if !strings.Contains(to, "/") {
+		to = path.Join(path.Dir(from), to)
+	}
+	to = path.Clean("/" + strings.TrimPrefix(filepath.ToSlash(to), "/"))
+	l, err := newLinter(p, project, nil)
+	if err != nil {
+		return fail(err)
+	}
+	if !l.Project().HasLib() {
+		return fail(errors.New("no mudlib: moving a file needs a dgdtools.yml with the root of the lib (or --root, or --profile and --lib-path for a checkout)"))
+	}
+	tree := l.Project().Tree()
+	fromPath, ok := tree.Path(from)
+	if !ok {
+		return fail(fmt.Errorf("%s is not a file of this checkout", from))
+	}
+	toPath, ok := tree.Path(to)
+	if !ok {
+		return fail(fmt.Errorf("%s is not a place in this checkout", to))
+	}
+	if info, err := os.Stat(fromPath); err != nil || info.IsDir() {
+		return fail(fmt.Errorf("%s: no such file in the mudlib", from))
+	}
+	if _, err := os.Stat(toPath); err == nil {
+		return fail(fmt.Errorf("%s exists already", to))
+	}
+	if !l.Scan(ctx) {
+		if ctx.Err() != nil {
+			return fail(ctx.Err())
+		}
+		return fail(errors.New("the mudlib could not be indexed"))
+	}
+	plan, err := rename.Files(ctx, l.Index().Snapshot(), []rename.Move{{From: fromPath, To: toPath}})
+	switch {
+	case ctx.Err() != nil:
+		return fail(ctx.Err())
+	case err != nil:
+		return refused(stderr, err)
+	case plan == nil:
+		return fail(fmt.Errorf("%s is not a file of the mudlib", from))
+	}
+	return newRenamer(p, l, plan, possible, stdout, stderr).finish(write, quiet, format)
+}
+
+// moveFile moves the file at from to to, making the directories to it.
+func moveFile(from, to string) error {
+	if err := os.MkdirAll(filepath.Dir(to), 0o755); err != nil {
+		return err
+	}
+	return os.Rename(from, to)
 }
 
 // refused reports a refusal of the rename, or another error of it.
@@ -340,6 +442,7 @@ type renamer struct {
 	l              *lint.Linter
 	plan           *rename.Plan
 	possible       bool
+	moved          bool // the files of a plan of moved files were moved
 	checkouts      []string
 	stdout, stderr io.Writer
 }
@@ -502,7 +605,11 @@ func what(k resolve.Kind) string {
 func (r *renamer) summary(files []changed, written int) {
 	plan, w := r.plan, r.stderr
 	sym := plan.Symbol
-	fmt.Fprintf(w, "rename %s %s to %s (%s:%d)\n", what(sym.Kind), sym.Name, plan.New, r.libName(sym.Def.Path), r.line(sym.Def.Path, sym.Def.Start))
+	if plan.Moves != nil {
+		fmt.Fprintf(w, "move %s to %s\n", sym.Name, plan.New)
+	} else {
+		fmt.Fprintf(w, "rename %s %s to %s (%s:%d)\n", what(sym.Kind), sym.Name, plan.New, r.libName(sym.Def.Path), r.line(sym.Def.Path, sym.Def.Start))
+	}
 	fmt.Fprintf(w, "  %d certain, %d possible, %d excluded; %s searched\n",
 		plan.Count(rename.Certain), plan.Count(rename.Possible), plan.Count(rename.Excluded), plural(plan.Files, "file"))
 	var owners []string
@@ -516,6 +623,21 @@ func (r *renamer) summary(files []changed, written int) {
 	}
 	for _, o := range owners {
 		fmt.Fprintf(w, "  %-20s %s, %s\n", o, plural(byOwner[o][0], "file"), plural(byOwner[o][1], "edit"))
+	}
+	if n := plan.Count(rename.Possible); plan.Moves != nil && n > 0 {
+		fmt.Fprintf(w, "  possible places not changed (a path made by a macro or an expression):\n")
+		shown := 0
+		for _, o := range plan.Occurrences {
+			if o.Class != rename.Possible {
+				continue
+			}
+			if shown == 20 {
+				fmt.Fprintf(w, "    and %d more\n", n-shown)
+				break
+			}
+			shown++
+			fmt.Fprintf(w, "    %s:%d:%d: %s\n", r.name(o.Path), o.Line, o.Col, o.Reason)
+		}
 	}
 	if n := len(plan.PossibleEdits); n > 0 {
 		if r.possible {
@@ -560,6 +682,10 @@ func (r *renamer) summary(files []changed, written int) {
 		fmt.Fprintf(w, "  %s in the mudlib make the name of the function they call when they run, and cannot be searched\n", plural(others, "other call"))
 	}
 	switch {
+	case plan.Moves != nil && r.moved:
+		fmt.Fprintf(w, "%s written, %s moved to %s\n", plural(written, "file"), sym.Name, plan.New)
+	case plan.Moves != nil:
+		fmt.Fprintf(w, "%s would change (--write writes them and moves %s)\n", plural(len(files), "file"), sym.Name)
 	case written > 0:
 		fmt.Fprintf(w, "%s written\n", plural(written, "file"))
 	case len(files) > 0:

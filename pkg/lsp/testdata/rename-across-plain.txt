@@ -78,7 +78,15 @@ exit
 <     "renameProvider": true,
 <     "workspace": {
 <       "workspaceFolders": {"supported": true, "changeNotifications": true},
-<       "textDocumentContent": {"schemes": ["dgdtools-profile"]}
+<       "textDocumentContent": {"schemes": ["dgdtools-profile"]},
+<       "fileOperations": {
+<         "willRename": {
+<           "filters": [
+<             {"scheme": "file", "pattern": {"glob": "**/*.{c,h}", "matches": "file"}},
+<             {"scheme": "file", "pattern": {"glob": "**", "matches": "folder"}}
+<           ]
+<         }
+<       }
 <     }
 <   },
 <   "serverInfo": {"name": "dgdtools", "version": "test"}

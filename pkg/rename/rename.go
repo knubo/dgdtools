@@ -169,6 +169,9 @@ type Plan struct {
 	// checkout of part of a mudlib, whose rest was not.
 	Files   int
 	Partial bool
+	// Moves are the files moved, of a plan of moved files (rename.Files):
+	// a directory's files each.
+	Moves []Move
 }
 
 // Count returns how many occurrences of the class the plan has.
@@ -468,7 +471,7 @@ func (rn *renamer) prepare(ctx context.Context, off uint32) (*Target, error) {
 	var err error
 	switch ref.Kind {
 	case resolve.Include, resolve.Object:
-		return nil, refuse("'%s' names a file: renaming files comes in a later version", ref.Name)
+		return nil, refuse("'%s' names a file: rename the file itself (in the editor, or with dgdtools rename FILE NEW), and the paths that name it are changed with it", ref.Name)
 	case resolve.Local, resolve.Parameter:
 		t.Def = ref.Defs[0]
 		return t, nil

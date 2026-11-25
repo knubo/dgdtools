@@ -57,6 +57,10 @@ var update = flag.Bool("update", false, "rewrite the transcripts in testdata")
 //	                             in each file, open or not, those that
 //	                             need no confirmation, each file's text
 //	                             after its name
+//	move FROM TO                 workspace/willRenameFiles, the edits made
+//	                             as for rename, then the file or folder
+//	                             moved on disk (a document open is
+//	                             closed, and opened at its new place)
 //	symbols FILE                 textDocument/documentSymbol
 //	find QUERY                   workspace/symbol
 //	text FILE                    the editor's text
@@ -205,8 +209,9 @@ func (p *player) showText(text string) {
 // applyEdit makes the edits of a rename that a client makes without
 // asking (those of no annotation that needs confirmation): in an open
 // document, the client's text; in another file, its text on disk, which
-// is not written. Each file's text is shown after "~ FILE".
-func (p *player) applyEdit(edit *lsp.WorkspaceEdit) {
+// is written with save (and the server told). Each file's text is shown
+// after "~ FILE".
+func (p *player) applyEdit(edit *lsp.WorkspaceEdit, save bool) {
 	t, c := p.t, p.c
 	byFile := map[string][]lsp.TextEdit{}
 	versions := map[string]*int{}
@@ -250,8 +255,43 @@ func (p *player) applyEdit(edit *lsp.WorkspaceEdit) {
 		text, err := lsptest.ApplyEdits(string(data), edits, c.Encoding)
 		require.NoError(t, err)
 		p.showText(text)
+		if save {
+			// As an editor saves what it edited of a file not open.
+			require.NoError(t, os.WriteFile(path, []byte(text), 0o644))
+			c.WatchedFiles(2, path)
+		}
 	}
 	require.Empty(t, byFile, "edits of files not in the lib")
+}
+
+// move moves the file or folder from to on disk, as an editor does after
+// willRenameFiles: a document open there is closed and opened again at
+// its new place, and the server is told of the files.
+func (p *player) move(from, to string) {
+	t, c := p.t, p.c
+	c.Idle()
+	var moved [][2]string
+	for _, rel := range slices.Sorted(maps.Keys(p.lib)) {
+		if rest, ok := strings.CutPrefix(rel, from); ok && (rest == "" || strings.HasPrefix(rest, "/")) {
+			moved = append(moved, [2]string{rel, to + rest})
+		}
+	}
+	require.NoError(t, os.MkdirAll(filepath.Dir(p.path(to)), 0o755))
+	require.NoError(t, os.Rename(p.path(from), p.path(to)))
+	var deleted, created []string
+	for _, m := range moved {
+		text := p.lib[m[0]]
+		delete(p.lib, m[0])
+		p.lib[m[1]] = text
+		deleted, created = append(deleted, p.path(m[0])), append(created, p.path(m[1]))
+		if c.IsOpen(p.path(m[0])) {
+			text := c.Doc(p.path(m[0])).Text
+			c.Close(p.path(m[0]))
+			c.Open(p.path(m[1]), text)
+		}
+	}
+	c.WatchedFiles(3, deleted...)
+	c.WatchedFiles(1, created...)
 }
 
 // span reads "L:C-L:C".
@@ -516,7 +556,21 @@ func (p *player) play(script string) string {
 				break
 			}
 			p.show(edit)
-			p.applyEdit(edit)
+			p.applyEdit(edit, false)
+		case "move":
+			require.Len(t, arg, 2, line)
+			from, to := p.path(arg[0]), p.path(arg[1])
+			var edit *lsp.WorkspaceEdit
+			params := lsp.RenameFilesParams{Files: []lsp.FileRename{{OldURI: lsptest.URI(from), NewURI: lsptest.URI(to)}}}
+			if err := c.Call("workspace/willRenameFiles", params, &edit); err != nil {
+				p.show(err.Error())
+				break
+			}
+			p.show(edit)
+			if edit != nil {
+				p.applyEdit(edit, true)
+			}
+			p.move(arg[0], arg[1])
 		case "symbols", "find":
 			method, params := "workspace/symbol", any(lsp.WorkspaceSymbolParams{Query: rest})
 			if cmd == "symbols" {

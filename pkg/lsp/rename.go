@@ -70,10 +70,6 @@ func (s *server) rename(ctx context.Context, p *RenameParams) (any, error) {
 		return nil, renameError(ctx, err)
 	}
 	annotate := s.caps.annotations && len(plan.PossibleEdits) > 0
-	type edit struct {
-		rename.Edit
-		annotation string
-	}
 	byPath := map[string][]edit{}
 	for _, e := range plan.Edits {
 		byPath[e.Path] = append(byPath[e.Path], edit{Edit: e})
@@ -105,8 +101,47 @@ func (s *server) rename(ctx context.Context, p *RenameParams) (any, error) {
 			byPath[e.Path] = append(byPath[e.Path], edit{Edit: e, annotation: id})
 		}
 	}
-	// The texts the edits were made in, which are the snapshot's: an open
-	// document's buffer, else the disk's.
+	s.mu.Lock()
+	doc := s.docs[uri]
+	current := doc != nil && doc.path == d.Path && doc.version == version
+	s.mu.Unlock()
+	if !current {
+		return nil, errContentModified
+	}
+	result, err := s.workspaceEdit(byPath, annotations, func(path string) ([]byte, error) {
+		if path == d.Path {
+			return d.File.Src, nil
+		}
+		return d.Snapshot.ReadFile(path)
+	})
+	if err != nil {
+		return nil, err
+	}
+	if !d.Snapshot.Current() {
+		return nil, errContentModified
+	}
+	name := func(p string) string { return cmp.Or(d.Snapshot.LibFile(p), p) }
+	if msg := renameMessage(plan, annotate, name); msg != "" {
+		s.mu.Lock()
+		s.tell(MessageWarning, msg)
+		s.mu.Unlock()
+	}
+	return result, nil
+}
+
+// edit is an edit of a plan, with the id of its change annotation ("":
+// none).
+type edit struct {
+	rename.Edit
+	annotation string
+}
+
+// workspaceEdit lays the edits of each file out as a WorkspaceEdit: in
+// documentChanges, each file's for the version of it they were made from
+// (an open document's; null for a file the client has not open, whose
+// text is the disk's), when the client reads that, else in changes. src
+// returns the text a file's edits were made in.
+func (s *server) workspaceEdit(byPath map[string][]edit, annotations map[string]ChangeAnnotation, src func(path string) ([]byte, error)) (*WorkspaceEdit, error) {
 	paths := slices.Sorted(maps.Keys(byPath))
 	result := &WorkspaceEdit{ChangeAnnotations: annotations}
 	if !s.caps.documentChanges {
@@ -114,23 +149,18 @@ func (s *server) rename(ctx context.Context, p *RenameParams) (any, error) {
 	}
 	s.mu.Lock()
 	versions := map[string]int{}
-	for _, path := range append(paths, d.Path) {
+	for _, path := range paths {
 		if doc := s.docs[uriOf(path)]; doc != nil && doc.path == path {
 			versions[path] = doc.version
 		}
 	}
 	s.mu.Unlock()
-	if v, open := versions[d.Path]; !open || v != version {
-		return nil, errContentModified
-	}
 	for _, path := range paths {
-		src := d.File.Src
-		if path != d.Path {
-			if src, err = d.Snapshot.ReadFile(path); err != nil {
-				return nil, &rpcError{Code: codeRequestFailed, Message: "the rename reaches " + path + ", which cannot be read: " + err.Error()}
-			}
+		text, err := src(path)
+		if err != nil {
+			return nil, &rpcError{Code: codeRequestFailed, Message: "the edits reach " + path + ", which cannot be read: " + err.Error()}
 		}
-		pm := NewPositionMapper(src, s.caps.encoding())
+		pm := NewPositionMapper(text, s.caps.encoding())
 		es := byPath[path]
 		slices.SortFunc(es, func(a, b edit) int { return cmp.Compare(a.Start, b.Start) })
 		out := make([]TextEdit, 0, len(es))
@@ -147,15 +177,6 @@ func (s *server) rename(ctx context.Context, p *RenameParams) (any, error) {
 			td.Version = &v
 		}
 		result.DocumentChanges = append(result.DocumentChanges, TextDocumentEdit{TextDocument: td, Edits: out})
-	}
-	if !d.Snapshot.Current() {
-		return nil, errContentModified
-	}
-	name := func(p string) string { return cmp.Or(d.Snapshot.LibFile(p), p) }
-	if msg := renameMessage(plan, annotate, name); msg != "" {
-		s.mu.Lock()
-		s.tell(MessageWarning, msg)
-		s.mu.Unlock()
 	}
 	return result, nil
 }

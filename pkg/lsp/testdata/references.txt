@@ -100,7 +100,15 @@ highlight lib/obj/a.c 3:1
 <     "renameProvider": {"prepareProvider": true},
 <     "workspace": {
 <       "workspaceFolders": {"supported": true, "changeNotifications": true},
-<       "textDocumentContent": {"schemes": ["dgdtools-profile"]}
+<       "textDocumentContent": {"schemes": ["dgdtools-profile"]},
+<       "fileOperations": {
+<         "willRename": {
+<           "filters": [
+<             {"scheme": "file", "pattern": {"glob": "**/*.{c,h}", "matches": "file"}},
+<             {"scheme": "file", "pattern": {"glob": "**", "matches": "folder"}}
+<           ]
+<         }
+<       }
 <     }
 <   },
 <   "serverInfo": {"name": "dgdtools", "version": "test"}

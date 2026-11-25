@@ -188,3 +188,46 @@ func TestRenameErrors(t *testing.T) {
 	assert.Equal(t, 2, code)
 	assert.True(t, strings.Contains(errs, "no mudlib"), errs)
 }
+
+// A FILE moves: the diffs of the paths that name it, the macro's place
+// possible (exit 1); --write writes them and moves the file.
+func TestRenameMove(t *testing.T) {
+	dir := tree(t, renameLib())
+	t.Chdir(filepath.Join(dir, "lib"))
+	code, out, errs := dgdtools(t, "", "rename", "/std/living.c", "being.c")
+	assert.Equal(t, 1, code, errs)
+	assert.Equal(t, `# d/Ruins: 1 file
+--- d/Ruins/saver.c
++++ d/Ruins/saver.c
+@@ -1,2 +1,2 @@
+-inherit "/std/living";
++inherit "/std/being";
+ void save() { save_object("/data/x"); }
+# players/ann: 1 file
+--- players/ann/pet.c
++++ players/ann/pet.c
+@@ -1,2 +1,2 @@
+-inherit "/std/living";
++inherit "/std/being";
+ void f(object ob) { write(query_name()); ob->query_name(); }
+`, out)
+	assert.Contains(t, errs, "move /std/living.c to /std/being.c\n  2 certain, 1 possible, 0 excluded;")
+	assert.Contains(t, errs, "possible places not changed (a path made by a macro or an expression):\n    obj/monster.c:2:9: names /std/living.c by the macro LIVING")
+	assert.Contains(t, errs, "2 files would change (--write writes them and moves /std/living.c)")
+	assert.FileExists(t, filepath.Join(dir, "lib/std/living.c"))
+
+	code, _, errs = dgdtools(t, "", "rename", "--write", "/std/living.c", "/std/being.c")
+	assert.Equal(t, 1, code, errs)
+	assert.Contains(t, errs, "2 files written, /std/living.c moved to /std/being.c")
+	assert.NoFileExists(t, filepath.Join(dir, "lib/std/living.c"))
+	assert.Equal(t, renameLib()["lib/std/living.c"], read(t, filepath.Join(dir, "lib/std/being.c")))
+	assert.Equal(t, "inherit \"/std/being\";\nvoid save() { save_object(\"/data/x\"); }\n", read(t, filepath.Join(dir, "lib/d/Ruins/saver.c")))
+
+	// Errors: no such file, a place taken.
+	code, _, errs = dgdtools(t, "", "rename", "/std/living.c", "x.c")
+	assert.Equal(t, 2, code)
+	assert.Contains(t, errs, "/std/living.c: no such file in the mudlib")
+	code, _, errs = dgdtools(t, "", "rename", "/std/being.c", "/obj/monster.c")
+	assert.Equal(t, 2, code)
+	assert.Contains(t, errs, "/obj/monster.c exists already")
+}
