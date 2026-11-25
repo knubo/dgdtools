@@ -772,7 +772,10 @@ package without a binary for the rest.
   `dgdlpc-mode-hook`, the Emacs norm. For Eglot only (`eglot-lsp-context`),
   a buffer-local `project-find-functions` entry roots the project at the
   nearest `dgdtools.yml` or `dgdlpc-roots` entry, as Neovim's root
-  markers do. Indentation is an indent function that counts brackets as
+  markers do. Eglot resolves symbolic links in the URIs it sends; where
+  that would take a file out of its lib (a linked wizard directory),
+  advice keeps the path inside the lib, as the server must see it to
+  find the configuration and what the file inherits. Indentation is an indent function that counts brackets as
   the formatter does, not cc-mode's engine. lsp-mode gets lines in the
   README, not code.
 - Helix, Sublime (LSP), Kate: a line of configuration each,

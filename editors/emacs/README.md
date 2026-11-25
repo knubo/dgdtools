@@ -104,6 +104,33 @@ If `dgdtools` isn't on `PATH`, set `exec-path`, or replace the entry after Eglot
                '((dgdlpc-mode :language-id "dgdlpc") "~/go/bin/dgdtools" "lsp")))
 ```
 
+### Linked folders
+
+A lib may contain symbolic links to folders that live elsewhere, such as a wizard's own directory. Open such files by their path **inside the lib**: that is where the mode finds `dgdtools.yml`.
+
+Eglot resolves links before it tells a server about a file, which would put these files outside the lib, with no completion or definitions from what they inherit. When resolving would take a file out of its lib, the mode keeps the path inside the lib. This relies on advice around an internal Eglot function, so check here if linked folders stop working after an Emacs or Eglot upgrade.
+
+### Completion with Tab (optional)
+
+These are personal preferences, so the mode does not set them. To have `TAB` indent and then complete, with inline suggestions (Emacs 30+):
+
+```elisp
+(setq tab-always-indent 'complete)                  ; all modes
+(add-hook 'dgdlpc-mode-hook #'completion-preview-mode)
+```
+
+In Emacs 31, `TAB` accepts the suggestion shown, even when other candidates match. To have it complete only what they share, and list them when they differ:
+
+```elisp
+(with-eval-after-load 'completion-preview
+  (keymap-set completion-preview-active-mode-map "C-i" #'completion-preview-complete))
+(setq completion-auto-select 'second-tab    ; a second TAB moves into the list
+      completions-format 'one-column
+      completions-max-height 15)
+```
+
+The last two blocks affect completion everywhere in Emacs, not only in LPC buffers.
+
 ### Partial checkouts without `dgdtools.yml`
 
 List the checkout in `dgdlpc-roots`, and pass the profile and lib path in the checkout's `.dir-locals.el`:

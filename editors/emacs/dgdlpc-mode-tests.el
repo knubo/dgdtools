@@ -257,6 +257,38 @@ buffers opened in it are killed after."
           (should (equal (project-root (project-current))
                          (expand-file-name "listed/" dir))))))))
 
+;;;; Linked folders
+
+(ert-deftest dgdlpc-eglot-linked-folders ()
+  "A folder linked into a lib is told to the server by its path in the lib."
+  (skip-unless (not (eq system-type 'windows-nt)))
+  (require 'eglot)
+  (dgdlpc-test--with-tree '(("lib/dgdtools.yml" . "")
+                            ("lib/std/a.c" . "int x;\n")
+                            ("outside/b.c" . "int x;\n"))
+    (make-symbolic-link (expand-file-name "outside" dir)
+                        (expand-file-name "lib/linked" dir))
+    ;; The lib reached through a link, and links that stay inside it or
+    ;; lead into it: Eglot's own answer, the resolved path, stands.
+    (make-symbolic-link (expand-file-name "lib" dir)
+                        (expand-file-name "alias" dir))
+    (make-symbolic-link (expand-file-name "lib/std" dir)
+                        (expand-file-name "lib/std2" dir))
+    (make-symbolic-link (expand-file-name "lib/std" dir)
+                        (expand-file-name "shortcut" dir))
+    (dolist (case '(("lib/linked/b.c" "lib/linked/b.c")
+                    ("alias/linked/b.c" "lib/linked/b.c")
+                    ("lib/std/a.c" "lib/std/a.c")
+                    ("alias/std/a.c" "lib/std/a.c")
+                    ("lib/std2/a.c" "lib/std/a.c")
+                    ("shortcut/a.c" "lib/std/a.c")))
+      (with-current-buffer (find-file-noselect (expand-file-name (car case) dir))
+        (dgdlpc-mode)
+        (should (equal (list (car case)
+                             (plist-get (eglot--TextDocumentIdentifier) :uri))
+                       (list (car case)
+                             (concat "file://" dir (cadr case)))))))))
+
 ;;;; Autoloads
 
 (ert-deftest dgdlpc-autoloads ()

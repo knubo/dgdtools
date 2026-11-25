@@ -33,6 +33,8 @@
 
 ;;; Code:
 
+(eval-when-compile (require 'cl-lib))
+
 ;; Why prog-mode and not cc-mode: a mode derived from `c-mode' runs
 ;; `c-mode-common-hook' and `c-mode-hook' in its buffers, so whatever a
 ;; user has put there for C (`eglot-ensure' with clangd, a C style)
@@ -446,6 +448,50 @@ the lib's dgdtools.yml.  For anything but Eglot this returns nil, and
     (let ((root (dgdlpc--lib-root dir)))
       (when root
         (cons 'transient (file-name-as-directory (expand-file-name root)))))))
+
+;; A lib may be put together with links, as a wizard's folder that lives
+;; elsewhere.  Eglot resolves links before it tells the server about a
+;; file, and the server then finds the file outside the lib, where it
+;; sees neither the lib's configuration nor what the file inherits.
+
+(defun dgdlpc--linked-name (file)
+  "Return the name to give the server for FILE, or nil to leave it to Eglot.
+There is one to give when FILE is in a lib, and resolving its links
+would take it out of that lib.  It is the lib's true name followed by
+the way to FILE from there, links and all, so that it agrees with the
+root Eglot gives the server."
+  (unless (file-remote-p file)
+    (let* ((file (expand-file-name file))
+           (root (dgdlpc--lib-root (file-name-directory file))))
+      (when root
+        (let* ((root (file-name-as-directory (expand-file-name root)))
+               (trueroot (file-name-as-directory (file-truename root))))
+          (unless (string-prefix-p trueroot (file-truename file))
+            (concat trueroot (file-relative-name file root))))))))
+
+(defun dgdlpc--eglot-keep-links (identifier)
+  "Call IDENTIFIER, keeping the links that lead out of the lib.
+Advice around `eglot--TextDocumentIdentifier', which has no hook for
+this.  Eglot resolves the name of the buffer's file with
+`file-truename', in every version since the one of Emacs 29, so that
+answer is what is changed."
+  (let ((name (and (derived-mode-p 'dgdlpc-mode)
+                   buffer-file-name
+                   (dgdlpc--linked-name buffer-file-name))))
+    (if (not name)
+        (funcall identifier)
+      (let ((file buffer-file-name)
+            (truename (symbol-function 'file-truename)))
+        (cl-letf (((symbol-function 'file-truename)
+                   (lambda (f &rest args)
+                     (if (equal f file) name (apply truename f args)))))
+          (funcall identifier))))))
+
+;; Not autoloaded: the advice needs this file, and an LPC buffer, which
+;; is all it acts on, has loaded it.
+(with-eval-after-load 'eglot
+  (advice-add 'eglot--TextDocumentIdentifier :around
+              #'dgdlpc--eglot-keep-links))
 
 ;; Registered when Eglot loads, which this does not make happen.  The
 ;; form is copied into the autoloads, so it is in place before the
