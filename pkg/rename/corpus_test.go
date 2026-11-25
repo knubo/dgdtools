@@ -100,6 +100,9 @@ func TestCorpusRename(t *testing.T) {
 	var asked, planned, warned int
 	var planTime time.Duration
 	for _, path := range sample {
+		// A rename checked before moved the index on; what other files
+		// name needs the scan of the new generation.
+		require.True(t, l.Scan(ctx))
 		doc, err := l.Lint(ctx, path, lint.Options{})
 		if err != nil {
 			continue

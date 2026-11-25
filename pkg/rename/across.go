@@ -183,6 +183,10 @@ func (rn *renamer) family(a *across, units []*index.Unit, t *Target) error {
 	}
 	autoKey := locKey(autoFn.Loc)
 	find(defKey(t.Def))
+	byPath := make(map[string]*index.Unit, len(units))
+	for _, u := range units {
+		byPath[u.Path] = u
+	}
 	for _, u := range objectUnits(units) {
 		fi, ok := u.Func(name)
 		if !ok || fi.Private {
@@ -191,6 +195,30 @@ func (rn *renamer) family(a *across, units []*index.Unit, t *Target) error {
 		k := locKey(fi.Loc)
 		find(k)
 		own(k, u.LibPath)
+		// The declarations of the name in the files the program is made
+		// of, read each on its own (a prototype in a header, a definition
+		// in a file included as code): one function of the program.
+		var deps map[string]bool
+		for _, d := range u.Deps[1:] {
+			du := byPath[d]
+			if du == nil {
+				continue
+			}
+			df, ok := du.Func(name)
+			if !ok || df.Private || locKey(df.Loc) == k {
+				continue
+			}
+			if deps == nil {
+				deps = map[string]bool{}
+				for _, p := range u.Deps {
+					deps[p] = true
+				}
+			}
+			if deps[df.Path] {
+				union(k, locKey(df.Loc))
+				own(locKey(df.Loc), u.LibPath)
+			}
+		}
 		inherited := false
 		for _, in := range u.Inherits {
 			if !in.Resolved {

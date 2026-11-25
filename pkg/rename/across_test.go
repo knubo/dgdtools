@@ -42,6 +42,10 @@ func wideLib() vfs.Mem {
 		"/lib/obj/cmds.c":      "void do_look() {}\nvoid f(string v) { call_out(\"do_\" + v, 1); call_other(this_object(), v); }\n",
 		"/lib/obj/clash.c":     "inherit \"/std/living\";\nstring query_short() { return \"x\"; }\n",
 		"/lib/obj/hidden.c":    "inherit \"/std/room\";\nvoid f() { int dim; dim = light; }\n",
+		"/lib/sys/parts.h":     "void helpme();\n",
+		"/lib/sys/impl.c":      "void helpme() {}\n",
+		"/lib/sys/use.c":       "#include \"parts.h\"\nvoid g() { helpme(); }\n",
+		"/lib/sys/whole.c":     "#include \"parts.h\"\n#include \"impl.c\"\n#include \"use.c\"\n",
 		"/lib/obj/stringize.c": "#define STR(x) #x\ninherit \"/std/room\";\nvoid f() { write(STR(light)); }\n",
 	}
 }
@@ -288,4 +292,16 @@ func TestRenamePartialAcross(t *testing.T) {
 	assert.Contains(t, got, "! this checkout is part of the mudlib: the places outside it that name 'open_door' are not renamed, and cannot be seen from here")
 	assert.Equal(t, "refused: 'init' redefines, or is redefined by, the function of /std/room.c, which is defined in the mudlib profile, not in your checkout: the two are one function and are renamed together",
 		w.prepare("/home/ann/hall.c", "void in|it()"))
+}
+
+// A program made of files included as code: the prototype a header has,
+// the definition in one file and the calls in another, each file read on
+// its own, are one function.
+func TestRenameProgramOfFiles(t *testing.T) {
+	w := newWorld(t, wideLib(), "/lib")
+	require.True(t, w.l.Scan(context.Background()))
+	got := w.renamed("/lib/sys/impl.c", "void help|me", "assist", false, false)
+	assert.Contains(t, got, "== /lib/sys/impl.c\nvoid assist() {}\n")
+	assert.Contains(t, got, "== /lib/sys/parts.h\nvoid assist();\n")
+	assert.Contains(t, got, "== /lib/sys/use.c\n#include \"parts.h\"\nvoid g() { assist(); }\n")
 }
