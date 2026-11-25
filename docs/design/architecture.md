@@ -908,8 +908,8 @@ is built on:
 
 - **Four groups, and the code's letter says which.** `E`, *syntax*: what
   the driver refuses to compile, ten rules, all errors. `R`, *runtime*:
-  code that compiles and then fails or silently returns nil, six rules
-  that need the lib. `S`, *suspicious*: constructs that are legal and
+  code that compiles and then fails or silently returns nil, seven
+  rules that need the lib. `S`, *suspicious*: constructs that are legal and
   probably not meant. `C`, *convention*: a lib's own policy, all off
   until a lib asks for them.
 - **The syntax group is what the oracle showed** (section 9): the
@@ -1128,6 +1128,7 @@ by `TestCorpusLint`.
 | target-object-missing | 7,170 |
 | callback-arity | 2,506 |
 | lifecycle-chain | 646 |
+| private-callback | 38 |
 | assignment-in-condition | 280 |
 | no-effect-statement | 174 |
 | sscanf-format | 27 |
@@ -1137,6 +1138,42 @@ by `TestCorpusLint`.
 | unformatted | 106,805 |
 | static-autosave-var | 68 |
 | unresolved-inherit | 2,859 |
+
+`private-callback` came later; its 38 are of a run of the default rules
+on the same lib (what it finds does not depend on the other rules), and
+the run's findings were those of the run before it and these 38, line
+for line. 15 are `add_action`, 13 `call_out` and 10 `store_fp`. Those
+read by hand each name a function declared `private` in the file
+(`/d/Army/obj/phalanx`: `store_fp("abandon_formation")` for the `__die`
+hook; `/d/Kalishan/std/multicont`, which rooms of the domain inherit:
+`call_out("reset_code_panel", 30)`; `/players/harald/wander`:
+`call_out("wander_again", 0)`). What it rests on is DGD's own source:
+call_out, call_other and the lib's registrars (VikingMUD's `add_action`
+ends in `call_other` or the auto object's `__static`, `store_fp` in a
+`call_other` too) find a function by name in the object's table of
+functions (`Frame::call`, `Control::symb`), and `Control::makeSymbols`
+leaves out every private function and every function of an object
+inherited privately, and keeps the inherited function where a private
+one redefines it; `call_static` lets call_out reach a static function,
+never a private one. So the rule asks the index what such a call finds
+over the whole chain, every program of it as declared (a private
+function in one inherited object and the same name not private in
+another is found), and in every object that inherits or includes the
+file, since `this_object()` may be any of them
+(`index.Query.PrivateOnly`). It is an error and on by default, as
+`static-crossobj` is, which says the same of `->` and `call_other`: the
+call does nothing, always, which is what the runtime group claims. It
+says nothing where that is not certain: a chain not known in full (an
+unresolved inherit, a file that did not parse, a profile's stub), an
+inheritor with a function of the name, a name made at run time, a
+receiver other than `this_object()`, the auto object's code or a
+function the auto object has, a partial checkout (whose inheritors
+elsewhere cannot be seen), and declarations of the name DGD refuses (a
+private definition after a prototype that is not, private and nomask:
+`FuncInfo.Refused`). It has no fix: `static` is what is usually meant,
+but a function that is no longer private redefines and clashes with
+the functions of its name in the objects it is inherited with, which
+the edit cannot weigh.
 
 The runtime rules have no oracle: the driver compiles what they report.
 They are held to the same standard by what the index refuses to

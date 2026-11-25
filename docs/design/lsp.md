@@ -1225,8 +1225,8 @@ since such a call fails today; `prepareRename` on one of them says so.
 At (and so definition, hover and references) still goes from such a
 string to the private function, which tells the reader why the call
 fails; the linter reports the `->` and `call_other` forms
-(`static-crossobj`) and not yet the callbacks (step 11, or a rule of its
-own). On the VikingMUD lib the corpus test found such callbacks, among them
+(`static-crossobj`) and the callbacks (`private-callback`, which came
+later: architecture.md, 9.3). On the VikingMUD lib the corpus test found such callbacks, among them
 `store_fp("wield_check")` in `/players/bladerunner/obj/weapon/str_sword`
 and `call_out("wander_again")` in `/players/harald/wander`: they name
 private functions, and never call them.
