@@ -2,8 +2,9 @@
 
 Status: a plan, of which the first three steps of section 12 are built:
 the editor-side grammars of section 10.1, under `editors/`; the server
-itself for steps 1 to 4 of section 8 (live diagnostics, code actions,
-formatting, go to definition), as `dgdtools lsp` and `pkg/lsp`; and the
+itself for steps 1 to 5 of section 8 (live diagnostics, code actions,
+formatting, go to definition, hover and signature help), as
+`dgdtools lsp` and `pkg/lsp`; and the
 VS Code client of
 section 11, in `editors/vscode`, which has been built and checked but
 not yet run in a VS Code. "What is built" below says exactly what, and
@@ -74,7 +75,7 @@ s.FS()                             // the files as the tools read them
 ### What is built
 
 `dgdtools lsp` speaks LSP 3.17 on standard input and output. `pkg/lsp`
-is some 2,400 lines over `session.Session`, the protocol's types among
+is some 2,700 lines over `session.Session`, the protocol's types among
 them. It makes one session, with `DiscoverOptions{ProfileDirs,
 UserConfig, Folders}` and no working directory: every path it is given
 is absolute.
@@ -86,16 +87,18 @@ is absolute.
 | `diagnostics.go` | when a document is linted, and what is published: the timers, the lint that a newer change stops, the whole-lib scan, `diag.Diagnostic` to the protocol's |
 | `actions.go` | `textDocument/codeAction`, `formatting`, `rangeFormatting` |
 | `definition.go` | `textDocument/definition`: `lint.Document.Resolve`'s answer as links or locations |
+| `hover.go` | `textDocument/hover` and `textDocument/signatureHelp`: `lint.Document.Hover`'s and `Signature`'s answers laid out as Markdown or plain text |
 | `content.go` | `workspace/textDocumentContent`: the text of a profile's stub |
 | `position.go` | `PositionMapper`, URIs and paths |
-| `protocol.go` | the protocol's types, as far as used (some 45) |
+| `protocol.go` | the protocol's types, as far as used (some 60) |
 | `lsptest/` | a client in the test's own process, over a pipe |
 
 Capabilities announced: `positionEncoding` (`utf-8` when the client
 offers it, else `utf-16`), `textDocumentSync` (open and close,
 incremental changes), `codeActionProvider` (`quickfix`,
 `source.fixAll.dgdtools`; only to a client with code action literals),
-`definitionProvider`,
+`definitionProvider`, `hoverProvider`, `signatureHelpProvider` (asked
+for at `(` and `,`, and again at `)`),
 `documentFormattingProvider`, `documentRangeFormattingProvider`,
 `workspace.workspaceFolders` (with change notifications),
 `workspace.textDocumentContent` for the scheme `dgdtools-profile`. Asked
@@ -107,7 +110,9 @@ What the library got for it, since both are a script's or a command's as
 much as the server's: `config.DiscoverOptions.Folders` (section 3) and
 `lint.Suppress` (the suppression comments of section 8, step 2). For
 step 4 it got `pkg/resolve`, what a place in a file refers to, which the
-server only asks (section 8, "As built, step 4").
+server only asks (section 8, "As built, step 4"); for step 5 `pkg/kfun`,
+the driver's kernel functions, and in `pkg/resolve` what there is to
+tell about a place and what a call takes ("As built, step 5").
 
 Where what is built is not what the sections below planned, the section
 says so in a paragraph that begins **As built**. In short:
@@ -416,7 +421,7 @@ knows the code base.
 | 2 **built**, but for "explain rule" | `codeAction`: quick fixes from `Diagnostic.Fixes` (a `safe` fix is `isPreferred` and joins "fix all"; an `unsafe` one is offered alone); "suppress with `dgdtools-ignore lint/RULE`" and "…for this file" (a `dgdtools-ignore-start lint/RULE` at its top) generated per diagnostic; "explain rule" as a command | fixes as text edits with their applicability (already data) | a helper that renders a suppression comment in the file's comment style and indentation | 2 |
 | 3 **built** | `formatting` and `rangeFormatting`; format-on-save of modified lines is the client's use of the latter | `format.Source(prj, path, text, lines)`: a function of the buffer and the file's settings, behind the gate (the same tokens, the same comments, a fixed point; a refusal returns no edits and a log line); `format.Edits(file, out)` gives one text edit per changed gap, so cursors and folds survive | LSP range to line range (a range that ends at column 0 does not include that line) | 2 |
 | 4 **built** | `definition`: `#include` targets, `inherit` paths, function calls (direct, `::`, `label::`, `->` with a known receiver, string callbacks in registrars), macros | `Document.Snapshot` and a `Query` on it: `ResolveInclude`, `ObjectPath`, `Chain`, `LookupCallable`; the file's `pp.Env` (`pp.Macro.Path/Off`) | `syntax.PathAt(file, offset)` (innermost node chain at a position); a stub target is already located by its virtual document URI (`dgdtools-profile://NAME/std/room.c`, see `profile.Location`), which the server answers with the stub's text | 4 |
-| 5 | `hover` and `signatureHelp` | `ChainFunc.Decl/Type/DefinedIn`, `index.Params`, macro body and class, variable types | active-parameter computation from the argument list around the cursor; kfun table for built-ins (new data file) | 3 |
+| 5 **built** | `hover` and `signatureHelp` | `ChainFunc.Decl/Type/DefinedIn`, `index.Params`, macro body and class, variable types | active-parameter computation from the argument list around the cursor; kfun table for built-ins (new data file) | 3 |
 | 6 | `documentSymbol`, `workspace/symbol` | `syntax.File.Decls`; units' symbol tables (whole-lib scan, cached) | fuzzy matcher | 2 |
 | 7 | `completion`: functions callable here (own chain, auto object, kfuns), `->` members for a known receiver, macros in view, `#include` and inherit paths, locals | chain + view + profile | local scopes (block-level symbol tables in `pkg/syntax`); tolerant parse at the cursor (the parser already recovers; completion context comes from tokens left of the cursor) | 5 |
 | 8 | `references` (and `documentHighlight`) | new: a reverse index of call sites and macro uses per name, built with the whole-lib scan and invalidated per file | reverse index in `pkg/index`; in a partial checkout results are labelled as "in this checkout" | 4 |
@@ -539,6 +544,152 @@ for a file that is open, so the answer follows unsaved changes there;
 the disk; a stub's text, which is what `workspace/textDocumentContent`
 gives for its URI.
 
+**As built, step 5.** Both answers are the library's again, and
+`pkg/lsp/hover.go` lays them out: `lint.Document.Hover(off)` and
+`Document.Signature(off)`, which are `pkg/resolve` on the document.
+
+```go
+h := doc.Hover(off)            // *resolve.Hover, nil when there is nothing to say
+h.Ref                          // what Resolve(off) gives: the name, and its text
+for _, info := range h.Infos { // one for each declaration; one for a kfun, an unknown receiver
+    info.Kind, info.Name
+    info.Code                  // the declaration as LPC
+    info.Doc                   // the comment above it, or the kfun table's line
+    info.Class                 // of a macro: what the parser takes it for
+    info.Note                  // what is not known: resolve.UnknownReceiver
+    info.Origin                // Kfun, Driver, Auto, Configured, File, Line, Profile; String() says it
+}
+
+s := doc.Signature(off)        // *resolve.SignatureHelp, nil outside a call or when nothing is known
+s.Name, s.Arg                  // the function called, the argument the cursor is in
+for _, sig := range s.Signatures {
+    sig.Label                  // the declaration
+    sig.Params                 // [start, end) of each parameter in Label
+    sig.Active                 // the parameter the argument is for; -1: none
+    sig.Doc, sig.Origin        // as a hover's
+}
+
+kfun.DGD()                     // the driver's kernel functions
+prj.Config.Kfuns()             // and the project's: dialect.kfuns
+```
+
+What a hover says, by what is named:
+
+| at the cursor | code | and |
+|---|---|---|
+| a function, in a call of any form that resolves, or at its declaration | its declaration as written, without the body: specifiers, return type, name, parameters (`index.FuncInfo.Decl`) | the comment directly above it; the file, by its name in the lib, and the line; `auto object` for one the auto object gives; `profile NAME` for one a stub declares. An ambiguous `::fn()` has each |
+| a kfun | its prototype from the table | the table's line of what it does; `kfun, DGD 1.7.9`, or `kfun, declared by the project (dialect.kfuns)` |
+| `x->fn()`, `call_other(x, "fn")` with `x` not known | none: `function fn` | "the receiver is not known: which object's function this calls cannot be told". Nothing is guessed |
+| a global variable | `private static int weight`: specifiers, type, name | comment, file and line |
+| a macro | `#define NAME(params) body`, the body on one line and cut at 400 bytes | `macro (CLASS)`, the class being what the parser takes its uses for; comment, file and line. A name the configuration gives a class and no file read defines says that |
+| an `#include` line | `#include <std.h>` | the file it resolves to |
+| the path of an `inherit` statement, a path handed to `clone_object` | none: `object /std/room` | the object's file |
+| an inherit label | `inherit side "/std/side";` | the file of the object it stands for |
+
+A name declared nowhere the tools see has no hover (`null`): a function
+nobody declares, a call on a known object that has no such function, an
+`#include` that leads nowhere, an object that is not there. So has
+everything `Resolve` says nothing of: locals, code that is not compiled.
+
+The comment is the one directly above the declaration
+(`resolve.Comment`): a block comment, or a run of `//` lines, that ends
+on the line before the declaration begins (or on that line, before it),
+with nothing but space before it on its own lines, so that the comment
+at the end of the line above is not taken. It is read in the text the
+document's generation of the index reads (`Snapshot.ReadFile`: an
+editor's buffer for a file that is open), given without its marks, the
+`*` that lead its lines and the indentation they share, and read as
+Latin-1 when it is not UTF-8. A stub has no comments, and no lines that
+mean anything: a declaration in one has neither.
+
+For a client that says it shows Markdown
+(`textDocument.hover.contentFormat`) the declaration is a `dgdlpc` code
+block, the name the editors' grammars have, and the comment is written
+so that it shows as it was typed: what Markdown reads as marks is
+escaped, a line break stays one, indentation is kept. Another client
+gets the same text plain. Several declarations are parted by a rule. The
+range is that of the name asked about.
+
+**Signature help** is found in the tokens to the left of the cursor,
+not in the tree: a call that is being written does not parse, and the
+statement around it is a `BadStmt` with nothing inside. From the cursor
+back over the compiled tokens (`pp.Selection.Sig`) of the function's
+body, counting brackets, to the `(` that is open and follows a name; the
+commas passed at that depth are the arguments before the cursor's. The
+commas of `({ })`, `([ ])`, an index and parentheses are their own; a
+`;` or a block's `{` ends the search; a string or a comment is one
+token, whatever is in it. The innermost call wins: in `f(g(1, |), 2)`
+it is `g`'s, and after the `)` it is `f`'s again. Outside the body of a
+function there are declarations and no calls.
+
+What the callee is, is asked as `Resolve` asks it:
+
+| the call | its signatures |
+|---|---|
+| `fn(` | the file's own function, else the inherited one, else the auto object's; else the kfun |
+| `::fn(`, `label::fn(` | the inherited function (of that label); two for an ambiguous `::fn`, the first active; for `::fn` the auto object's, then the kfun, when none has it |
+| `x->fn(` with `x` being `this_object()`, a string constant or a macro that is one | the function in that object's chain. The receiver is read from the tokens before the `->` as `calls.Extract` reads the tree of one, and the tests hold the one to the other |
+| `call_other(x, "fn", ` , `call_out("fn", delay, `, a `conventions.call_registry` entry with `args:` | in the arguments that are passed on (from `args` onward): the function named, with `x` as for `->`. In the arguments before them: the registrar's own |
+| `MACRO(` | the macro's name and parameters, when it has parameters |
+| `x->fn(` with `x` not known, a function nobody declares, `(*f)(` | nothing: `null` |
+
+The active parameter is the argument's own; the last one for every
+argument a parameter with `...` takes (`mixed args...`); none when the
+argument is past the end, sent as one past the last parameter, which is
+how every client reads "none". `varargs` changes nothing: an optional
+parameter is at its place. A client with `labelOffsetSupport` gets each
+parameter as its offsets in the label, another as its text; one with
+`activeParameterSupport` gets an active parameter for each signature
+beside the one of the whole. Asked again while it shows signatures
+(`context.isRetrigger`), the server keeps the one the user turned to
+when the call is still the same. The documentation of a signature is
+the comment and where the declaration is, as a hover has them.
+
+**The kfun table** is `pkg/kfun`: the 106 functions of DGD 1.7.9 that a
+program can call by name, in `dgd.kfuns`, a prototype a line under the
+line that says what the function does. It is read out of the driver's
+source and not written by hand: `TestDriverSource`, given a checkout of
+the driver in `$DGD_SRC`, reads the `FUNCDEF` tables of `src/kfun` in
+the order `table.cpp` includes them, takes what `KFun::kfunc` finds
+(the entries past the `KF_BUILTINS` operators whose names are
+identifiers, and the four names it maps back among those: `call_other`,
+`call_trace`, `status`, `strlen`), decodes each prototype's bytes
+(class, number of arguments that must and that may be given, types;
+`C_ELLIPSIS`), takes the first sentence of the comment above the C
+function, and holds the file to that; `-update` writes it. The driver
+declares types and no parameter names, so the table has none: `int
+call_out(string, mixed, mixed...)`. An argument the driver assigns to
+(`sscanf`'s) has the type `lvalue`. One comment of the driver's says
+what another function does (`asn_cmp` has `asn_sub`'s) and is left out.
+An entry under a build condition would fail the test: there is none
+among the functions a program can name.
+
+What a driver has beyond stock DGD is the project's to say, not the
+table's: `dialect.kfuns` in `dgdtools.yml` lists the kfuns of the
+driver's extension modules as prototypes, with parameter names when the
+project wants them shown; `dgdtools profile build` puts them into the
+profile's manifest, so a wizard's checkout has them; a checkout's own
+word of a kfun stands before the profile's, and the project's before
+the table's. `examples/viking/dgdtools.yml` declares the three of that
+mud's module (`rusage`, `argon2_hash`, `argon2_verify`), held to the
+module's source in `$DGD_EXT_SRC` by `TestExtensionExample`.
+
+A kfun is the meaning of a name only where that can be proved, as a
+definition is: the file is in a lib, no object of its chain is unseen,
+the auto object and what it inherits are seen, and the auto object has
+no function of the name (a lib's auto object redefines the driver's
+`clone_object` and the like, with other parameters; when it is seen and
+has one, that is what the name resolves to). In the auto object itself,
+and in what it is made of, the name is the kfun: `::find_object()`
+there no longer resolves to the auto object's own function.
+
+Not built: parameter names for the driver's kfuns (the driver's manual
+pages have them, in a repository of their own that the driver's
+checkout only links to); `->fn` on a receiver the code makes known a
+line earlier (`ob = clone_object("/obj/x")`), which waits for receiver
+flow as the linter does; a hover for locals and parameters (scopes,
+step 7); `signatureHelp` in the arguments of a function pointer.
+
 Steps 1 to 3 (9 days) are the "useful every day" milestone: live
 diagnostics, fixes, formatting. Steps 4 to 6 (9 days) make it a
 navigation tool. Steps 7 to 9 (13 days) need two pieces of library work
@@ -548,7 +699,8 @@ of step 7 and the reverse index of step 8.
 
 Library additions, all testable without a server: `syntax.PathAt`
 (built, with `token.File.TokenAt`),
-block scopes, kfun table (name, parameters, return type), reverse
+block scopes, kfun table (name, parameters, return type; built,
+`pkg/kfun`), reverse
 reference index, `pkg/rename`. A lint already returns the parsed tree,
 tokens, `#define` environment, index unit and snapshot with the
 diagnostics.
@@ -1288,7 +1440,8 @@ network.
    a release packs it for each platform with the binary inside (11.2),
    and publishes it nowhere until the owner says where.
 4. `syntax.PathAt`; steps 4 to 6 (9 days); then semantic tokens 9a (2
-   days), which needs only what hover needs.
+   days), which needs only what hover needs. **Steps 4 and 5 are done**
+   (section 8), and the kfun table of the next item with them.
 5. Scopes and kfun table in the library (also unlock linter rules:
    undeclared variable, undefined function, argument counts); step 7 and
    semantic tokens 9b (7 days); then step 10, rename within a file (3
@@ -1402,6 +1555,69 @@ grammars alone can ship in the first.
     in the checkout only, and none to something else. All 219,423
     declarations of the checkout side were held to their files and
     stubs.
+- **As built, hover and signature help (step 5).** In `pkg/kfun`:
+  `TestDriverSource` and `TestExtensionExample`, which hold the table
+  and the example's `dialect.kfuns` to the driver's and the module's
+  source (`$DGD_SRC`, `$DGD_EXT_SRC`; skipped without them),
+  `TestDGD`, `TestParse`, `TestWith`. In `pkg/resolve`: `TestHover`
+  (every kind on a whole lib, with what has no hover),
+  `TestHoverKfunProved` (an unseen object in the chain, an unseen auto
+  object, a file with no lib), `TestHoverPartialCheckout` (stubs, and
+  the profile's kfuns), `TestComment`; `TestSignature` (the argument at
+  every place of a call, nested calls, commas that are not the call's,
+  `varargs` and `...`, each form of callee, the arguments a registrar
+  passes on, declarations, unknown receivers), `TestSignatureWhileTyping`
+  (a call half written, the statement not parsing),
+  `TestSignatureReceiverIsExtracts` (the receiver as read from the
+  tokens against `calls.Extract`), `TestEveryPrefix` (a file as it is
+  typed, a byte at a time). Under them `TestAutoMembers` and
+  `TestLibFileAndParamSpans` (`pkg/index`), `TestForms` (`pkg/calls`).
+  In `pkg/lsp`: `TestHoverIsResolve` holds the server to the library at
+  every place of every file of a lib, for hover and signature help
+  both, in both encodings and for a client with and without Markdown
+  and label offsets; `TestHoverContent` and `TestMarkdownText` (what
+  the two kinds of client get); `TestHoverInStub`;
+  `TestSignatureRetrigger`; `TestHoverOfNothing`; the transcripts
+  `hover.txt` and `hover-plain.txt`. In `editors`: `TestNeovimHover`,
+  the `nvim` on `PATH` showing hovers and signatures with
+  `vim.lsp.buf.hover()` and `vim.lsp.buf.signature_help()`, the active
+  parameter marked. On the corpus (`-tags corpus`, in `pkg/resolve`),
+  `TestCorpusHover` asks for the hover of every place that names
+  something in 2,000 of the VikingMUD lib's 108,117 files, and for the
+  signature just inside the `(` of every call of their code:
+  - 76,876 places, 74,484 with a hover (96.9%): all of the 7,373 `->fn`
+    on an unknown receiver, which say so; direct calls 34,045 of 36,051
+    (94.4%: 30,714 with a declaration and 3,331 that are kfuns);
+    21,321 of the declarations told have a comment above them. A hover
+    takes 24 µs on average, a signature 34 µs.
+  - 47,920 calls, 38,198 with a signature (79.7%; 94.2% of those whose
+    receiver is not unknown): direct calls of the lib's functions
+    30,714 of 32,720, kfuns 3,331 of 3,331, `::fn` 1,627 of 1,729,
+    `label::fn` 417 of 419, `->fn` on a known object 695 of 730 and on
+    `this_object()` 183 of 195, macros 1,231 of 1,423; on an unknown
+    receiver 0 of 7,373, by design.
+  - Held, for each of them: a hover has something for every
+    declaration the place resolves to, and for a function the
+    declaration the index has; the signatures of a call are the
+    declarations its name resolves to, or the kfun's, which holds the
+    reading of the tokens to the reading of the tree at every call; an
+    unknown receiver has no signature and a hover that says so. No
+    exception in the sample.
+  - Kfuns: 3,331 calls of 22 of the project's 109 (the table's 106 and
+    the three of the mud's extension module), `this_object`, `sizeof`,
+    `previous_object`, `strlen` and `sscanf` before the rest. In a
+    program all of which is known, 519 calls of 139 names are neither
+    a function of the lib nor in the table: none of them is a kfun of
+    DGD's. They are other drivers' functions that code brought along
+    (`pointerp`, `replace_program`, `extract`, `strsrch`,
+    `first_inventory`, `m_indices`, the `socket_` family), macros of
+    headers the file does not include, and the lib's functions called
+    in files that do not inherit them: what the driver answers
+    "undefined function" to. 1,591 calls are not judged, the program
+    having an object nobody sees.
+  `TestCorpusResolve` and `TestCorpusResolvePartial` are as they were,
+  but for one `::destruct_object()` in what the auto object is made
+  of, which is the driver's and no longer the auto object's own.
 - **Edit fuzzing** (`go test -fuzz`): start from a corpus file, apply a
   random sequence of range edits through incremental sync while applying
   the same edits to a plain string; after each step the server's buffer
@@ -1505,6 +1721,25 @@ Each with the alternative it was chosen over.
   rather than the likeliest place (section 8, "As built, step 4").
 - **An `inherit` statement goes to the object**, whatever its path is
   written with; a macro elsewhere goes to its `#define`.
+- **The kfun table is read out of the driver's source**, by a test
+  that also writes it, not typed in from the manual: the prototypes are
+  the driver's own bytes, and a new driver version is a diff of one
+  file. The price is that parameters have no names, the driver having
+  none (section 8, "As built, step 5").
+- **A driver's extension kfuns are the project's data**
+  (`dialect.kfuns`, carried by the profile), never the table's: no
+  mud's module is in the tool.
+- **A kfun is told only where the program is all known**, as the auto
+  object's function is: a lib's auto object redefines the driver's
+  functions, and to show the driver's `clone_object(object)` for the
+  lib's `clone_object(string)` would be worse than to show nothing.
+- **Signature help reads tokens, hover reads the tree.** A call being
+  written does not parse; a name being read does. The two are held to
+  each other where both can speak.
+- **The arguments that `call_other` and `call_out` pass on show the
+  called function's signature**, not the registrar's `mixed...`: that
+  is the function being written to. The registrar's own arguments show
+  its own.
 
 - **The VS Code extension is published under the repository owner's
   account**, to both the Visual Studio Marketplace and Open VSX (so

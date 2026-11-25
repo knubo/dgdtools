@@ -128,7 +128,7 @@ only settings can differ from one directory to the next.
 | `profile` | The mudlib profile to work against: a name, found as `NAME.profile` next to the config file, in a directory listed in `$DGDTOOLS_PROFILE_PATH`, or in the user config directory (`~/.config/dgdtools/profiles/`); or a path to a profile file. No profile is built in. It supplies the driver settings, the shared headers and the signatures of shared objects, so a wizard needs nothing else. Files on disk always win over the profile. |
 | `lib_path` | The lib path of the directory a partial checkout is (`/usr/ann`), when its path on disk does not show it (the profile lists the lib's checkout patterns, such as `usr/*`). |
 | `exclude` | Globs, relative to the lib root, that directory walks skip. A file named on the command line is always taken. |
-| `dialect` | `slash_slash`, `closures`, and `typechecking` (the driver's level; the rules that depend on it are silent while it is unknown). |
+| `dialect` | `slash_slash`, `closures`, `typechecking` (the driver's level; the rules that depend on it are silent while it is unknown), and `kfuns`: the kernel functions the driver has beyond stock DGD's, those of the extension modules it loads, each as a prototype (`"int *rusage()"`, `"string sha256(string text, varargs int rounds)"`). The editor shows them like the driver's own, which are built in. |
 | `include_dirs`, `include_file`, `auto_objects`, `create` | What the driver's config says: the include search path, the header included into every file, the object every object inherits, and the function a new object is initialized by. Usually read from `profile_build.driver_config` or the profile; set here they override both (a lib whose auto object receives the driver's `create` call and passes it on as another function names that function). |
 | `relative_object_paths` | What `"std/room"` (no leading slash) is relative to. DGD hands every `inherit` and every `call_other("path", …)` to the lib's driver object to resolve, so this is the lib's choice: `root` (the default, and what the driver's own functions such as `compile_object` do) or `file` (the directory of the file that says it, as in the kernel library). |
 | `conventions` | The lib's own habits; nothing here has a default. `specifier_macros: [public]` names empty macros that stand where a specifier does, and `macros: {FOREACH: statement}` says how to read a macro that cannot be classified from its `#define` (`expression`, `empty`, `specifier`, `type`, `string`, `statement`, `opaque`); `defines:` lists names to treat as defined in `#ifdef`. `call_registry`: the lib's functions that take the name of a function to call later, each with the argument that names the `function`, optionally the argument that says in which `object` (without it: `this_object()`) and the first of the `args` passed on; a function called in several ways lists its forms. `object_registry`: functions whose string argument is an object path (`compile_object`, `find_object`, `clone_object` are built in). `format_registry`: scanf-style functions and the position of their format string (`sscanf` is built in). `autosave_markers`: names whose mention marks an object as one that saves itself with `save_object`. `virtual_paths`: lib-path globs served by virtual-object daemons. |
@@ -573,8 +573,15 @@ the rename command planned on top).
 `dgdtools lsp` is a language server: an editor starts it and gets, for
 the files that are open, the findings of `dgdtools lint` as they are
 typed, the fixes and `dgdtools-ignore` comments for them, and `dgdtools
-format` for a file or a selection. It reads the same `dgdtools.yml` as
-the commands, so the editor and the command line cannot disagree.
+format` for a file or a selection. It also answers what a name is: go
+to definition (the header of an `#include`, the object of an `inherit`,
+the function of a call, a macro's `#define`, a global variable), a
+hover with the declaration, the comment above it and where it is, and
+signature help in the arguments of a call, for the lib's functions and
+for the driver's kfuns alike. Where the tools cannot know (a call on an
+object held in a variable) they say so, or nothing, and never guess. It
+reads the same `dgdtools.yml` as the commands, so the editor and the
+command line cannot disagree.
 [`editors/`](editors/README.md) has what each editor needs: syntax
 highlighting for VS Code and for Vim and Neovim, under the language name
 `dgdlpc`, a VS Code extension that starts the server, and how to start

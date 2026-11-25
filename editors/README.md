@@ -231,6 +231,21 @@ and what it formats is what `dgdtools format` writes. What it does:
   your folder opens as the profile's read-only stub. Where the tools
   cannot know (a call on an object held in a variable, a local
   variable), nothing happens rather than a guess.
+- **Hover** on any of those names: the declaration (a function's with
+  its specifiers and types, a variable's type, a macro's `#define` and
+  what the parser takes it for), the comment directly above it, and
+  where it is: the file and line, `auto object`, the profile, or `kfun`
+  for a function of the driver's, of which the server has DGD's table
+  (the kfuns of your driver's extension modules are `dialect.kfuns` in
+  `dgdtools.yml`). On `ob->fn()` with `ob` a variable it says that the
+  receiver is not known, and no more.
+- **Signature help** in the arguments of a call, as you type `(` and
+  `,`: the function's declaration with the parameter you are at, for
+  `fn()`, `::fn()`, `label::fn()`, `->fn()` on `this_object()` or a
+  path, and kfuns; in `call_other(ob, "fn", ...)` and `call_out("fn",
+  delay, ...)` the arguments that are passed on are `fn`'s. It works
+  while the line is half written. A call on an unknown receiver has
+  none.
 
 It keeps a log when asked to: `dgdtools lsp --log /tmp/dgdtools-lsp.log`,
 and with `--trace` every message in both directions. It never writes to
@@ -258,7 +273,9 @@ Open a `.c` file under a `dgdtools.yml`; `:checkhealth vim.lsp` shows
 the client attached, `:lua vim.diagnostic.setqflist()` lists the
 findings, `gra` (or `:lua vim.lsp.buf.code_action()`) offers the fixes
 and the comments, `:lua vim.lsp.buf.format()` formats, and `gq` formats
-a selection. To format on save:
+a selection; `CTRL-]` goes to a definition, `K` shows the hover, and
+`CTRL-S` in insert mode the signature of the call being written. To
+format on save:
 
 ```lua
 vim.api.nvim_create_autocmd('BufWritePre', {
@@ -296,7 +313,8 @@ nvim -u NONE \
 screen: it runs the server under the `nvim` on `PATH`, waits for the
 diagnostics of a file, mends one finding by typing and one by the
 server's fix, and has the file formatted. `TestNeovimDefinition` goes
-to definitions the same way.
+to definitions the same way, and `TestNeovimHover` reads what `K` and
+`CTRL-S` show.
 
 ### Vim
 

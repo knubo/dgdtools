@@ -50,6 +50,7 @@ profile: mylib             # the mudlib profile, for a partial checkout
 lib_path: /usr/name        # where a partial checkout sits in the lib
 exclude: ["attic/**"]
 dialect: {slash_slash: true, closures: false, typechecking: 2}
+# dialect.kfuns: ["int *rusage()"]   the kfuns of the driver's extension modules
 include_dirs: ["/include"] # what the driver's config says
 include_file: /include/std.h
 auto_objects: [/kernel/lib/auto]

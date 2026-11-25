@@ -50,6 +50,9 @@ pkg/syntax   AST + hand-written error-tolerant recursive-descent parser,
              declarations rendered as text (signatures, types)
 pkg/directive  the comments addressed to the tool: dgdtools-ignore ...
 pkg/tokcmp   significant-token comparison of two files
+pkg/kfun     the driver's kernel functions: name, prototype and a line
+             each, read out of the driver's source; a project adds
+             those of its driver's extension modules
 pkg/profile  a mudlib profile: manifest, stubs, the file format, lookup
 pkg/editorconfig  .editorconfig files
 pkg/fileset  where a lib is on disk: path mapping, globs, the walk
@@ -64,7 +67,9 @@ pkg/calls    the late-bound call sites of one file (obj->fn(),
              registry of functions that take a function name
 pkg/resolve  what a place in a file refers to (the file of an #include,
              the object of an inherit, the function of a call, a macro's
-             #define, a global variable) and where that is declared
+             #define, a global variable) and where that is declared;
+             what there is to tell about it (hover), and what the call
+             takes whose arguments a place is in (signature help)
 pkg/format   the formatter: a layout plan from the syntax tree, a
              token-stream printer, the token-equality gate (section 8)
 pkg/lint     the embeddable linter: rules with typed options, the layers
@@ -227,6 +232,13 @@ rule so a lib can baseline or disable them independently:
 
 `&f()` and `(*f)()` are syntax errors unless `dialect.closures` is set.
 
+The kernel functions are data too. `pkg/kfun` has those of stock DGD,
+read out of the driver's source (`dgd.kfuns`, held to it by a test);
+what the extension modules of a mud's driver add is that mud's to say,
+as prototypes in `dialect.kfuns`, which its profile carries
+([lsp.md](lsp.md) section 8, "As built, step 5"). An editor's hover and
+signature help read the table; no rule does yet.
+
 ## 3. Project root and configuration discovery
 
 ### 3.1 Prior art
@@ -302,7 +314,7 @@ line are designed in [config.md](config.md). What the linter adds:
   misspelled setting must not be silently ignored.
 - **Project keys and settings.** What the linter resolves references
   against is the project: `root`, `profile`, `lib_path`, `exclude`,
-  `dialect` (with `typechecking`), `include_dirs`, `include_file`,
+  `dialect` (with `typechecking` and `kfuns`), `include_dirs`, `include_file`,
   `auto_objects`, `create`, `relative_object_paths` and `conventions`
   (`specifier_macros`,
   `macros: {NAME: expression|empty|specifier|type|string|statement|opaque}`,
@@ -755,8 +767,8 @@ file read per edit, and findings identical to the whole-lib run's.
 
 Described in [lsp.md](lsp.md): a thin layer, `pkg/lsp` behind the
 `dgdtools lsp` subcommand, holding one `session.Session`. Diagnostics,
-code actions, formatting and go to definition are built; the rows below
-them are planned.
+code actions, formatting, go to definition, hover and signature help
+are built; the rows below them are planned.
 What it maps onto:
 
 | LSP feature | Maps onto |
@@ -766,7 +778,8 @@ What it maps onto:
 | `workspace/didChangeWatchedFiles` | `Session.DiskChanged(paths...)`: sources, directories, and every kind of configuration file alike. |
 | `textDocument/codeAction` | `Fixes` on the diagnostics in range (quick-fix edits), plus the "suppress with `dgdtools-ignore lint/RULE`" actions of `lint.Suppress`. |
 | `textDocument/definition` | `Document.Resolve(off)`, which is `pkg/resolve` on the document: the token at the offset as a `Ref` (what it names: the file of an `#include`, the object of an `inherit` or of a path argument, a label, a function, a global variable, a macro) and its `Defs`, the declarations it resolves to through `ResolveInclude`, `ObjectFile`, `Snapshot.Chain` (functions and variables; `::` and `label::` calls), `AutoFunc`, the receivers `pkg/calls` knows (`->`, `call_other`, the registrars' callbacks) and the file's `pp.Env` (`Definition`). Each `Def` has the file, the range of the declared name and the index's facts (`FuncInfo`, `VarInfo`, `pp.Macro`); a declaration in a profile stub is at `dgdtools-profile://NAME/std/room.c`. What cannot be proved has no `Def` ([lsp.md](lsp.md) section 8). |
-| `textDocument/hover` | the same lookups: specifiers and argument range of a function, the object that provides it, a macro's body and class. |
+| `textDocument/hover` | `Document.Hover(off)`: the `Ref` of the place and an `Info` for each of its `Defs`, with the declaration as LPC (`FuncInfo.Decl`, a variable's type, a macro's `#define` and class), the comment directly above it (`resolve.Comment`, in the text `Snapshot.ReadFile` gives) and where it is (`Origin`: the file's name in the lib and the line, the auto object, a profile). A function of the driver's is told from the project's kfun table (`Config.Kfuns`: `pkg/kfun` and `dialect.kfuns`), where the whole program is known; a call whose receiver is unknown is told as that. |
+| `textDocument/signatureHelp` | `Document.Signature(off)`: the innermost call whose arguments the offset is in, read from the tokens left of it (`pp.Selection.Sig`), so that it is there while the statement does not parse; the callee resolved as for a definition (`Chain`, `AutoFunc`, the kfun table, a receiver that is `this_object()` or a constant path, the arguments a `calls.Registry` form passes on); each declaration with its parameters' places in it (`index.ParamSpans`) and the one the argument is for. |
 | `textDocument/documentSymbol`, `workspace/symbol` | `syntax.File.Decls`; the units' symbol tables. |
 | `textDocument/formatting`, `rangeFormatting` | `format.Source(prj, path, text, lines)`, a function of the buffer and the file's settings; `format.Edits` for the reply. |
 | `textDocument/rename` | `pkg/rename`, to be written: one engine for the editor and for `dgdtools rename` ([lsp.md](lsp.md) section 9). |
@@ -774,7 +787,8 @@ What it maps onto:
 What the server adds itself: JSON-RPC transport, position conversion,
 debouncing, and per-document versioning. No analysis logic lives there.
 What the core still lacks for it: scopes for local variables (section
-11). The "node at offset" helper is `syntax.PathAt`.
+11). The "node at offset" helper is `syntax.PathAt`; the kfun table is
+`pkg/kfun`.
 
 ## 7. Rules
 
@@ -1105,7 +1119,8 @@ A profile is a manifest plus stub files (`pkg/profile`):
 
 - **Manifest (JSON):** the dialect (`language: lpc`, `driver: dgd`,
   version, `//` comments, closures, typechecking level, predefined
-  macros); the driver's include dirs, force-included header, auto
+  macros, the kfuns of the driver's extension modules); the driver's
+  include dirs, force-included header, auto
   object and create function; how relative object paths resolve; the
   lib's conventions
   (call/object/format registries, autosave markers, virtual paths,
@@ -1348,8 +1363,10 @@ today. Generalizing to FluffOS or LDMud is mostly not profile work:
   errors only in DGD).
 - **Efun/kfun tables** per driver (name, arity, purity) for name
   resolution and for knowing that e.g. `call_other` and `call_out` exist
-  with which argument positions; today the handful the linter needs are
-  hard-coded as DGD kfuns.
+  with which argument positions. DGD's is `pkg/kfun`, read out of the
+  driver's source, and a project's extension kfuns are its
+  `dialect.kfuns`; the handful the linter's rules need are still
+  named in the code (`calls.NewRegistry`).
 - **Semantics the runtime rules encode:** visibility and `call_other`
   reachability (`static`/`private`/`protected`/`nosave` differ),
   `inherit` semantics (virtual inherit in LDMud, no labels in FluffOS),
@@ -1371,7 +1388,8 @@ Not built, in rough priority order:
    distinct environment it is included in.
 2. **Name resolution** ("undefined function", "undeclared variable",
    direct-call arity, redeclaration): the next 2,500 files the driver
-   rejects. Needs the kfun table, scopes, and inherited variables.
+   rejects. Needs scopes and inherited variables; the kfun table is
+   there (`pkg/kfun`).
 3. **Receiver flow** for `ob->fn()` where `ob` is a local assigned from
    `clone_object("…")` and the like: 76% of late-bound call sites have
    an unknown receiver (9.3).
