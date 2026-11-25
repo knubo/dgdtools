@@ -97,6 +97,35 @@
 >    });
 #    ^^ meta.array.dgdlpc punctuation.definition.array.end.dgdlpc
 #      ^ punctuation.terminator.statement.dgdlpc
+>    set_dirs(({
+#    ^^^^^^^^ entity.name.function.call.dgdlpc
+#            ^ punctuation.section.parens.begin.dgdlpc
+#             ^^ meta.array.dgdlpc punctuation.definition.array.begin.dgdlpc
+>        "north",
+#        ^ meta.array.dgdlpc string.quoted.double.dgdlpc punctuation.definition.string.begin.dgdlpc
+#         ^^^^^ meta.array.dgdlpc string.quoted.double.dgdlpc
+#              ^ meta.array.dgdlpc string.quoted.double.dgdlpc punctuation.definition.string.end.dgdlpc
+#               ^ meta.array.dgdlpc punctuation.separator.comma.dgdlpc
+>        "south",
+#        ^ meta.array.dgdlpc string.quoted.double.dgdlpc punctuation.definition.string.begin.dgdlpc
+#         ^^^^^ meta.array.dgdlpc string.quoted.double.dgdlpc
+#              ^ meta.array.dgdlpc string.quoted.double.dgdlpc punctuation.definition.string.end.dgdlpc
+#               ^ meta.array.dgdlpc punctuation.separator.comma.dgdlpc
+>    }), ([
+#    ^^ meta.array.dgdlpc punctuation.definition.array.end.dgdlpc
+#      ^ punctuation.separator.comma.dgdlpc
+#        ^^ meta.mapping.dgdlpc punctuation.definition.mapping.begin.dgdlpc
+>        "north": 1,
+#        ^ meta.mapping.dgdlpc string.quoted.double.dgdlpc punctuation.definition.string.begin.dgdlpc
+#         ^^^^^ meta.mapping.dgdlpc string.quoted.double.dgdlpc
+#              ^ meta.mapping.dgdlpc string.quoted.double.dgdlpc punctuation.definition.string.end.dgdlpc
+#               ^ meta.mapping.dgdlpc punctuation.separator.colon.dgdlpc
+#                 ^ meta.mapping.dgdlpc constant.numeric.integer.decimal.dgdlpc
+#                  ^ meta.mapping.dgdlpc punctuation.separator.comma.dgdlpc
+>    ]));
+#    ^^ meta.mapping.dgdlpc punctuation.definition.mapping.end.dgdlpc
+#      ^ punctuation.section.parens.end.dgdlpc
+#       ^ punctuation.terminator.statement.dgdlpc
 >    set_short("a sample room");
 #    ^^^^^^^^^ entity.name.function.call.dgdlpc
 #             ^ punctuation.section.parens.begin.dgdlpc
@@ -193,8 +222,25 @@
 #              ^ keyword.operator.assignment.dgdlpc
 #                ^^ constant.numeric.integer.decimal.dgdlpc
 #                  ^ punctuation.terminator.statement.dgdlpc
->    else
+>    else if (total < 0 &&
 #    ^^^^ keyword.control.dgdlpc
+#         ^^ keyword.control.dgdlpc
+#            ^ punctuation.section.parens.begin.dgdlpc
+#                   ^ keyword.operator.comparison.dgdlpc
+#                     ^ constant.numeric.integer.decimal.dgdlpc
+#                       ^^ keyword.operator.logical.dgdlpc
+>        which > 1) {
+#              ^ keyword.operator.comparison.dgdlpc
+#                ^ constant.numeric.integer.decimal.dgdlpc
+#                 ^ punctuation.section.parens.end.dgdlpc
+#                   ^ punctuation.section.block.begin.dgdlpc
+>        return 0;
+#        ^^^^^^ keyword.control.dgdlpc
+#               ^ constant.numeric.integer.decimal.dgdlpc
+#                ^ punctuation.terminator.statement.dgdlpc
+>    } else
+#    ^ punctuation.section.block.end.dgdlpc
+#      ^^^^ keyword.control.dgdlpc
 >        total++;
 #             ^^ keyword.operator.increment-decrement.dgdlpc
 #               ^ punctuation.terminator.statement.dgdlpc

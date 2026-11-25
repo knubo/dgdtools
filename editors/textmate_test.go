@@ -341,8 +341,10 @@ func lexSample(t *testing.T, path, src string) lexed {
 // is what the grammar makes of each byte, and boundary whether something
 // of the grammar's begins at a byte. White space between tokens is not
 // compared (a grammar counts the blanks before a '#' to the directive).
-// Up to ten differences are reported.
-func (l lexed) agree(t *testing.T, path string, class []byteClass, boundary []bool) {
+// A grammar that is not strict may leave operators and names alone: it
+// is held to the literals, the reserved words, the comments and the
+// directives. Up to ten differences are reported.
+func (l lexed) agree(t *testing.T, path string, class []byteClass, boundary []bool, strict bool) {
 	t.Helper()
 	line, col, bad := 1, 1, 0
 	report := func(format string, args ...any) {
@@ -355,11 +357,13 @@ func (l lexed) agree(t *testing.T, path string, class []byteClass, boundary []bo
 			line, col = line+1, 1
 			continue
 		}
-		blank := l.class[i] == clOther && strings.IndexByte(" \t\r", l.src[i]) >= 0
-		if want, have := l.class[i], class[i]; want != have && want != clAny && !blank {
+		want, have := l.class[i], class[i]
+		blank := want == clOther && strings.IndexByte(" \t\r", l.src[i]) >= 0
+		left := !strict && want == clOperator && have == clOther
+		if want != have && want != clAny && !blank && !left {
 			report("%q is of a %s token, and %s to the grammar", l.src[i], want, have)
 		}
-		if tok, ok := l.starts[i]; ok {
+		if tok, ok := l.starts[i]; ok && (strict || (want != clOperator && want != clOther)) {
 			text := l.src[tok.Off:tok.End]
 			if !boundary[i] {
 				report("the grammar does not begin anything at the token %q", text)
@@ -448,7 +452,7 @@ func TestGrammarAgreesWithLexer(t *testing.T) {
 			}
 			off += len(text)
 		}
-		l.agree(t, path, class, boundary)
+		l.agree(t, path, class, boundary, true)
 	}
 }
 

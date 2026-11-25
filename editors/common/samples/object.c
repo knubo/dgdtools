@@ -25,6 +25,12 @@ create()
         2,
         3,
     });
+    set_dirs(({
+        "north",
+        "south",
+    }), ([
+        "north": 1,
+    ]));
     set_short("a sample room");
     set_long("A room with two exits, " +
         "described over two lines.\n");
@@ -47,7 +53,10 @@ query_count(int which, varargs int fallback)
     }
     if (total > 10)
         total = 10;
-    else
+    else if (total < 0 &&
+        which > 1) {
+        return 0;
+    } else
         total++;
     while (total > 5) {
         total--;
