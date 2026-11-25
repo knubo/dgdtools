@@ -546,6 +546,46 @@ persistent on-disk cache would save little and adds invalidation risk,
 so there is none. The in-process index is lazy and invalidatable, which
 is what a long-lived server needs.
 
+**Memory.** What a server holds is the index: a unit for each file of
+the lib (its functions and variables, inherits, include closure and the
+Uses references are found by, [lsp.md](lsp.md) section 8, step 8), the chains it has flattened, the
+reverse edges for invalidation. `TestCorpusMemory` (`pkg/lsp`, `-tags
+corpus`) measures it on the VikingMUD lib (108,115 objects, 110,086
+files with headers, 12 CPUs): the server alone in the process, the
+whole-lib scan, then an editor's session over 300 files (open, semantic
+tokens, five hovers and completions, an edit and its undo, close) and
+the references of `add_item` (140,161 places) and `set_short` (58,631);
+the heap after a collection at both points, the peak resident size, and
+with `$DGDTOOLS_PPROF` heap profiles for pprof. Before step 8's Uses the
+heap at the end of a session was some 357 MB; they took it to 586. The
+profiles showed the Uses (125 MB in records of 28 bytes), the units'
+maps of functions (a map of one function is a group of eight slots of
+112 bytes, and half the objects have one), a copy of every include
+path in every unit that includes it, slack left by appending, and
+flattened chains that copy their parents' entries. Each change, in
+order:
+
+| change | heap after scan | after session | in use, session | peak RSS | scan |
+|---|---|---|---|---|---|
+| before (step 9) | 537 MB | 586 MB | 890 MB | 1.8 GB | 3.0 s |
+| functions and variables in sorted slices | 456 | 508 | 790 | 1.7 | 3.0 |
+| a Use in 16 bytes | 403 | 455 | 690 | 1.4 | 3.1 |
+| one string per include path; no slack | 322 | 373 | 610 | 1.3 | 3.1 |
+| chains share their parents' entries | 322 | 337 | 560 | 1.3 | 3.1 |
+
+Latencies did not move (medians before and after: open to diagnostics
+1.6 ms, an edit 1.7 ms, semantic tokens 40 µs, hover 50 µs, completion
+2.4 ms, the references of `add_item` 490 ms and of `set_short` 220 ms
+through the server, most of it JSON), nor did any answer: `dgdtools
+lint`'s JSON for the whole lib is the same byte for byte, and so are the
+counts of every corpus test. The scan's time is within its noise (3.0
+to 3.3 s from run to run on the same commit; most of it is opening
+files). What is left: the Uses' records (75 MB) and their names (30 MB
+of handles, 20 MB in `unique`'s map), the functions (43 MB), the
+reverse edges (35 MB), the units themselves (17 MB). The peak resident
+size is the scan's garbage, not what is kept. `TestCorpusSession`'s
+2,003 files end with 371 MB (638 MB before).
+
 ## 5. Missing references and how unknowns degrade
 
 The rule everywhere: **Found / provably Missing / Unknown**, and only

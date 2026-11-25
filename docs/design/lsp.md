@@ -940,12 +940,14 @@ on the VikingMUD lib). An `#include` is searched by the file it
 resolves to, however each writes its name. The name of a macro in an
 `inherit` statement is a Use of the macro as well as of the object:
 At gives `inherit ROOM;` to the room, and the references of `ROOM` would
-otherwise miss most of its uses. A Use is a record of 28 bytes, its
-name a `unique` handle and its line and column kept, so that the server
-answers 60,000 places without reading their files (a line that is not
-ASCII up to the place is read for its columns). On the VikingMUD lib
-(110,086 files and headers) that is 4.47 million Uses; the scan takes
-3.0 s instead of 2.2 s and the heap at its end is 607 MB instead of 405.
+otherwise miss most of its uses. A Use is a record of 16 bytes (28 as
+first built), its name a `unique` handle and its line and column kept,
+so that the server answers 60,000 places without reading their files (a
+line that is not ASCII up to the place is read for its columns). On the
+VikingMUD lib (110,086 files and headers) that is 4.47 million Uses; the
+scan took 3.0 s instead of 2.2 s and the heap at its end was 607 MB
+instead of 405, before the memory work of architecture.md, section 4.1
+("Memory"), which brought what a server holds after the scan to 322 MB.
 
 **What is found.** For a function: its definition and prototypes (with
 `includeDeclaration`), and every call that reaches it: `fn()`, `&fn`,
@@ -1975,7 +1977,10 @@ grammars alone can ship in the first.
   document that waited for the first scan of the lib; 357 MB of heap at
   the end, 709 MB since the reverse index of step 8 and the searches the
   test now makes (as many places as the library finds for 51
-  functions). Not built: the VS Code integration test (the client is the
+  functions), 371 MB since the memory work of architecture.md, section
+  4.1 (638 MB just before it). `TestCorpusMemory` measures what the
+  server holds and its latencies, with heap profiles (same section).
+  Not built: the VS Code integration test (the client is the
   next step).
 - **As built, definitions (step 4).** In `pkg/resolve`: every kind of
   reference on a whole lib, on a checkout with a profile (declarations
