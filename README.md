@@ -180,9 +180,15 @@ has the last word.
 `dgdtools config path/to/file.c` shows the result for a file and where
 each value comes from. It is also how a configuration is checked:
 `dgdtools config` in a project verifies its `dgdtools.yml` and every
-nested one below, and exits 2 with the file, the line and what is wrong
-when a key, a value, a rule name or a rule's option is not one the tools
-know.
+settings scope below, and exits 2 with the file, the line and what is
+wrong when a key, a value, a rule name or a rule's option is not one the
+tools know.
+
+A `dgdtools.yml` below a project that does not say `root: false` is a
+project of its own (a wizard's folder with `profile: NAME` in it, inside
+the whole lib). Its files are formatted by its own settings, and linted
+by naming that folder; a lint of the project above passes over them and
+says so.
 
 Without any project config, a `dgdtools.yml` in the user configuration
 directory (`~/.config/dgdtools/dgdtools.yml`) is used: the place for
@@ -319,7 +325,8 @@ The linter has to know where in the lib your folder belongs. The profile
 lists the places the lib keeps such folders (here `usr/*`), so a folder
 downloaded with its place in the path (`…/usr/ann/`) is recognized;
 anywhere else, add `lib_path: /usr/ann`. `dgdtools lint --profile mymud
-file.c` works without any config file, and so does `profile: mymud` in
+file.c` works without any config file (with `--lib-path /usr/ann`, run
+from the folder: the lib path is the working directory's), and so does `profile: mymud` in
 `~/.config/dgdtools/dgdtools.yml`, the user-level configuration that
 applies wherever no project has its own.
 
@@ -365,10 +372,13 @@ dgdtools explain RULE                  # what a rule means and why it fires
 dgdtools config [path]                 # the resolved project, and the rules that run on a file
 ```
 
+A directory stands for the `.c` files under it, each with the headers
+it includes; a header named by itself is linted on its own.
+
 Exit codes: `0` no findings at or above `fail_on`, `1` findings, `2`
 usage or configuration error, or an internal error of the linter on
-some file (which is reported, with the file). A file that cannot be read
-is a warning: the rest of the run stands.
+some file (which is reported, with the file), `130` interrupted. A file
+that cannot be read is a warning: the rest of the run stands.
 
 The linter parses every file with its own error-tolerant parser for the DGD
 1.7 grammar, on source as written: macros are classified from their
@@ -533,7 +543,8 @@ of its source line, tags (`unnecessary`, `deprecated`), related
 locations, and any fix as text edits with its applicability (`safe` or
 `unsafe`); `rules` describes the rules that occur, with the address of
 their documentation; `errors` lists the files that were not linted
-(`unreadable` or `internal`); the summary includes the "not verified"
+(`unreadable`, `internal`, or `stale` for one that changed while it was
+read); the summary includes the "not verified"
 counters. `--output-format sarif` is SARIF 2.1.0 for code-scanning
 upload: locations are URIs (relative to `%SRCROOT%`, the working
 directory, or `file:` for files outside it), rules carry `helpUri`,
@@ -542,13 +553,14 @@ Actions annotations. Columns count bytes. The linter never modifies
 files.
 
 Everything is a Go library, and `cmd/dgdtools` is a thin front end over
-it. `pkg/lint`: a `Linter` takes a project and a file system (`pkg/vfs`,
-with an overlay for unsaved editor buffers), can be told which files
-changed, honours `context` cancellation, and returns diagnostics as
-data. `pkg/format`: `Format` and `Lines` (a range of lines) take a lexed
-file and return text, `Edits` the minimal replacements an editor
-applies. `pkg/config`: `Project.Settings(path)` is the per-file
-settings resolution described above. See `docs/design/`:
+it. `pkg/lint`: a `Linter` takes a project and a file system (`pkg/vfs`),
+can be told which files changed, honours `context` cancellation, and
+returns diagnostics as data. `pkg/format`: `Source` formats a file's
+text, or some of its lines, by that file's settings, and `Edits` gives
+the minimal replacements an editor applies. `pkg/config`:
+`Project.Settings(path)` is the per-file settings resolution described
+above. `pkg/session`: what an editor server holds (unsaved buffers,
+projects, a linter each), with every change applied in one step. See `docs/design/`:
 [architecture.md](docs/design/architecture.md) (the library, the linter
 and the project model), [formatter.md](docs/design/formatter.md) (the
 formatter), [config.md](docs/design/config.md) (configuration and the

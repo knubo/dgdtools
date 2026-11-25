@@ -5,16 +5,65 @@ editor-side grammars of section 10.1, under `editors/`. Nothing of the
 server is implemented; the command reserves the names `lsp` and
 `rename`. It builds on the library described in
 [architecture.md](architecture.md) (sections 6 and 10),
-[config.md](config.md) and [formatter.md](formatter.md): `pkg/lint`
-(`Linter.Lint`, `Invalidate`, `Scan`, `Generation`), `pkg/vfs`
-(`Overlay`), `pkg/index` (generations, chains, `#define` environments,
-declarations with types and positions), `pkg/calls`, `pkg/profile`,
-`pkg/format` (`Format`, `Lines`, `Edits`), `pkg/config` (`Workspace`,
-`Discover`, `Project.Settings`).
+[config.md](config.md) and [formatter.md](formatter.md), and on one type
+above all: `session.Session` (`pkg/session`), which holds what a server
+holds (the open documents' texts, the projects, a linter for each) and
+applies every change to all of it in one step. Beside it: `pkg/lint`
+(`Document`, `Options.NoScan`, `Linter.Scan`), `pkg/index` (generations,
+chains, `#define` environments, declarations with types and positions),
+`pkg/calls`, `pkg/profile`, `pkg/format` (`Source`, `Edits`),
+`pkg/config` (`Project.Settings`, `Project.Inputs`), `pkg/diag`
+(`UTF16Col`, `ByteCol`).
 
-The server is a thin layer: transport, document state, scheduling and
+The server is a thin layer: transport, document versions, scheduling and
 position conversion. Analysis stays in the library; any logic the server
 needs that a script or the CLI could also use goes into the library first.
+
+### The session
+
+```go
+s := session.New(vfs.OS{}, config.DiscoverOptions{WorkDir: folder, ProfileDirs: dirs, UserConfig: user})
+
+a := s.Change(path, text)          // didOpen, didChange: the buffer is the file
+a  = s.Change(path, nil)           // didClose: the disk is the file again
+a  = s.DiskChanged(paths...)       // didChangeWatchedFiles: files and directories
+// a.Files: whose diagnostics may differ; a.All: configuration changed, anybody's may
+
+doc, err := s.Lint(ctx, path, lint.Options{NoScan: true})
+if err == nil && s.Current(doc) { /* publish doc.Diagnostics */ }
+
+prj, _ := s.Project(path)          // settings, format.Source(prj, path, text, lines)
+l, _ := s.Linter(path)             // l.Scan(ctx), l.BaselinePath(), l.Rules()
+s.FS()                             // the files as the tools read them
+```
+
+- **One step.** A change sets or drops the buffer, tells the workspace
+  (a `dgdtools.yml`, an `.editorconfig`, a profile, a driver
+  configuration: `config.Workspace.Invalidate` forgets the projects
+  resolved from it, and their linters go with them), tells every linter
+  (a baseline it has read is read again; `Linter.Invalidate` starts the
+  index's next generation), and returns the union of what the linters
+  say is affected. Changes are applied one at a time.
+- **No lint mixes two texts.** A lint reads one generation of the index
+  from start to end, and a unit of the index knows the text it was built
+  from: `Snapshot.Parse` refuses to pair it with another
+  (`lint.Stale`). A lint that a change overtook either fails that way or
+  is not `Current`; the server makes it again in both cases, which it
+  was going to do anyway, since the changed file is in `Affected.Files`.
+- **A document is self-contained.** `lint.Document` has the diagnostics,
+  the tokens, the tree, the `#define` environment (safe to read from any
+  goroutine), the index unit, and the `Snapshot` it was linted against,
+  for the questions hover and definition ask about the lib as the
+  diagnostics saw it. `Document.Errors` names the rules that crashed on
+  the file; everything else in the document stands.
+- **Configuration is not special-cased by the server.** It passes every
+  watched path to `DiskChanged` and acts on `Affected`. A project that
+  changed is resolved again, and indexes its lib again, when one of its
+  documents is next linted (seconds on a big lib, and rare); the other
+  projects keep their linters. `Project.Inputs()` and
+  `Linter.BaselinePath()` are the files to watch that the glob patterns
+  of section 3 may not reach (an `extends:` base, a profile in the user's
+  configuration directory, the driver's configuration).
 
 ## 1. Shape
 
@@ -55,34 +104,36 @@ make every optional field a pointer; we use perhaps 5% of the spec.
 
 **Dispatch:** notifications that change state (`didOpen`, `didChange`,
 `didClose`, `didChangeWatchedFiles`, `didChangeConfiguration`) are handled
-strictly in arrival order on one goroutine. Requests are handled
-concurrently against an immutable snapshot (document version + the
-linter's index generation: every `Lint` reads one `index.Snapshot` from
-start to end, and `Invalidate` never disturbs one in use), each with a
-context cancelled by `$/cancelRequest` or by a newer version of its
-document.
+strictly in arrival order on one goroutine, each as one call on the
+session. Requests are handled concurrently against what a lint returned
+(a `lint.Document`: one document version, one generation of the index,
+which no later change disturbs), each with a context cancelled by
+`$/cancelRequest` or by a newer version of its document.
 
 ## 3. Workspaces, projects and profiles
 
 - `initialize` gives `workspaceFolders` (fallback `rootUri`).
   `workspace/didChangeWorkspaceFolders` is supported.
-- A **project** is what `config.Workspace.Project(path)` returns:
-  config file, lib root or partial-checkout mount, profile. The
-  workspace resolves each root config once; each project owns one
-  `vfs.Overlay` view and one `lint.Linter`.
+- A **project** is what `Session.Project(path)` returns: config file,
+  lib root or partial-checkout mount, profile. The session resolves each
+  root config once, and again when what it was resolved from changes;
+  each project has one `lint.Linter`, made when first needed, and all of
+  them read the one overlay of open buffers.
 - A **document** finds its project from its own path, exactly like the
-  CLI (nearest root config upward; settings scopes are passed over).
-  Two workspace folders under one lib share one project; one folder
-  containing two libs gets two. A file with no project gets the shared
-  one without a config (file-local rules; the user-level configuration
-  when there is one).
+  CLI: the nearest root config upward; settings scopes are passed over.
+  A root config below another project's is a project of its own, for the
+  server as for every command. Two workspace folders under one lib share
+  one project; one folder containing two libs gets two. A file with no
+  project gets the shared one without a config (file-local rules; the
+  user-level configuration when there is one).
 - A document's **settings** are `Project.Settings(path)`: the format
   settings and the lint layers of that file (scopes, `.editorconfig`).
   The server asks the library and adds nothing.
 - **Zero-config wizards:** client settings `dgdtools.profile` and
   `dgdtools.libPath` (read with `workspace/configuration`, per folder) are
   passed as `DiscoverOptions.Profile/LibPath` for folders that have no
-  `dgdtools.yml`. They carry only what a wizard without any file needs;
+  `dgdtools.yml` (the lib path is that of `DiscoverOptions.WorkDir`, the
+  workspace folder). They carry only what a wizard without any file needs;
   nothing in an editor's settings overrides a project. The server also
   passes what the library does not read itself:
   `DiscoverOptions.ProfileDirs` from `profile.UserDirs` (the
@@ -96,11 +147,13 @@ document.
   works for every folder).
 - **Watching:** register `workspace/didChangeWatchedFiles` for
   `**/*.{c,h}`, `**/dgdtools.yml`, `**/.dgdtools.yml`,
-  `**/.editorconfig`, `**/*.profile`, `**/dgdtools-baseline.json`.
-  Source changes go to `Linter.Invalidate`; a change to a settings scope
-  or an `.editorconfig` goes to `Project.ResetSettings` and re-lints the
-  open documents under it; a root config, profile or baseline change
-  rebuilds that project's linter and re-lints its open documents.
+  `**/.editorconfig`, `**/*.profile`, `**/dgdtools-baseline.json`, and
+  for the `Project.Inputs()` and `Linter.BaselinePath()` of the projects
+  in use that lie outside the folders. Every event goes to
+  `Session.DiskChanged`, a deleted or renamed directory as the directory;
+  events for a document that is open change nothing the tools read. The
+  open documents in `Affected.Files` are linted again, all of them when
+  `Affected.All` is set.
 - The baseline applies in the editor as on the command line; a setting
   `dgdtools.showBaselined` shows baselined findings as hints.
 
@@ -111,13 +164,13 @@ document.
 - `didChange`: apply each range edit to the buffer (positions converted
   with the negotiated encoding against the *pre-edit* line table), rebuild
   the line table from the first changed line, then
-  `overlay.Set(path, text)`, `changed := linter.Invalidate(path)`, and
-  schedule diagnostics for the document and for every *open* document in
-  `changed`.
-- `didOpen` sets the overlay even if the text equals the disk file (the
-  editor is now the source of truth); `didClose` deletes the overlay
-  entry, invalidates, and clears the document's diagnostics unless the
-  file is in a project (then they are recomputed from disk once).
+  `affected := session.Change(path, text)`, and schedule diagnostics for
+  the document and for every *open* document in `affected.Files`.
+- `didOpen` is the same call even if the text equals the disk file (the
+  editor is now the source of truth); `didClose` is
+  `session.Change(path, nil)`, and clears the document's diagnostics
+  unless the file is in a project (then they are recomputed from disk
+  once).
 - `didSave` needs nothing (the watcher covers other processes).
 - A full-document fallback (`TextDocumentSyncKind.Full`) is kept for
   clients that do not do incremental sync; the fuzz test (section 13)
@@ -133,11 +186,13 @@ document.
   and during the whole-lib scan, and a cancelled reverse lookup answers
   "unknown", so a cancelled run can never publish a wrong "missing".
 - Results are published only if the document's version still equals the
-  version the lint started with and `Document.Generation` is still
-  `Linter.Generation()`; otherwise the document is linted again. (A lint
-  that was in flight when another file changed describes the lib before
-  that change, and `Invalidate` reports dependents of lints against the
-  current generation only.) Diagnostics carry the document version.
+  version the lint started with and `Session.Current(doc)` holds;
+  otherwise the document is linted again. (A lint that was in flight when
+  another file changed describes the lib before that change, and a change
+  reports the dependents of lints against the current generation only.)
+  A lint that fails as `lint.Stale` was overtaken by a change to its own
+  file and is made again the same way. Diagnostics carry the document
+  version.
 - Dependents (open files that include or inherit the changed file) are
   queued behind the edited document at lower priority, with a longer
   debounce (1 s), so typing in a header does not re-lint twenty rooms per
@@ -149,8 +204,9 @@ document.
   VikingMUD); until it completes those lookups are unknown, and the
   documents that needed it are linted again when it finishes. The scan
   survives edits: after the first one, `Scan` reads only the files that
-  changed, so the server simply calls it again after each `Invalidate`
-  that leaves a document with `NeedsScan`. In a partial checkout the
+  changed, so the server simply calls it again after each change that
+  leaves a document with `NeedsScan`; a scan that a change overtakes
+  stops and gives the scan slot to the next. In a partial checkout the
   scan covers only the checkout and takes milliseconds.
 
 ## 6. Positions and encodings
@@ -161,8 +217,8 @@ Two separate questions.
 lets the client offer `general.positionEncodings`; if it offers `utf-8`
 the server selects it and a column is simply a byte offset in the line,
 which is what the lexer counts: no conversion at all. Otherwise UTF-16
-via `diag.UTF16Col` and its inverse (to be added: `diag.ByteCol(line,
-utf16)`), computed on the single line involved. Both directions live in
+via `diag.UTF16Col` and its inverse `diag.ByteCol(line, utf16)`,
+computed on the single line involved. Both directions live in
 one small type, `lsp.PositionMapper`, used for every incoming position
 and every outgoing range.
 
@@ -197,8 +253,10 @@ document text as a JSON string, i.e. as Unicode.
 
 - Every handler runs under `recover`: a panic becomes an `InternalError`
   response (or is swallowed for a notification), is logged with a stack,
-  and the server keeps running. The index already isolates a panic while
-  analyzing one file.
+  and the server keeps running. The library already isolates a panic
+  while analyzing one file (`lint.Internal`) and a panic in one rule
+  (`Document.Errors`: the document keeps its tree and the other rules'
+  findings); both are logged, neither is shown as a diagnostic.
 - Requests have a deadline (5 s for interactive ones); on expiry they
   return an empty result, not an error dialog.
 - Memory: the index keeps facts, not trees; trees exist for the duration
@@ -218,17 +276,17 @@ knows the code base.
 
 | # | Feature | Maps onto | Needs first | Days |
 |---|---|---|---|---|
-| 1 | Skeleton: initialize/shutdown, projects, incremental sync, `publishDiagnostics` with code, `codeDescription` (`Rule.URL`), related information, tags (`Diagnostic.Tags`: `unnecessary` for unreachable-code and unused suppressions) | `Linter.Lint`, `Invalidate`, `Scan`, `diag` | `PositionMapper`; `diag.ByteCol` | 5 |
+| 1 | Skeleton: initialize/shutdown, projects, incremental sync, `publishDiagnostics` with code, `codeDescription` (`Rule.URL`), related information, tags (`Diagnostic.Tags`: `unnecessary` for unreachable-code and unused suppressions) | `Session.Change`, `DiskChanged`, `Lint`, `Current`; `Linter.Scan`; `diag` | `PositionMapper` | 5 |
 | 2 | `codeAction`: quick fixes from `Diagnostic.Fixes` (a `safe` fix is `isPreferred` and joins "fix all"; an `unsafe` one is offered alone); "suppress with `dgdtools-ignore lint/RULE`" and "…for this file" (a `dgdtools-ignore-start lint/RULE` at its top) generated per diagnostic; "explain rule" as a command | fixes as text edits with their applicability (already data) | a helper that renders a suppression comment in the file's comment style and indentation | 2 |
-| 3 | `formatting` and `rangeFormatting`; format-on-save of modified lines is the client's use of the latter | `format.Format(file, opts)` and `format.Lines(file, opts, ranges)` with `opts = format.OptionsFor(cfg, settings.Format)`: functions of the buffer and the file's settings, with the token-equality gate (a failed gate returns no edits and a log line); `format.Edits(file, out)` gives one text edit per changed gap, so cursors and folds survive | LSP range to line range (a range that ends at column 0 does not include that line) | 2 |
-| 4 | `definition`: `#include` targets, `inherit` paths, function calls (direct, `::`, `label::`, `->` with a known receiver, string callbacks in registrars), macros | `ResolveInclude`, `ObjectPath`, `Chain`, `LookupCallable`, the file's `pp.Env` (`pp.Macro.Path/Off`) | `syntax.PathAt(file, offset)` (innermost node chain at a position); a stub target is already located by its virtual document URI (`dgdtools-profile://NAME/std/room.c`, see `profile.Location`), which the server answers with the stub's text | 4 |
+| 3 | `formatting` and `rangeFormatting`; format-on-save of modified lines is the client's use of the latter | `format.Source(prj, path, text, lines)`: a function of the buffer and the file's settings, behind the gate (the same tokens, the same comments, a fixed point; a refusal returns no edits and a log line); `format.Edits(file, out)` gives one text edit per changed gap, so cursors and folds survive | LSP range to line range (a range that ends at column 0 does not include that line) | 2 |
+| 4 | `definition`: `#include` targets, `inherit` paths, function calls (direct, `::`, `label::`, `->` with a known receiver, string callbacks in registrars), macros | `Document.Snapshot` and a `Query` on it: `ResolveInclude`, `ObjectPath`, `Chain`, `LookupCallable`; the file's `pp.Env` (`pp.Macro.Path/Off`) | `syntax.PathAt(file, offset)` (innermost node chain at a position); a stub target is already located by its virtual document URI (`dgdtools-profile://NAME/std/room.c`, see `profile.Location`), which the server answers with the stub's text | 4 |
 | 5 | `hover` and `signatureHelp` | `ChainFunc.Decl/Type/DefinedIn`, `index.Params`, macro body and class, variable types | active-parameter computation from the argument list around the cursor; kfun table for built-ins (new data file) | 3 |
 | 6 | `documentSymbol`, `workspace/symbol` | `syntax.File.Decls`; units' symbol tables (whole-lib scan, cached) | fuzzy matcher | 2 |
 | 7 | `completion`: functions callable here (own chain, auto object, kfuns), `->` members for a known receiver, macros in view, `#include` and inherit paths, locals | chain + view + profile | local scopes (block-level symbol tables in `pkg/syntax`); tolerant parse at the cursor (the parser already recovers; completion context comes from tokens left of the cursor) | 5 |
 | 8 | `references` (and `documentHighlight`) | new: a reverse index of call sites and macro uses per name, built with the whole-lib scan and invalidated per file | reverse index in `pkg/index`; in a partial checkout results are labelled as "in this checkout" | 4 |
 | 9 | `semanticTokens` (section 10.2): what a grammar cannot know. Ships in two parts: 9a macros by class, declarations, inherit labels, calls resolved through the chain (no scopes needed); 9b parameters/locals and unresolved names | tree + view + chain | 9b needs scopes (from 7) | 9a: 2, 9b: 2 |
 | 10 | `prepareRename` and `rename` for the symbols one file decides (section 9): locals and parameters, private functions and variables, macros a `.c` file defines for itself | `pkg/rename` (new) over the tree, the scopes and the file's `pp.Env` | scopes (from 7); `syntax.PathAt` (from 4) | 3 |
-| 11 | Rename across files, in the editor and as `dgdtools rename SYMBOL NEW` (section 9): functions, object globals, header macros; every occurrence classified certain, possible or excluded; edits previewed with change annotations, or written as a patch | `pkg/rename` over the reverse index, `Snapshot.UsersOf`, `Chain`, `LookupCallable`, `calls.Extract` | the reverse index (from 8); the whole-lib scan; step 10 | 9 |
+| 11 | Rename across files, in the editor and as `dgdtools rename SYMBOL NEW` (section 9): functions, object globals, header macros; every occurrence classified certain, possible or excluded; edits previewed with change annotations, or written as a patch | `pkg/rename` over the reverse index, who inherits a file (a `Query` on the snapshot), `Chain`, `LookupCallable`, `calls.Extract` | the reverse index (from 8); the whole-lib scan; step 10 | 9 |
 | 12 | Refactorings as code actions (section 9.6): add the missing prototype, fix an `#include` path; renaming a file updates the `inherit` and `#include` lines that name it (`workspace/willRenameFiles`) | `ResolveInclude`, `ObjectPath`, the include and inherit edges `Invalidate` already follows | the reverse index (from 8) for the file rename | 3 |
 | later | inlay hints for parameter names, pull diagnostics (`textDocument/diagnostic`, `workspace/diagnostic`), call hierarchy over inherit chains | | | |
 
@@ -240,10 +298,10 @@ Steps 10 to 12 (15 days) are the editing tools, and stand on the scopes
 of step 7 and the reverse index of step 8.
 
 Library additions, all testable without a server: `syntax.PathAt`,
-`diag.ByteCol`, block scopes, kfun table (name, parameters, return type),
-reverse reference index, `pkg/rename`. `Linter.Lint(ctx, path, opts)`
-already returns the parsed tree, tokens, `#define` environment and index
-unit with the diagnostics.
+block scopes, kfun table (name, parameters, return type), reverse
+reference index, `pkg/rename`. A lint already returns the parsed tree,
+tokens, `#define` environment, index unit and snapshot with the
+diagnostics.
 
 ## 9. Rename and refactorings
 
@@ -705,7 +763,7 @@ servers under one id is worse than a new word.
    independent of everything else): the shared word list, the TextMate
    grammar and the Vim runtime files, with their tests. **Done**
    (10.1).
-2. Library prerequisites for step 1 (`diag.ByteCol`, `PositionMapper`),
+2. The prerequisite of step 1 that is left (`PositionMapper`),
    `pkg/lsp` skeleton, transcript test harness. Ship steps 1 to 3 behind
    `dgdtools lsp` and test with Neovim (no extension needed) (9 days).
 3. VS Code extension (client, settings, grammar packaging) against steps
@@ -732,6 +790,14 @@ grammars alone can ship in the first.
 
 ## 13. Testing
 
+- **Under the server.** What the server relies on is tested without it,
+  in `pkg/session`: a buffer change is one step while lints run beside
+  it; a configuration, profile, baseline or `.editorconfig` change
+  reaches the files it is for and no other project's linter; a deleted
+  directory; and `TestDifferential`, which after each of a random
+  sequence of edits, creations and deletions holds what a front end
+  would be showing to what a session made afresh finds (30 sequences of
+  25 steps by default, `-seeds N` for more).
 - **Golden transcripts.** A test is a `.txtar`: the lib's files, then a
   script of client messages (`open a.c`, `change a.c 3:5-3:9 "x"`,
   `request hover a.c 10:4`, `wait diagnostics a.c`) and the expected

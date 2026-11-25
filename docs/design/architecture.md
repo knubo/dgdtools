@@ -68,6 +68,8 @@ pkg/lint     the embeddable linter: rules with typed options, the layers
              of rule settings, suppressions, baseline, diagnostics
 pkg/profilebuild  a profile from a whole lib: which files are shared, and
              each one's stub
+pkg/session  what a long-lived front end holds: the open documents'
+             texts, the projects, a linter each; one change, one step
 pkg/report   output writers: human, JSON, SARIF 2.1.0, GitHub annotations
 cmd/dgdtools the one binary: a thin front end per subcommand (lint,
              format, rules, explain, config, profile) over the packages
@@ -490,11 +492,23 @@ reads the buffer wherever it would have read the file, the lib around it
 is the one on disk, and the output names the path. Nameless, it is no
 object of any lib: the file-local rules run and a note says so.
 
+**What a directory stands for.** `lint DIR` lints the `.c` files under
+it: the objects, each with the headers it includes read as part of it,
+which is the only way the driver reads a header. A header named by
+itself is linted on its own (nothing is concluded there from what it
+does not see defined). `format DIR` takes `.c` and `.h` alike: layout is
+a property of a file's text. A directory below with a root config of its
+own is another project ([config.md](config.md) section 3): `lint` passes
+over its files and says so in a note (`nested-project`), `format`
+formats them by that project's settings.
+
 **Exit codes:** `0` no findings at or above `fail_on`; `1` findings;
 `2` usage or configuration error (including an unknown rule name and a
-path that does not exist) or an internal error on some file. Syntax
-errors in linted files are findings, not tool errors (ruff/ESLint:
-same); a file that cannot be read is a warning.
+path that does not exist) or an internal error on some file or in some
+rule; `130` interrupted (Ctrl-C stops the run in an orderly way and
+says "interrupted"). Syntax errors in linted files are findings, not
+tool errors (ruff/ESLint: same); a file that cannot be read is a
+warning.
 
 **Output:** human (`path:line:col: severity: message [CODE name]`, the
 format editors and `grep` already parse, related locations indented
@@ -546,7 +560,6 @@ withheld findings were unknown, so a drop in coverage is observable.
 Everything is a library first; the command is one front end.
 
 ```go
-fs  := vfs.NewOverlay(vfs.OS{})            // editor buffers shadow disk
 prj, _ := config.Discover(fs, paths, config.DiscoverOptions{WorkDir: cwd, ProfileDirs: dirs, UserConfig: user})
 l, _ := lint.New(prj, fs)                  // no globals; safe to keep alive
 set, _ := prj.Settings(path)               // one file's format settings and lint scopes
@@ -556,10 +569,22 @@ for _, d := range res.Diagnostics { ... }          // ranges, code, related, fix
 
 doc, _ := l.Lint(ctx, path, lint.Options{})        // one document:
 doc.Diagnostics; doc.Tree; doc.File; doc.Env       // findings + what they came from
+doc.Snapshot                                       // the lib as they saw it
 
-fs.Set(path, unsavedBytes)                 // editor change
-affected := l.Invalidate(path)             // files whose findings may differ
-doc, _ = l.Lint(ctx, path, lint.Options{})
+out, _ := format.Source(prj, path, text, nil)      // one file's text, formatted
+```
+
+That is a command: one project, one run. A front end that lives on (an
+editor server) holds a `session.Session` instead, which owns the overlay
+of unsaved buffers, a `config.Workspace` and a linter per project, and
+takes every change as one call:
+
+```go
+s := session.New(vfs.OS{}, config.DiscoverOptions{WorkDir: folder, ...})
+affected := s.Change(path, unsavedBytes)   // buffer set (nil: dropped)
+affected  = s.DiskChanged(paths...)        // files, directories, configuration
+doc, err := s.Lint(ctx, path, lint.Options{NoScan: true})
+s.Current(doc)                             // still what linting gives?
 ```
 
 Properties the core guarantees (each has a test in `pkg/lint` or
@@ -587,6 +612,30 @@ Properties the core guarantees (each has a test in `pkg/lint` or
   (`Result.Generation`, `Document.Generation`); one that is no longer
   `Linter.Generation()` describes the lib before a change and is
   computed again.
+- **A change is one step, and no lint mixes two texts.**
+  `Session.Change` and `DiskChanged` apply a change to the buffers, to
+  the projects resolved from a configuration file
+  (`Workspace.Invalidate`; `Project.Inputs` lists what a project was
+  resolved from) and to every linter's index, under one lock, and return
+  the files whose diagnostics can differ (`Affected.Files`; `All` when
+  configuration changed and anybody's can). A snapshot does not pin the
+  bytes of files, which are read through the file system on first need;
+  what it pins is what it concluded. Each unit therefore knows the text
+  it was built from, and `Snapshot.Parse` refuses to pair it with a tree
+  of another text (`index.ErrChanged`, `lint.Stale`): a lint a change
+  overtook fails that way or is not of the current generation
+  (`Session.Current`), and is made again.
+- **Changes the index takes.** `Invalidate` takes files and directories
+  (a deleted, created or renamed directory stands for the files under
+  it, known and new). Whether the lib is complete (the include dirs, the
+  force-included header, the auto objects exist) is a fact of the
+  generation, looked at again when one of those places changes; when the
+  answer flips, every unit is dropped, since each concluded something
+  from it. A path that is no place in the lib and that nothing was read
+  from starts no generation. A change of configuration is not
+  invalidated but rebuilt: the project is resolved again and gets a new
+  linter and index (as ruff's and gopls's servers do; the lib is indexed
+  again in seconds).
 - **Lazy index.** Units are lexed/parsed/indexed on first demand and
   memoized as *facts only* (symbols with their positions, inherits,
   dependencies), not trees, so a whole lib stays small in memory. Linting
@@ -618,9 +667,11 @@ Properties the core guarantees (each has a test in `pkg/lint` or
   unknown and `NeedsScan` is set); a server runs `Linter.Scan` in the
   background and lints again. `Run` uses the same mechanism to parse each
   file of a whole lib once.
-- **`context.Context`** is checked between files and during the whole-lib
-  scan; a cancelled or superseded reverse lookup answers "unknown", never
-  "missing".
+- **`context.Context`** is checked between files, between the rules of
+  a file, at each lookup of a call target and during the whole-lib scan;
+  a cancelled or superseded lookup answers "unknown", never "missing". A
+  scan whose generation has been replaced stops, and frees the scan slot
+  for the next.
 - **Diagnostics** carry byte offsets (`Start`, `End`), 1-based line/column
   for both ends, a stable `Code` and `Rule` name, a `Fingerprint` of the
   source line (what baselines match on), `Related` locations (the
@@ -679,10 +730,14 @@ Properties the core guarantees (each has a test in `pkg/lint` or
   refused; the rest of the run stands, the front end warns. `internal`:
   the tools crashed on it, in the analysis (`index.InternalError`,
   recorded per generation, also for a file read on another's behalf) or
-  in a rule (the message names it); the run goes on, what depends on
-  that file is unknown, and `dgdtools lint` exits 2 whatever else it
-  found, because a result with a hole in it must not pass for a clean
-  one. `dgdtools profile build` refuses to write a profile then.
+  in a rule (the message names it; that costs the file the rule's
+  findings and nothing else: the other rules' findings and the
+  `Document` with its tree stand, the error is in `Document.Errors`).
+  The run goes on, what depends on a file whose analysis crashed is
+  unknown, and `dgdtools lint` exits 2 whatever else it found, because a
+  result with a hole in it must not pass for a clean one. `dgdtools
+  profile build` refuses to write a profile then. `stale`: the file's
+  text changed under the lint (above).
 
 Measured on the 108,116-file lib (`TestCorpusEdit`, 689 single-file
 edits after a whole-lib run): `Invalidate` 1.7 ms median (3.2 ms at the
@@ -693,19 +748,18 @@ file read per edit, and findings identical to the whole-lib run's.
 ### 6.1 `dgdtools lsp`
 
 Planned in [lsp.md](lsp.md): a thin layer, the reserved `dgdtools lsp`
-subcommand, holding one `vfs.Overlay` and, per project a
-`config.Workspace` discovers, one `lint.Linter`. What it maps onto:
+subcommand, holding one `session.Session`. What it maps onto:
 
 | LSP feature | Maps onto |
 |---|---|
-| `textDocument/didOpen`, `didChange`, `didClose` | `overlay.Set/Delete` + `Linter.Invalidate(path)` |
-| `textDocument/publishDiagnostics` | `Linter.Lint` for the changed document, debounced, with the previous lint cancelled through its context. `Invalidate` returns the dependents; those that are open are linted again. `Diagnostic.code` = rule code, `codeDescription` = `Rule.URL`, `relatedInformation` = `Related`, `tags` = `Tags`, positions via `diag.UTF16Col`. |
-| `workspace/didChangeWatchedFiles` | `Invalidate` for disk changes; a config change rebuilds the `Linter`. |
+| `textDocument/didOpen`, `didChange`, `didClose` | `Session.Change(path, text)` (`nil` on close) |
+| `textDocument/publishDiagnostics` | `Session.Lint` for the changed document, debounced, with the previous lint cancelled through its context, published when `Session.Current(doc)`. A change returns the dependents; those that are open are linted again. `Diagnostic.code` = rule code, `codeDescription` = `Rule.URL`, `relatedInformation` = `Related` (a range), `tags` = `Tags`, positions via `diag.UTF16Col` and `diag.ByteCol`. |
+| `workspace/didChangeWatchedFiles` | `Session.DiskChanged(paths...)`: sources, directories, and every kind of configuration file alike. |
 | `textDocument/codeAction` | `Fixes` on the diagnostics in range (quick-fix edits), plus generated "suppress with `dgdtools-ignore lint/RULE`" actions. |
-| `textDocument/definition` | the index: resolve the identifier under the cursor through `Snapshot.Chain` (functions and variables; `::` and `label::` calls), `->` calls with a known receiver through `LookupCallable`, `inherit`/`#include` paths through `ObjectPath`/`ResolveInclude`, macros through the file's `pp.Env`. `ChainFunc`, `ChainVar` and `pp.Macro` carry the defining file and position; a definition in a profile stub is at `dgdtools-profile://NAME/std/room.c`. |
+| `textDocument/definition` | the document's snapshot (`Document.Snapshot`): resolve the identifier under the cursor through `Snapshot.Chain` (functions and variables; `::` and `label::` calls), `->` calls with a known receiver through `LookupCallable`, `inherit`/`#include` paths through `ObjectPath`/`ResolveInclude`, macros through the file's `pp.Env`. `ChainFunc`, `ChainVar` and `pp.Macro` carry the defining file and position; a definition in a profile stub is at `dgdtools-profile://NAME/std/room.c`. |
 | `textDocument/hover` | the same lookups: specifiers and argument range of a function, the object that provides it, a macro's body and class. |
 | `textDocument/documentSymbol`, `workspace/symbol` | `syntax.File.Decls`; the units' symbol tables. |
-| `textDocument/formatting`, `rangeFormatting` | `format.Format` and `format.Lines`, functions of the buffer and the file's settings; `format.Edits` for the reply. |
+| `textDocument/formatting`, `rangeFormatting` | `format.Source(prj, path, text, lines)`, a function of the buffer and the file's settings; `format.Edits` for the reply. |
 | `textDocument/rename` | `pkg/rename`, to be written: one engine for the editor and for `dgdtools rename` ([lsp.md](lsp.md) section 9). |
 
 What the server adds itself: JSON-RPC transport, position conversion,
@@ -756,7 +810,9 @@ is built on:
 The formatter is a trivia-only rewriter with a gate: it writes every
 significant token's bytes unchanged, synthesizes the whitespace between
 them, and returns a result only if the output re-lexes to the same token
-stream (`pkg/tokcmp`) and formatting it again changes nothing. That
+stream (`pkg/tokcmp`), has the same comments in the same order (a block
+comment's further lines may be indented differently, nothing else), and
+formatting it again changes nothing. That
 design is right for a formatter that must also work on files that do not
 parse. What it lays tokens out *by* is the syntax tree.
 
@@ -774,8 +830,11 @@ function's header ends.
 
 **Printer.** One pass over the token stream writes each token with the
 separator and indentation the plan gives. Inside a statement the printer
-tracks only the brackets open in it (parentheses, `({`, `([`), for the
-indentation of the lines that continue it.
+tracks only the brackets open in it. A literal (`({ })`, `([ ])`) indents
+the lines inside it one level, so a literal inside a literal is one level
+further in and closes where it began; a parenthesis or an index bracket
+does not nest that way: a line inside one continues its statement, one
+level in, however many are open.
 
 **Every branch.** A formatter lays out all the text of a file, not one
 configuration of it. The file is parsed as `pp` selects it, then again
@@ -795,8 +854,9 @@ right after a skipped construct parsed, and is laid out by its shape
 (`BadStmt.Resumed`), though the rules never see it.
 
 **One file, one result.** A file is formatted from its own text and its
-options (`format.OptionsFor`: the three settings resolved for that file,
-the project's predefined names and configured macro classes). No other
+options (`format.Source(prj, path, text, lines)`: the three settings
+resolved for that file, the project's dialect, predefined names and
+configured macro classes). No other
 file is read: the parser runs with a partial environment, so macros from
 headers are met with the same tolerance as in a checkout with nothing
 else in it, and the result is the same in an editor buffer, in a
@@ -972,7 +1032,22 @@ constant, a macro that evaluates to one, or `this_object()`.
 - `pkg/lint`: every rule, positive and negative, on in-memory libs; the
   fixture lib; degraded modes (no root, incomplete lib, file outside the
   root); overlay + invalidation; cancellation; baseline; rule table
-  stability.
+  stability; a rule that crashes; a text that changed untold.
+- `pkg/index`: facts, includes, chains, lookups; what each kind of change
+  affects (a file, a directory, the force-included header, the auto
+  object, what makes the lib complete); the scan, cancelled and
+  superseded; generations under concurrent readers.
+- `pkg/session`: a change is one step under concurrent lints;
+  configuration, baseline and `.editorconfig` changes; and
+  `TestDifferential`, which after each step of random sequences of edits,
+  creations and deletions (files, and whole directories) holds what a
+  front end would be showing to what a new session over the same files
+  finds (`-seeds N` for more than the default 30 sequences).
+- Fuzz targets, whose seeds every test run goes through: `FuzzFormat`
+  (a proven result or a refusal to format what does not tokenize, never
+  a failed gate; the edits reproduce the result), `FuzzParse` (no panic,
+  span invariants), `FuzzLint` (no crash in any rule, findings and fixes
+  inside the text). `go test -fuzz NAME ./pkg/...` looks further.
 - `pkg/config` (discovery, settings scopes, `.editorconfig`, the
   user-level fallback, validation), `pkg/editorconfig`, `pkg/pp`,
   `pkg/diag`, `pkg/directive`, `pkg/calls` (the driver's calls, declared

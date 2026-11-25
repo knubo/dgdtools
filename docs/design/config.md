@@ -129,13 +129,23 @@ first. For each key the nearest file that sets it wins:
   directory it is about. Globs in a scope's `overrides` are relative to
   the scope's directory; the root's are relative to the lib root.
 
-A root config found *below* the project that is being run (a wizard's
-own checkout config, with `profile:` in it, sitting in the whole lib)
-contributes its `lint:` and `format:` like a scope and its project keys
-are not used: they describe how to find the lib when that directory is
-all there is, and here the lib is known. Refusing it (Biome) would make
-a whole-lib run fail because of a file one wizard added; ignoring it
-would lint that wizard's files by settings they did not choose.
+A root config found *below* another project's (a wizard's own checkout
+config, with `profile:` in it, sitting in the whole lib) is a project
+boundary, for every command and for an editor alike: the files under it
+belong to that project, whichever way they are come by. A file named by
+itself, a document an editor opens and a file met in a walk all get the
+project of the nearest root config above them. `dgdtools format DIR`
+formats the files of a project below by that project's settings and
+excludes; `dgdtools lint DIR`, whose run has one lib, passes over them
+and says so in a note (`nested-project`), and they are linted by naming
+that directory. The lib itself is not cut up by this: the index reads
+every file under the lib root, so who inherits what is known whichever
+project a file is linted in. (Reading such a file's `lint:` and
+`format:` as if it were a scope, and ignoring the rest, made one file
+mean two things depending on the command line; refusing it, as Biome
+does, would make a whole-lib run fail because of a file one wizard
+added.) `--config FILE` is the way to run one configuration over
+everything below.
 
 A scope that is not valid (a project key in it, a rule that does not
 exist) is an error for the files under it, in `lint`, `format` and
@@ -151,11 +161,9 @@ the project: below the directory of the project's config; or, when the
 config names a lib somewhere else (`root: ../lib`), from the lib root
 down. A file outside both has the project's own settings.
 
-**A directory given to a command is its project's.** `dgdtools format
-dir/` and `dgdtools lint dir/` take the project of `dir`, and every
-file under it is that project's file, formatted and linted by its own
-settings as above. Only the paths named on the command line choose
-projects.
+**A directory given to a command** stands for the files under it that
+its project does not exclude, each formatted and linted by its own
+settings as above; a project below it is treated as just said.
 
 ## 4. `.editorconfig`
 
@@ -202,8 +210,9 @@ Highest first:
 `dgdtools config PATH` prints the project of a path and, for a file, its
 resolved settings and where each came from. It is the tool's "verify":
 it checks the configuration that applies to the path, and every
-`dgdtools.yml` below a directory, and exits 2 with the first thing that
-is wrong.
+settings scope below a directory (a root config down there is named as
+the project of its own it is), and exits 2 with the first thing that is
+wrong.
 
 An editor's own settings carry only what a wizard with no file at all
 needs (a profile name, a lib path); they are the same fallback as the
@@ -225,16 +234,25 @@ prj, err = ws.Project(path)
 s, err := prj.Settings(path)   // *config.Settings
 s.Format                       // every key set
 s.From                         // where each key came from: a file, "command line", "default"
-s.Scopes                       // the nested files that apply, outermost first (lint layers)
+s.Scopes                       // the settings scopes that apply, outermost first (lint layers)
+prj.Nested(path)               // the root config of the project below that path belongs to, or ""
+prj.Inputs()                   // the files the project was resolved from
+
+dropped, changed := ws.Invalidate(path)   // a configuration file changed
 ```
 
 `Discover` and `Workspace` read no environment: the front end passes
 the working directory, the profile directories and the user-level config
 path (`config.UserConfigPath`). A `Project` caches what it reads per
-directory and is safe for concurrent use; `Project.ResetSettings` drops
-the cache when a `dgdtools.yml` or `.editorconfig` changes under a
-long-lived server. `pkg/editorconfig` is the parser (sections, the
-glob forms of the specification, `root = true`, `unset`).
+directory and is safe for concurrent use. Under a long-lived server a
+`Workspace` is told what changed (`session.Session` does it): a
+`dgdtools.yml` drops the project it is the root config of and the
+projects it is, or may now be, a settings scope of, and one of a
+project's other inputs (a file it extends, its profile, the driver's
+configuration) drops that project; each is resolved again, as a new
+value, when next asked for. An `.editorconfig` is read again by every
+project. `pkg/editorconfig` is the parser (sections, the glob forms of
+the specification, `root = true`, `unset`).
 
 `lint.New(prj, fs)` lints every file by `prj.Settings`, and
 `Linter.EffectiveRules(path)` answers which rules run on a file;

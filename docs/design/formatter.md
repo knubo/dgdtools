@@ -38,7 +38,9 @@ Three things recur in the tools people do not fight with:
 
 The formatter writes every significant token's bytes unchanged and
 chooses only the whitespace between them. The result is returned only if
-it re-lexes to the same token stream (`pkg/tokcmp`) and formatting it
+it re-lexes to the same token stream (`pkg/tokcmp`), has the same
+comments in the same order (the further lines of a block comment may
+begin at another column, and nothing else may differ), and formatting it
 again changes nothing.
 
 This is gofmt's contract (a formatter cannot change what the program
@@ -228,8 +230,8 @@ that is already formatted this is the canonical indentation, so range
 formatting and whole-file formatting agree there; all lines as a range
 are exactly `Format`.
 
-**The gate still holds.** The token streams must be equal, and
-formatting the same gaps of the result again must change nothing (a gap
+**The gate still holds.** The token streams and the comments must be
+equal, and formatting the same gaps of the result again must change nothing (a gap
 is identified by the number of tokens before it, which formatting does
 not change). `TestCorpusLines` checks this on every file of the lib.
 
