@@ -1,0 +1,282 @@
+>/*
+#^^ dgdlpcComment
+> * An object the way the formatter leaves one: this file is a fixed
+#^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ dgdlpcComment
+> * point of `dgdtools format`, and what the Vim indent script must
+#^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ dgdlpcComment
+> * reproduce from the same lines with their indentation taken away.
+#^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ dgdlpcComment
+> */
+#^^^ dgdlpcComment
+>#include <std.h>
+#^^^^^^^^^ dgdlpcInclude
+#         ^^^^^^^ dgdlpcInclude dgdlpcIncluded
+>
+>inherit room "/std/room";
+#^^^^^^^ dgdlpcInherit
+#        ^^^^ dgdlpcInheritLabel
+#             ^^^^^^^^^^^ dgdlpcString
+>
+>#define DOOR_KEY "brass key"
+#^^^^^^^^ dgdlpcDefine
+#        ^^^^^^^^ dgdlpcDefine dgdlpcMacro
+#                 ^^^^^^^^^^^ dgdlpcDefine dgdlpcString
+>
+>private static mapping exits;
+#^^^^^^^ dgdlpcSpecifier
+#        ^^^^^^ dgdlpcSpecifier
+#               ^^^^^^^ dgdlpcType
+>private int *counts;
+#^^^^^^^ dgdlpcSpecifier
+#        ^^^ dgdlpcType
+>
+>static void
+#^^^^^^ dgdlpcSpecifier
+#       ^^^^ dgdlpcType
+>create()
+#^^^^^^ dgdlpcFunction
+>{
+>    room::create();
+#    ^^^^ dgdlpcInheritLabel
+#        ^^ dgdlpcOperator
+#          ^^^^^^ dgdlpcFunction
+>    exits = ([
+#            ^^ dgdlpcMapping dgdlpcMappingDelim
+>        "north": "/room/hall",
+#        ^^^^^^^ dgdlpcMapping dgdlpcString
+#               ^^ dgdlpcMapping
+#                 ^^^^^^^^^^^^ dgdlpcMapping dgdlpcString
+#                             ^ dgdlpcMapping
+>        "south": "/room/yard",
+#        ^^^^^^^ dgdlpcMapping dgdlpcString
+#               ^^ dgdlpcMapping
+#                 ^^^^^^^^^^^^ dgdlpcMapping dgdlpcString
+#                             ^ dgdlpcMapping
+>        "up": ([
+#        ^^^^ dgdlpcMapping dgdlpcString
+#            ^^ dgdlpcMapping
+#              ^^ dgdlpcMapping dgdlpcMapping dgdlpcMappingDelim
+>            "dest": "/room/attic",
+#            ^^^^^^ dgdlpcMapping dgdlpcMapping dgdlpcString
+#                  ^^ dgdlpcMapping dgdlpcMapping
+#                    ^^^^^^^^^^^^^ dgdlpcMapping dgdlpcMapping dgdlpcString
+#                                 ^ dgdlpcMapping dgdlpcMapping
+>            "key": DOOR_KEY,
+#            ^^^^^ dgdlpcMapping dgdlpcMapping dgdlpcString
+#                 ^^ dgdlpcMapping dgdlpcMapping
+#                   ^^^^^^^^ dgdlpcMapping dgdlpcMapping dgdlpcMacro
+#                           ^ dgdlpcMapping dgdlpcMapping
+>        ]),
+#        ^^ dgdlpcMapping dgdlpcMappingDelim
+#          ^ dgdlpcMapping
+>    ]);
+#    ^^ dgdlpcMappingDelim
+>    counts = ({
+#             ^^ dgdlpcArray dgdlpcArrayDelim
+>        1,
+#        ^ dgdlpcArray dgdlpcNumber
+#         ^ dgdlpcArray
+>        2,
+#        ^ dgdlpcArray dgdlpcNumber
+#         ^ dgdlpcArray
+>        3,
+#        ^ dgdlpcArray dgdlpcNumber
+#         ^ dgdlpcArray
+>    });
+#    ^^ dgdlpcArrayDelim
+>    set_dirs(({
+#    ^^^^^^^^ dgdlpcFunction
+#             ^^ dgdlpcArray dgdlpcArrayDelim
+>        "north",
+#        ^^^^^^^ dgdlpcArray dgdlpcString
+#               ^ dgdlpcArray
+>        "south",
+#        ^^^^^^^ dgdlpcArray dgdlpcString
+#               ^ dgdlpcArray
+>    }), ([
+#    ^^ dgdlpcArrayDelim
+#        ^^ dgdlpcMapping dgdlpcMappingDelim
+>        "north": 1,
+#        ^^^^^^^ dgdlpcMapping dgdlpcString
+#               ^^ dgdlpcMapping
+#                 ^ dgdlpcMapping dgdlpcNumber
+#                  ^ dgdlpcMapping
+>    ]));
+#    ^^ dgdlpcMappingDelim
+>    set_items(({
+#    ^^^^^^^^^ dgdlpcFunction
+#              ^^ dgdlpcArray dgdlpcArrayDelim
+>        ([
+#        ^^ dgdlpcArray dgdlpcMapping dgdlpcMappingDelim
+>            "name": "door",
+#            ^^^^^^ dgdlpcArray dgdlpcMapping dgdlpcString
+#                  ^^ dgdlpcArray dgdlpcMapping
+#                    ^^^^^^ dgdlpcArray dgdlpcMapping dgdlpcString
+#                          ^ dgdlpcArray dgdlpcMapping
+>            "ids": ({
+#            ^^^^^ dgdlpcArray dgdlpcMapping dgdlpcString
+#                 ^^ dgdlpcArray dgdlpcMapping
+#                   ^^ dgdlpcArray dgdlpcMapping dgdlpcArray dgdlpcArrayDelim
+>                "door",
+#                ^^^^^^ dgdlpcArray dgdlpcMapping dgdlpcArray dgdlpcString
+#                      ^ dgdlpcArray dgdlpcMapping dgdlpcArray
+>                "brass door",
+#                ^^^^^^^^^^^^ dgdlpcArray dgdlpcMapping dgdlpcArray dgdlpcString
+#                            ^ dgdlpcArray dgdlpcMapping dgdlpcArray
+>            }),
+#            ^^ dgdlpcArray dgdlpcMapping dgdlpcArrayDelim
+#              ^ dgdlpcArray dgdlpcMapping
+>        ]),
+#        ^^ dgdlpcArray dgdlpcMappingDelim
+#          ^ dgdlpcArray
+>    }));
+#    ^^ dgdlpcArrayDelim
+>    set_smells(({ "dust", "old wood",
+#    ^^^^^^^^^^ dgdlpcFunction
+#               ^^ dgdlpcArray dgdlpcArrayDelim
+#                  ^^^^^^ dgdlpcArray dgdlpcString
+#                        ^^ dgdlpcArray
+#                          ^^^^^^^^^^ dgdlpcArray dgdlpcString
+#                                    ^ dgdlpcArray
+>        "brass polish" }));
+#        ^^^^^^^^^^^^^^ dgdlpcArray dgdlpcString
+#                       ^^ dgdlpcArrayDelim
+>    set_short("a sample room");
+#    ^^^^^^^^^ dgdlpcFunction
+#              ^^^^^^^^^^^^^^^ dgdlpcString
+>    set_long("A room with two exits, " +
+#    ^^^^^^^^ dgdlpcFunction
+#             ^^^^^^^^^^^^^^^^^^^^^^^^^ dgdlpcString
+>        "described over two lines.\n");
+#        ^^^^^^^^^^^^^^^^^^^^^^^^^^ dgdlpcString
+#                                  ^^ dgdlpcString dgdlpcEscape
+#                                    ^ dgdlpcString
+>}
+>
+>/*
+#^^ dgdlpcComment
+> * A comment of several lines
+#^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ dgdlpcComment
+> * before a function.
+#^^^^^^^^^^^^^^^^^^^^^ dgdlpcComment
+> */
+#^^^ dgdlpcComment
+>int
+#^^^ dgdlpcType
+>query_count(int which, varargs int fallback)
+#^^^^^^^^^^^ dgdlpcFunction
+#            ^^^ dgdlpcType
+#                       ^^^^^^^ dgdlpcSpecifier
+#                               ^^^ dgdlpcType
+>{
+>    int i, total;
+#    ^^^ dgdlpcType
+>
+>    if (which < 0 || which >= sizeof(counts)) {
+#    ^^ dgdlpcConditional
+#                ^ dgdlpcNumber
+#                              ^^^^^^ dgdlpcFunction
+>        return fallback;
+#        ^^^^^^ dgdlpcStatement
+>    }
+>    for (i = 0; i < which; i++) {
+#    ^^^ dgdlpcRepeat
+#             ^ dgdlpcNumber
+>        total += counts[i];
+#                       ^^^ dgdlpcSubscript
+>    }
+>    if (total > 10)
+#    ^^ dgdlpcConditional
+#                ^^ dgdlpcNumber
+>        total = 10;
+#                ^^ dgdlpcNumber
+>    else if (total < 0 &&
+#    ^^^^ dgdlpcConditional
+#         ^^ dgdlpcConditional
+#                     ^ dgdlpcNumber
+>        which > 1) {
+#                ^ dgdlpcNumber
+>        return 0;
+#        ^^^^^^ dgdlpcStatement
+#               ^ dgdlpcNumber
+>    } else
+#      ^^^^ dgdlpcConditional
+>        total++;
+>    while (total > 5) {
+#    ^^^^^ dgdlpcRepeat
+#                   ^ dgdlpcNumber
+>        total--;
+>    }
+>    do {
+#    ^^ dgdlpcRepeat
+>        total++;
+>    } while (total < 3);
+#      ^^^^^ dgdlpcRepeat
+#                     ^ dgdlpcNumber
+>    switch (which) {
+#    ^^^^^^ dgdlpcConditional
+>    case 0:
+#    ^^^^ dgdlpcLabel
+#         ^ dgdlpcNumber
+>        total = 0;
+#                ^ dgdlpcNumber
+>        break;
+#        ^^^^^ dgdlpcStatement
+>    case 1..2:
+#    ^^^^ dgdlpcLabel
+#         ^ dgdlpcNumber
+#          ^^ dgdlpcOperator
+#            ^ dgdlpcNumber
+>        total = call_other(this_object(), "query_bonus",
+#                ^^^^^^^^^^ dgdlpcFunction
+#                           ^^^^^^^^^^^ dgdlpcFunction
+#                                          ^^^^^^^^^^^^^ dgdlpcString
+>            which, total);
+>        break;
+#        ^^^^^ dgdlpcStatement
+>    default:
+#    ^^^^^^^ dgdlpcLabel
+>        break;
+#        ^^^^^ dgdlpcStatement
+>    }
+>#ifdef DEBUG
+#^^^^^^^ dgdlpcPreCondit
+#       ^^^^^ dgdlpcPreCondit dgdlpcMacro
+>    write("total: " + total + "\n");
+#    ^^^^^ dgdlpcFunction
+#          ^^^^^^^^^ dgdlpcString
+#                              ^ dgdlpcString
+#                               ^^ dgdlpcString dgdlpcEscape
+#                                 ^ dgdlpcString
+>#endif
+#^^^^^^ dgdlpcPreCondit
+>    return total;
+#    ^^^^^^ dgdlpcStatement
+>}
+>
+>string
+#^^^^^^ dgdlpcType
+>query_exit(string dir)
+#^^^^^^^^^^ dgdlpcFunction
+#           ^^^^^^ dgdlpcType
+>{
+>    string dest;
+#    ^^^^^^ dgdlpcType
+>
+>    dest = exits[dir];
+#                ^^^^^ dgdlpcSubscript
+>    if (!dest) {
+#    ^^ dgdlpcConditional
+>        // nothing that way
+#        ^^^^^^^^^^^^^^^^^^^ dgdlpcLineComment
+>        return nil;
+#        ^^^^^^ dgdlpcStatement
+#               ^^^ dgdlpcConstant
+>    }
+>    return catch (dest->load()) ? nil : dest;
+#    ^^^^^^ dgdlpcStatement
+#           ^^^^^ dgdlpcException
+#                      ^^ dgdlpcOperator
+#                        ^^^^ dgdlpcFunction
+#                                  ^^^ dgdlpcConstant
+>}

@@ -1,0 +1,131 @@
+{
+  "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+  "runs": [
+    {
+      "originalUriBaseIds": {
+        "%SRCROOT%": {
+          "uri": "file:///work/mud/"
+        }
+      },
+      "results": [],
+      "tool": {
+        "driver": {
+          "informationUri": "https://github.com/mmcdole/dgdtools",
+          "name": "dgdtools",
+          "rules": [
+            {
+              "id": "adjacent-strings",
+              "name": "adjacent-strings",
+              "shortDescription": {
+                "text": "adjacent strings"
+              },
+              "fullDescription": {
+                "text": "Two strings side by side."
+              },
+              "helpUri": "https://github.com/mmcdole/dgdtools/blob/v1.2.3/docs/rules.md#adjacent-strings",
+              "defaultConfiguration": {
+                "level": "error"
+              },
+              "properties": {
+                "code": "E002",
+                "group": "syntax"
+              }
+            },
+            {
+              "id": "callable-not-found",
+              "name": "callable-not-found",
+              "shortDescription": {
+                "text": "no such function"
+              },
+              "fullDescription": {
+                "text": "The function is not there."
+              },
+              "helpUri": "https://github.com/mmcdole/dgdtools/blob/v1.2.3/docs/rules.md#callable-not-found",
+              "defaultConfiguration": {
+                "level": "error"
+              },
+              "properties": {
+                "code": "R001",
+                "group": "runtime"
+              }
+            },
+            {
+              "id": "static-crossobj",
+              "name": "static-crossobj",
+              "shortDescription": {
+                "text": "out of reach"
+              },
+              "fullDescription": {
+                "text": "The function cannot be called from there."
+              },
+              "helpUri": "https://github.com/mmcdole/dgdtools/blob/v1.2.3/docs/rules.md#static-crossobj",
+              "defaultConfiguration": {
+                "level": "error"
+              },
+              "properties": {
+                "code": "R002",
+                "group": "runtime"
+              }
+            },
+            {
+              "id": "unreachable-code",
+              "name": "unreachable-code",
+              "shortDescription": {
+                "text": "never runs"
+              },
+              "fullDescription": {
+                "text": "Nothing gets here."
+              },
+              "helpUri": "https://github.com/mmcdole/dgdtools/blob/v1.2.3/docs/rules.md#unreachable-code",
+              "defaultConfiguration": {
+                "level": "warning"
+              },
+              "properties": {
+                "code": "S004",
+                "group": "suspicious"
+              }
+            },
+            {
+              "id": "unformatted",
+              "name": "unformatted",
+              "shortDescription": {
+                "text": "not formatted"
+              },
+              "fullDescription": {
+                "text": "The formatter would change it."
+              },
+              "helpUri": "https://github.com/mmcdole/dgdtools/blob/v1.2.3/docs/rules.md#unformatted",
+              "defaultConfiguration": {
+                "level": "note"
+              },
+              "properties": {
+                "code": "C003",
+                "group": "convention"
+              }
+            },
+            {
+              "id": "missing-visibility",
+              "name": "missing-visibility",
+              "shortDescription": {
+                "text": "no specifier"
+              },
+              "fullDescription": {
+                "text": "Not among the findings."
+              },
+              "helpUri": "https://github.com/mmcdole/dgdtools/blob/v1.2.3/docs/rules.md#missing-visibility",
+              "defaultConfiguration": {
+                "level": "warning"
+              },
+              "properties": {
+                "code": "C002",
+                "group": "convention"
+              }
+            }
+          ],
+          "version": "v1.2.3"
+        }
+      }
+    }
+  ],
+  "version": "2.1.0"
+}

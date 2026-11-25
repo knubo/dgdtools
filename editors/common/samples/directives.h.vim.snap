@@ -1,0 +1,160 @@
+>/*
+#^^ dgdlpcComment
+> * Preprocessor directives: '#' first on its line, to the end of the
+#^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ dgdlpcComment
+> * logical line.
+#^^^^^^^^^^^^^^^^ dgdlpcComment
+> */
+#^^^ dgdlpcComment
+>#ifndef SAMPLE_H
+#^^^^^^^^ dgdlpcPreCondit
+#        ^^^^^^^^ dgdlpcPreCondit dgdlpcMacro
+># define SAMPLE_H
+#^^^^^^^^^ dgdlpcDefine
+#         ^^^^^^^^ dgdlpcDefine dgdlpcMacro
+>
+>#include <std.h>
+#^^^^^^^^^ dgdlpcInclude
+#         ^^^^^^^ dgdlpcInclude dgdlpcIncluded
+># include "local.h"	/* a comment after it */
+#^^^^^^^^^^ dgdlpcInclude
+#          ^^^^^^^^^ dgdlpcInclude dgdlpcIncluded
+#                   	^^^^^^^^^^^^^^^^^^^^^^^^ dgdlpcInclude dgdlpcComment
+>#include "/include/config.h" // and a line comment
+#^^^^^^^^^ dgdlpcInclude
+#         ^^^^^^^^^^^^^^^^^^^ dgdlpcInclude dgdlpcIncluded
+#                             ^^^^^^^^^^^^^^^^^^^^^ dgdlpcInclude dgdlpcLineComment
+>#include SAMPLE_PATH
+#^^^^^^^^^ dgdlpcInclude
+#         ^^^^^^^^^^^ dgdlpcInclude dgdlpcMacro
+>
+>#define LIMIT 10
+#^^^^^^^^ dgdlpcDefine
+#        ^^^^^ dgdlpcDefine dgdlpcMacro
+#              ^^ dgdlpcDefine dgdlpcNumber
+>#define EMPTY
+#^^^^^^^^ dgdlpcDefine
+#        ^^^^^ dgdlpcDefine dgdlpcMacro
+>#define MAX(a, b) ((a) > (b) ? (a) : (b))
+#^^^^^^^^ dgdlpcDefine
+#        ^^^ dgdlpcDefine dgdlpcMacro
+#           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ dgdlpcDefine
+>#define STR(x) #x
+#^^^^^^^^ dgdlpcDefine
+#        ^^^ dgdlpcDefine dgdlpcMacro
+#           ^^^^^^ dgdlpcDefine
+>#define PASTE(a, b) a ## b
+#^^^^^^^^ dgdlpcDefine
+#        ^^^^^ dgdlpcDefine dgdlpcMacro
+#             ^^^^^^^^^^^^^ dgdlpcDefine
+>#define DIRS ({ "north", "south" })
+#^^^^^^^^ dgdlpcDefine
+#        ^^^^ dgdlpcDefine dgdlpcMacro
+#             ^^ dgdlpcDefine dgdlpcArray dgdlpcArrayDelim
+#                ^^^^^^^ dgdlpcDefine dgdlpcArray dgdlpcString
+#                       ^^ dgdlpcDefine dgdlpcArray
+#                         ^^^^^^^ dgdlpcDefine dgdlpcArray dgdlpcString
+#                                 ^^ dgdlpcDefine dgdlpcArrayDelim
+>#define EXITS ([ "north": "/room/hall", \
+#^^^^^^^^ dgdlpcDefine
+#        ^^^^^ dgdlpcDefine dgdlpcMacro
+#              ^^ dgdlpcDefine dgdlpcMapping dgdlpcMappingDelim
+#                 ^^^^^^^ dgdlpcDefine dgdlpcMapping dgdlpcString
+#                        ^^ dgdlpcDefine dgdlpcMapping
+#                          ^^^^^^^^^^^^ dgdlpcDefine dgdlpcMapping dgdlpcString
+#                                      ^^^ dgdlpcDefine dgdlpcMapping
+>                 "south": DIRS[1] ])
+#                 ^^^^^^^ dgdlpcDefine dgdlpcMapping dgdlpcString
+#                        ^^ dgdlpcDefine dgdlpcMapping
+#                          ^^^^ dgdlpcDefine dgdlpcMapping dgdlpcMacro
+#                              ^ dgdlpcDefine dgdlpcMapping dgdlpcSubscript
+#                               ^ dgdlpcDefine dgdlpcMapping dgdlpcSubscript dgdlpcNumber
+#                                ^ dgdlpcDefine dgdlpcMapping dgdlpcSubscript
+#                                  ^^ dgdlpcDefine dgdlpcMappingDelim
+>#define LONG_TEXT "one line\n\
+#^^^^^^^^ dgdlpcDefine
+#        ^^^^^^^^^ dgdlpcDefine dgdlpcMacro
+#                  ^^^^^^^^^ dgdlpcDefine dgdlpcString
+#                           ^^ dgdlpcDefine dgdlpcString dgdlpcEscape
+#                             ^ dgdlpcDefine dgdlpcString
+>another line\n"
+#^^^^^^^^^^^^ dgdlpcDefine dgdlpcString
+#            ^^ dgdlpcDefine dgdlpcString dgdlpcEscape
+#              ^ dgdlpcDefine dgdlpcString
+>#define OPEN ([
+#^^^^^^^^ dgdlpcDefine
+#        ^^^^ dgdlpcDefine dgdlpcMacro
+#             ^^ dgdlpcDefine dgdlpcMapping dgdlpcMappingDelim
+>#define CLOSE ])
+#^^^^^^^^ dgdlpcDefine
+#        ^^^^^ dgdlpcDefine dgdlpcMacro
+#             ^^^ dgdlpcDefine
+>#define MULTI(x) do { \
+#^^^^^^^^ dgdlpcDefine
+#        ^^^^^ dgdlpcDefine dgdlpcMacro
+#             ^^^^ dgdlpcDefine
+#                 ^^ dgdlpcDefine dgdlpcRepeat
+#                   ^^^^ dgdlpcDefine
+>        x; /* a comment that
+#^^^^^^^^^^^ dgdlpcDefine
+#           ^^^^^^^^^^^^^^^^^ dgdlpcDefine dgdlpcComment
+>              goes on */ \
+#^^^^^^^^^^^^^^^^^^^^^^^^ dgdlpcDefine dgdlpcComment
+#                        ^^ dgdlpcDefine
+>    } while (0)
+#^^^^^^ dgdlpcDefine
+#      ^^^^^ dgdlpcDefine dgdlpcRepeat
+#           ^^ dgdlpcDefine
+#             ^ dgdlpcDefine dgdlpcNumber
+#              ^ dgdlpcDefine
+>
+>#if defined(__DGD__) && LIMIT > 0x10 || !defined(OTHER)
+#^^^^^^^^^^^^ dgdlpcPreCondit
+#            ^^^^^^^ dgdlpcPreCondit dgdlpcMacro
+#                   ^^^^^ dgdlpcPreCondit
+#                        ^^^^^ dgdlpcPreCondit dgdlpcMacro
+#                             ^^^ dgdlpcPreCondit
+#                                ^^^^ dgdlpcPreCondit dgdlpcNumber
+#                                    ^^^^^^^^^^^^^ dgdlpcPreCondit
+#                                                 ^^^^^ dgdlpcPreCondit dgdlpcMacro
+#                                                      ^ dgdlpcPreCondit
+># undef LIMIT
+#^^^^^^^^ dgdlpcDefine
+#        ^^^^^ dgdlpcDefine dgdlpcMacro
+>#elif LIMIT == 3
+#^^^^^^ dgdlpcPreCondit
+#      ^^^^^ dgdlpcPreCondit dgdlpcMacro
+#           ^^^^ dgdlpcPreCondit
+#               ^ dgdlpcPreCondit dgdlpcNumber
+># line 100 "sample.h"
+#^^^^^^^ dgdlpcPreProc
+#       ^^^ dgdlpcPreProc dgdlpcNumber
+#           ^^^^^^^^^^ dgdlpcPreProc dgdlpcString
+># pragma unconstrained_float
+#^^^^^^^^^^^^^^^^^^^^^^^^^^^^ dgdlpcPreProc
+>#else
+#^^^^^ dgdlpcPreCondit
+># error this can't be right: "unbalanced
+#^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ dgdlpcPreError
+>#endif
+#^^^^^^ dgdlpcPreCondit
+>
+>#ifdef OTHER
+#^^^^^^^ dgdlpcPreCondit
+#       ^^^^^ dgdlpcPreCondit dgdlpcMacro
+>int after_a_directive;
+#^^^ dgdlpcType
+>#endif
+#^^^^^^ dgdlpcPreCondit
+>  #define INDENTED 1
+#  ^^^^^^^^ dgdlpcDefine
+#          ^^^^^^^^ dgdlpcDefine dgdlpcMacro
+#                   ^ dgdlpcDefine dgdlpcNumber
+>#unknown directive
+#^^^^^^^^^^^^^^^^^^ dgdlpcPreProc
+>#
+#^ dgdlpcPreProc
+>
+>#endif /* SAMPLE_H */
+#^^^^^^^ dgdlpcPreCondit
+#       ^^^^^^^^^^^^^^ dgdlpcPreCondit dgdlpcComment

@@ -1,0 +1,336 @@
+>/*
+#^^ dgdlpcComment
+> * The tokens of DGD LPC, one class at a time: a sample for the grammar
+#^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ dgdlpcComment
+> * tests under editors/, not an object anybody should compile.
+#^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ dgdlpcComment
+> */
+#^^^ dgdlpcComment
+>
+>inherit "/lib/base";
+#^^^^^^^ dgdlpcInherit
+#        ^^^^^^^^^^^ dgdlpcString
+>inherit room "/std/room";
+#^^^^^^^ dgdlpcInherit
+#        ^^^^ dgdlpcInheritLabel
+#             ^^^^^^^^^^^ dgdlpcString
+>private inherit util UTIL_PATH;
+#^^^^^^^ dgdlpcSpecifier
+#        ^^^^^^^ dgdlpcInherit
+#                ^^^^ dgdlpcInheritLabel
+#                     ^^^^^^^^^ dgdlpcMacro
+>
+>// A line comment (dialect.slash_slash) ends with its line, whatever \
+#^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ dgdlpcLineComment
+>static int after_the_comment;
+#^^^^^^ dgdlpcSpecifier
+#       ^^^ dgdlpcType
+>
+>/* A block comment keeps "this" and // this and 'x' and #if to itself,
+#^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ dgdlpcComment
+>   over as many lines as it takes. */
+#^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ dgdlpcComment
+>
+>private static mapping exits;
+#^^^^^^^ dgdlpcSpecifier
+#        ^^^^^^ dgdlpcSpecifier
+#               ^^^^^^^ dgdlpcType
+>static nomask atomic varargs mixed *table;
+#^^^^^^ dgdlpcSpecifier
+#       ^^^^^^ dgdlpcSpecifier
+#              ^^^^^^ dgdlpcSpecifier
+#                     ^^^^^^^ dgdlpcSpecifier
+#                             ^^^^^ dgdlpcType
+>object owner; float weight; string name; int count;
+#^^^^^^ dgdlpcType
+#              ^^^^^ dgdlpcType
+#                            ^^^^^^ dgdlpcType
+#                                         ^^^ dgdlpcType
+>
+>static mixed
+#^^^^^^ dgdlpcSpecifier
+#       ^^^^^ dgdlpcType
+>literals(string str, int *arr)
+#^^^^^^^^ dgdlpcFunction
+#         ^^^^^^ dgdlpcType
+#                     ^^^ dgdlpcType
+>{
+>    float f;
+#    ^^^^^ dgdlpcType
+>    int i;
+#    ^^^ dgdlpcType
+>
+>    f = 1.0 + 1. + .5 + 1e10 + 1.5e-3 + 2E+4 + 0.25;
+#        ^^^ dgdlpcFloat
+#              ^^ dgdlpcFloat
+#                   ^^ dgdlpcFloat
+#                        ^^^^ dgdlpcFloat
+#                               ^^^^^^ dgdlpcFloat
+#                                        ^^^^ dgdlpcFloat
+#                                               ^^^^ dgdlpcFloat
+>    i = 0 + 7 + 42 + 0x1f + 0XFF + 017;
+#        ^ dgdlpcNumber
+#            ^ dgdlpcNumber
+#                ^^ dgdlpcNumber
+#                     ^^^^ dgdlpcNumber
+#                            ^^^^ dgdlpcNumber
+#                                   ^^^ dgdlpcNumber
+>    i = 'a' + '\n' + '\'' + '\\' + '\101' + '\x41' + '"' + '/';
+#        ^^^ dgdlpcCharacter
+#              ^ dgdlpcCharacter
+#               ^^ dgdlpcCharacter dgdlpcEscape
+#                 ^ dgdlpcCharacter
+#                     ^ dgdlpcCharacter
+#                      ^^ dgdlpcCharacter dgdlpcEscape
+#                        ^ dgdlpcCharacter
+#                            ^ dgdlpcCharacter
+#                             ^^ dgdlpcCharacter dgdlpcEscape
+#                               ^ dgdlpcCharacter
+#                                   ^ dgdlpcCharacter
+#                                    ^^^^ dgdlpcCharacter dgdlpcEscape
+#                                        ^ dgdlpcCharacter
+#                                            ^ dgdlpcCharacter
+#                                             ^^^^ dgdlpcCharacter dgdlpcEscape
+#                                                 ^ dgdlpcCharacter
+#                                                     ^^^ dgdlpcCharacter
+#                                                           ^^^ dgdlpcCharacter
+>    str = "plain" + "esc \n \t \" \\ \101 \x41 \q" + "" + "/* no comment */";
+#          ^^^^^^^ dgdlpcString
+#                    ^^^^^ dgdlpcString
+#                         ^^ dgdlpcString dgdlpcEscape
+#                            ^^ dgdlpcString dgdlpcEscape
+#                               ^^ dgdlpcString dgdlpcEscape
+#                                  ^^ dgdlpcString dgdlpcEscape
+#                                     ^^^^ dgdlpcString dgdlpcEscape
+#                                          ^^^^ dgdlpcString dgdlpcEscape
+#                                               ^^ dgdlpcString dgdlpcEscape
+#                                                 ^ dgdlpcString
+#                                                     ^^ dgdlpcString
+#                                                          ^^^^^^^^^^^^^^^^^^ dgdlpcString
+>    str = "continued \
+#          ^^^^^^^^^^^^ dgdlpcString
+>on the next line" + "// no comment";
+#^^^^^^^^^^^^^^^^^ dgdlpcString
+#                    ^^^^^^^^^^^^^^^ dgdlpcString
+>    arr = arr[1..2] + arr[..3] + arr[i..] + arr[0 .. 1] + arr[i + 1 ..];
+#             ^ dgdlpcSubscript
+#              ^ dgdlpcSubscript dgdlpcNumber
+#               ^^ dgdlpcSubscript dgdlpcOperator
+#                 ^ dgdlpcSubscript dgdlpcNumber
+#                  ^ dgdlpcSubscript
+#                         ^ dgdlpcSubscript
+#                          ^^ dgdlpcSubscript dgdlpcOperator
+#                            ^ dgdlpcSubscript dgdlpcNumber
+#                             ^ dgdlpcSubscript
+#                                    ^^ dgdlpcSubscript
+#                                      ^^ dgdlpcSubscript dgdlpcOperator
+#                                        ^ dgdlpcSubscript
+#                                               ^ dgdlpcSubscript
+#                                                ^ dgdlpcSubscript dgdlpcNumber
+#                                                  ^^ dgdlpcSubscript dgdlpcOperator
+#                                                     ^ dgdlpcSubscript dgdlpcNumber
+#                                                      ^ dgdlpcSubscript
+#                                                             ^^^^^ dgdlpcSubscript
+#                                                                  ^ dgdlpcSubscript dgdlpcNumber
+#                                                                    ^^ dgdlpcSubscript dgdlpcOperator
+#                                                                      ^ dgdlpcSubscript
+>    return ({ str, f, i, nil, ([ "a": 1, "b": ({ 2, 3 }), arr[0]: arr[1] ]) });
+#    ^^^^^^ dgdlpcStatement
+#           ^^ dgdlpcArray dgdlpcArrayDelim
+#             ^^^^^^^^^^^^ dgdlpcArray
+#                         ^^^ dgdlpcArray dgdlpcConstant
+#                            ^^ dgdlpcArray
+#                              ^^ dgdlpcArray dgdlpcMapping dgdlpcMappingDelim
+#                                 ^^^ dgdlpcArray dgdlpcMapping dgdlpcString
+#                                    ^^ dgdlpcArray dgdlpcMapping
+#                                      ^ dgdlpcArray dgdlpcMapping dgdlpcNumber
+#                                       ^^ dgdlpcArray dgdlpcMapping
+#                                         ^^^ dgdlpcArray dgdlpcMapping dgdlpcString
+#                                            ^^ dgdlpcArray dgdlpcMapping
+#                                              ^^ dgdlpcArray dgdlpcMapping dgdlpcArray dgdlpcArrayDelim
+#                                                 ^ dgdlpcArray dgdlpcMapping dgdlpcArray dgdlpcNumber
+#                                                  ^^ dgdlpcArray dgdlpcMapping dgdlpcArray
+#                                                    ^ dgdlpcArray dgdlpcMapping dgdlpcArray dgdlpcNumber
+#                                                      ^^ dgdlpcArray dgdlpcMapping dgdlpcArrayDelim
+#                                                        ^^^^^ dgdlpcArray dgdlpcMapping
+#                                                             ^ dgdlpcArray dgdlpcMapping dgdlpcSubscript
+#                                                              ^ dgdlpcArray dgdlpcMapping dgdlpcSubscript dgdlpcNumber
+#                                                               ^ dgdlpcArray dgdlpcMapping dgdlpcSubscript
+#                                                                ^^^^^ dgdlpcArray dgdlpcMapping
+#                                                                     ^ dgdlpcArray dgdlpcMapping dgdlpcSubscript
+#                                                                      ^ dgdlpcArray dgdlpcMapping dgdlpcSubscript dgdlpcNumber
+#                                                                       ^ dgdlpcArray dgdlpcMapping dgdlpcSubscript
+#                                                                         ^^ dgdlpcArray dgdlpcMappingDelim
+#                                                                            ^^ dgdlpcArrayDelim
+>}
+>
+>static int
+#^^^^^^ dgdlpcSpecifier
+#       ^^^ dgdlpcType
+>operators(int a, int b, object ob, mixed args...)
+#^^^^^^^^^ dgdlpcFunction
+#          ^^^ dgdlpcType
+#                 ^^^ dgdlpcType
+#                        ^^^^^^ dgdlpcType
+#                                   ^^^^^ dgdlpcType
+#                                             ^^^ dgdlpcOperator
+>{
+>    a = b; a += b; a -= b; a *= b; a /= b; a %= b;
+>    a &= b; a |= b; a ^= b; a <<= b; a >>= b;
+>    a = a + b - a * b / a % b;
+>    a = a & b | a ^ ~b;
+>    a = a << 2 >> 1;
+#             ^ dgdlpcNumber
+#                  ^ dgdlpcNumber
+>    a = a == b || a != b && a < b || a > b && a <= b || a >= b || !a;
+>    a++; b--; ++a; --b;
+>    a = a ? b : -a;
+>    a = ob <- "/std/room";
+#           ^^ dgdlpcOperator
+#              ^^^^^^^^^^^ dgdlpcString
+>    ob->call(a, b, args...);
+#      ^^ dgdlpcOperator
+#        ^^^^ dgdlpcFunction
+#                       ^^^ dgdlpcOperator
+>    ob = new object "/data/thing";
+#         ^^^ dgdlpcKeyword
+#             ^^^^^^ dgdlpcType
+#                    ^^^^^^^^^^^^^ dgdlpcString
+>    room::create();
+#    ^^^^ dgdlpcInheritLabel
+#        ^^ dgdlpcOperator
+#          ^^^^^^ dgdlpcFunction
+>    ::create();
+#    ^^ dgdlpcOperator
+#      ^^^^^^ dgdlpcFunction
+>    return f(a[i]) + g(([ ]), ({ }), ([ a: b[0] ])[a]) + sizeof(({ a, b }));
+#    ^^^^^^ dgdlpcStatement
+#           ^ dgdlpcFunction
+#              ^^^ dgdlpcSubscript
+#                     ^ dgdlpcFunction
+#                       ^^ dgdlpcMapping dgdlpcMappingDelim
+#                          ^^ dgdlpcMappingDelim
+#                              ^^ dgdlpcArray dgdlpcArrayDelim
+#                                 ^^ dgdlpcArrayDelim
+#                                     ^^ dgdlpcMapping dgdlpcMappingDelim
+#                                       ^^^^^ dgdlpcMapping
+#                                            ^ dgdlpcMapping dgdlpcSubscript
+#                                             ^ dgdlpcMapping dgdlpcSubscript dgdlpcNumber
+#                                              ^ dgdlpcMapping dgdlpcSubscript
+#                                                ^^ dgdlpcMappingDelim
+#                                                  ^^^ dgdlpcSubscript
+#                                                         ^^^^^^ dgdlpcFunction
+#                                                                ^^ dgdlpcArray dgdlpcArrayDelim
+#                                                                  ^^^^^^ dgdlpcArray
+#                                                                        ^^ dgdlpcArrayDelim
+>}
+>
+>static void
+#^^^^^^ dgdlpcSpecifier
+#       ^^^^ dgdlpcType
+>keywords(int n, string function)
+#^^^^^^^^ dgdlpcFunction
+#         ^^^ dgdlpcType
+#                ^^^^^^ dgdlpcType
+>{
+>    int i;
+#    ^^^ dgdlpcType
+>
+>    if (n)
+#    ^^ dgdlpcConditional
+>        n = 1;
+#            ^ dgdlpcNumber
+>    else if (!n) {
+#    ^^^^ dgdlpcConditional
+#         ^^ dgdlpcConditional
+>        n = 2;
+#            ^ dgdlpcNumber
+>    } else
+#      ^^^^ dgdlpcConditional
+>        return;
+#        ^^^^^^ dgdlpcStatement
+>    for (i = 0; i < n; i++)
+#    ^^^ dgdlpcRepeat
+#             ^ dgdlpcNumber
+>        continue;
+#        ^^^^^^^^ dgdlpcStatement
+>    while (n--)
+#    ^^^^^ dgdlpcRepeat
+>        break;
+#        ^^^^^ dgdlpcStatement
+>    do {
+#    ^^ dgdlpcRepeat
+>        n++;
+>    } while (n < 10);
+#      ^^^^^ dgdlpcRepeat
+#                 ^^ dgdlpcNumber
+>    switch (n) {
+#    ^^^^^^ dgdlpcConditional
+>    case 1:
+#    ^^^^ dgdlpcLabel
+#         ^ dgdlpcNumber
+>    case 2..3:
+#    ^^^^ dgdlpcLabel
+#         ^ dgdlpcNumber
+#          ^^ dgdlpcOperator
+#            ^ dgdlpcNumber
+>        break;
+#        ^^^^^ dgdlpcStatement
+>    case 'a':
+#    ^^^^ dgdlpcLabel
+#         ^^^ dgdlpcCharacter
+>        goto out;
+#        ^^^^ dgdlpcStatement
+>    default:
+#    ^^^^^^^ dgdlpcLabel
+>        return;
+#        ^^^^^^ dgdlpcStatement
+>    }
+>    catch {
+#    ^^^^^ dgdlpcException
+>        n = 1 / 0;
+#            ^ dgdlpcNumber
+#                ^ dgdlpcNumber
+>    } : {
+>        n = 0;
+#            ^ dgdlpcNumber
+>    }
+>    try {
+#    ^^^ dgdlpcException
+>        n = 1;
+#            ^ dgdlpcNumber
+>    } catch (err) {
+#      ^^^^^ dgdlpcException
+>        n = 2;
+#            ^ dgdlpcNumber
+>    }
+>    rlimits (10; 1000) {
+#    ^^^^^^^ dgdlpcStatement
+#             ^^ dgdlpcNumber
+#                 ^^^^ dgdlpcNumber
+>        function = catch(call_other(this_object(), function, n));
+#                   ^^^^^ dgdlpcException
+#                         ^^^^^^^^^^ dgdlpcFunction
+#                                    ^^^^^^^^^^^ dgdlpcFunction
+>    }
+>out:
+>    NAME = MAX_COUNT + __DGD__ + _x + X + T1;
+#    ^^^^ dgdlpcMacro
+#           ^^^^^^^^^ dgdlpcMacro
+#                       ^^^^^^^ dgdlpcMacro
+#                                          ^^ dgdlpcMacro
+>    n = count + \
+>        1;
+#        ^ dgdlpcNumber
+>}
+>
+>static int
+#^^^^^^ dgdlpcSpecifier
+#       ^^^ dgdlpcType
+>operator+ (int n)
+#^^^^^^^^ dgdlpcKeyword
+#           ^^^ dgdlpcType
+>{
+>    return count + n;
+#    ^^^^^^ dgdlpcStatement
+>}

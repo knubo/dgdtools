@@ -1,0 +1,376 @@
+Hover and signature help, for a client that shows Markdown and reads a
+parameter as offsets in the signature's label: a function with the
+comment above it, the auto object's, a kfun of the driver's and one the
+project declares, a variable, a macro, a header, an object, a label, a
+parameter, a call whose receiver nobody knows; then the arguments of
+calls.
+
+-- lib/dgdtools.yml --
+root: .
+include_dirs: [/include]
+auto_objects: [/sys/auto]
+dialect:
+  kfuns: ["int *rusage()"]
+-- lib/include/std.h --
+/* Grundläggande */ #define BASE "/std/base"
+// The square of x.
+#define SQUARE(x) ((x)*(x))
+-- lib/sys/auto.c --
+/* Tells the user. */
+static void write(string s) {}
+-- lib/std/base.c --
+/* blåbær, in grams */
+int weight;
+
+/*
+ * Sets the weight.
+ *   1. *Not* below zero.
+ *
+ * # See query_weight().
+ */
+varargs void set_weight(int grams, string why...) {}
+void create() {}
+-- lib/std/side.c --
+void create() {}
+-- lib/obj/a.c --
+#include <std.h>
+inherit BASE;
+inherit side "/std/side";
+void create() { /* først 🫐 */ ::create(); set_weight(SQUARE(2), "a", "b"); }
+void f(object ob) { write("x"); weight = strlen("blåbær"); rusage(); ob->set_weight(1); "/std/base"->set_weight(1, "x"); side::create(); call_out("f", 1, ob); }
+-- script --
+initialize lib
+open lib/obj/a.c
+# a function of an inherited object, with its comment; an ambiguous one
+hover lib/obj/a.c 3:44
+hover lib/obj/a.c 3:34
+# the auto object's, the driver's, the project's
+hover lib/obj/a.c 4:22
+hover lib/obj/a.c 4:43
+hover lib/obj/a.c 4:61
+# a variable, a macro, a header, an object, a label
+hover lib/obj/a.c 4:33
+hover lib/obj/a.c 3:56
+hover lib/obj/a.c 0:12
+hover lib/obj/a.c 1:10
+hover lib/obj/a.c 4:124
+# a parameter, where it is used
+hover lib/obj/a.c 4:70
+# a call whose receiver is not known; nothing at all
+hover lib/obj/a.c 4:75
+hover lib/obj/a.c 4:0
+# the arguments of calls: the innermost, a parameter that takes the rest
+signature lib/obj/a.c 3:54
+signature lib/obj/a.c 3:62
+signature lib/obj/a.c 3:73
+signature lib/obj/a.c 4:27
+signature lib/obj/a.c 4:50
+signature lib/obj/a.c 4:66
+signature lib/obj/a.c 4:117
+signature lib/obj/a.c 4:134
+signature lib/obj/a.c 4:156
+# an unknown receiver has none, nor has a place outside a call
+signature lib/obj/a.c 4:84
+signature lib/obj/a.c 4:20
+# while a call is written
+change lib/obj/a.c 4:20-4:20 "set_weight(1, "
+signature lib/obj/a.c 4:34
+shutdown
+exit
+-- transcript --
+> initialize lib
+< {
+<   "capabilities": {
+<     "positionEncoding": "utf-16",
+<     "textDocumentSync": {"openClose": true, "change": 2},
+<     "codeActionProvider": {"codeActionKinds": ["quickfix", "refactor.rewrite", "source.fixAll.dgdtools"]},
+<     "completionProvider": {"triggerCharacters": [">", ":", "\"", "/", "<"], "resolveProvider": true},
+<     "definitionProvider": true,
+<     "referencesProvider": true,
+<     "documentHighlightProvider": true,
+<     "hoverProvider": true,
+<     "signatureHelpProvider": {"triggerCharacters": ["(", ","], "retriggerCharacters": [")"]},
+<     "documentSymbolProvider": true,
+<     "workspaceSymbolProvider": true,
+<     "documentFormattingProvider": true,
+<     "documentRangeFormattingProvider": true,
+<     "semanticTokensProvider": {
+<       "legend": {
+<         "tokenTypes": [
+<           "namespace",
+<           "type",
+<           "parameter",
+<           "variable",
+<           "function",
+<           "method",
+<           "macro",
+<           "keyword",
+<           "modifier"
+<         ],
+<         "tokenModifiers": ["declaration", "definition", "static", "defaultLibrary", "inherited", "local", "macro"]
+<       },
+<       "range": true,
+<       "full": {"delta": true}
+<     },
+<     "renameProvider": {"prepareProvider": true},
+<     "workspace": {
+<       "workspaceFolders": {"supported": true, "changeNotifications": true},
+<       "textDocumentContent": {"schemes": ["dgdtools-profile"]},
+<       "fileOperations": {
+<         "willRename": {
+<           "filters": [
+<             {"scheme": "file", "pattern": {"glob": "**/*.{c,h}", "matches": "file"}},
+<             {"scheme": "file", "pattern": {"glob": "**", "matches": "folder"}}
+<           ]
+<         }
+<       }
+<     }
+<   },
+<   "serverInfo": {"name": "dgdtools", "version": "test"}
+< }
+> open lib/obj/a.c
+# a function of an inherited object, with its comment; an ambiguous one
+> hover lib/obj/a.c 3:44
+< {
+<   "contents": {
+<     "kind": "markdown",
+<     "value": "```dgdlpc\nvarargs void set_weight(int grams, string why...)\n```\n\nSets the weight.  \n  1\\. \\*Not\\* below zero.\n\n\\# See query\\_weight().\n\n/std/base.c:10"
+<   },
+<   "range": {"start": {"line": 3, "character": 43}, "end": {"line": 3, "character": 53}}
+< }
+> hover lib/obj/a.c 3:34
+< {
+<   "contents": {
+<     "kind": "markdown",
+<     "value": "```dgdlpc\nvoid create()\n```\n\n/std/base.c:11\n\n---\n\n```dgdlpc\nvoid create()\n```\n\n/std/side.c:1"
+<   },
+<   "range": {"start": {"line": 3, "character": 33}, "end": {"line": 3, "character": 39}}
+< }
+# the auto object's, the driver's, the project's
+> hover lib/obj/a.c 4:22
+< {
+<   "contents": {
+<     "kind": "markdown",
+<     "value": "```dgdlpc\nstatic void write(string s)\n```\n\nTells the user.\n\nauto object, /sys/auto.c:2"
+<   },
+<   "range": {"start": {"line": 4, "character": 20}, "end": {"line": 4, "character": 25}}
+< }
+> hover lib/obj/a.c 4:43
+< {
+<   "contents": {
+<     "kind": "markdown",
+<     "value": "```dgdlpc\nint strlen(string)\n```\n\nreturn the length of a string\n\nkfun, DGD 1.7.9"
+<   },
+<   "range": {"start": {"line": 4, "character": 41}, "end": {"line": 4, "character": 47}}
+< }
+> hover lib/obj/a.c 4:61
+< {
+<   "contents": {
+<     "kind": "markdown",
+<     "value": "```dgdlpc\nint *rusage()\n```\n\nkfun, declared by the project (dialect.kfuns)"
+<   },
+<   "range": {"start": {"line": 4, "character": 59}, "end": {"line": 4, "character": 65}}
+< }
+# a variable, a macro, a header, an object, a label
+> hover lib/obj/a.c 4:33
+< {
+<   "contents": {
+<     "kind": "markdown",
+<     "value": "```dgdlpc\nint weight\n```\n\nblåbær, in grams\n\n/std/base.c:2"
+<   },
+<   "range": {"start": {"line": 4, "character": 32}, "end": {"line": 4, "character": 38}}
+< }
+> hover lib/obj/a.c 3:56
+< {
+<   "contents": {
+<     "kind": "markdown",
+<     "value": "```dgdlpc\n#define SQUARE(x) ((x)*(x))\n```\n\nThe square of x.\n\nmacro (expression), /include/std.h:3"
+<   },
+<   "range": {"start": {"line": 3, "character": 54}, "end": {"line": 3, "character": 60}}
+< }
+> hover lib/obj/a.c 0:12
+< {
+<   "contents": {"kind": "markdown", "value": "```dgdlpc\n#include <std.h>\n```\n\n/include/std.h"},
+<   "range": {"start": {"line": 0, "character": 9}, "end": {"line": 0, "character": 16}}
+< }
+> hover lib/obj/a.c 1:10
+< {
+<   "contents": {"kind": "markdown", "value": "object `/std/base`\n\n/std/base.c"},
+<   "range": {"start": {"line": 1, "character": 8}, "end": {"line": 1, "character": 12}}
+< }
+> hover lib/obj/a.c 4:124
+< {
+<   "contents": {"kind": "markdown", "value": "```dgdlpc\ninherit side \"/std/side\";\n```\n\n/std/side.c"},
+<   "range": {"start": {"line": 4, "character": 121}, "end": {"line": 4, "character": 125}}
+< }
+# a parameter, where it is used
+> hover lib/obj/a.c 4:70
+< {
+<   "contents": {"kind": "markdown", "value": "```dgdlpc\nobject ob\n```\n\nparameter, /obj/a.c:5"},
+<   "range": {"start": {"line": 4, "character": 69}, "end": {"line": 4, "character": 71}}
+< }
+# a call whose receiver is not known; nothing at all
+> hover lib/obj/a.c 4:75
+< {
+<   "contents": {
+<     "kind": "markdown",
+<     "value": "function `set_weight`\n\nthe receiver is not known: which object's function this calls cannot be told"
+<   },
+<   "range": {"start": {"line": 4, "character": 73}, "end": {"line": 4, "character": 83}}
+< }
+> hover lib/obj/a.c 4:0
+< null
+# the arguments of calls: the innermost, a parameter that takes the rest
+> signature lib/obj/a.c 3:54
+< {
+<   "signatures": [
+<     {
+<       "label": "varargs void set_weight(int grams, string why...)",
+<       "documentation": {
+<         "kind": "markdown",
+<         "value": "Sets the weight.  \n  1\\. \\*Not\\* below zero.\n\n\\# See query\\_weight().\n\n/std/base.c:10"
+<       },
+<       "parameters": [{"label": [24, 33]}, {"label": [35, 48]}],
+<       "activeParameter": 0
+<     }
+<   ],
+<   "activeSignature": 0,
+<   "activeParameter": 0
+< }
+> signature lib/obj/a.c 3:62
+< {
+<   "signatures": [
+<     {
+<       "label": "SQUARE(x)",
+<       "documentation": {"kind": "markdown", "value": "The square of x.\n\n/include/std.h:3"},
+<       "parameters": [{"label": [7, 8]}],
+<       "activeParameter": 0
+<     }
+<   ],
+<   "activeSignature": 0,
+<   "activeParameter": 0
+< }
+> signature lib/obj/a.c 3:73
+< {
+<   "signatures": [
+<     {
+<       "label": "varargs void set_weight(int grams, string why...)",
+<       "documentation": {
+<         "kind": "markdown",
+<         "value": "Sets the weight.  \n  1\\. \\*Not\\* below zero.\n\n\\# See query\\_weight().\n\n/std/base.c:10"
+<       },
+<       "parameters": [{"label": [24, 33]}, {"label": [35, 48]}],
+<       "activeParameter": 1
+<     }
+<   ],
+<   "activeSignature": 0,
+<   "activeParameter": 1
+< }
+> signature lib/obj/a.c 4:27
+< {
+<   "signatures": [
+<     {
+<       "label": "static void write(string s)",
+<       "documentation": {"kind": "markdown", "value": "Tells the user.\n\nauto object, /sys/auto.c:2"},
+<       "parameters": [{"label": [18, 26]}],
+<       "activeParameter": 0
+<     }
+<   ],
+<   "activeSignature": 0,
+<   "activeParameter": 0
+< }
+> signature lib/obj/a.c 4:50
+< {
+<   "signatures": [
+<     {
+<       "label": "int strlen(string)",
+<       "documentation": {"kind": "markdown", "value": "return the length of a string\n\nkfun, DGD 1.7.9"},
+<       "parameters": [{"label": [11, 17]}],
+<       "activeParameter": 0
+<     }
+<   ],
+<   "activeSignature": 0,
+<   "activeParameter": 0
+< }
+> signature lib/obj/a.c 4:66
+< {
+<   "signatures": [
+<     {
+<       "label": "int *rusage()",
+<       "documentation": {"kind": "markdown", "value": "kfun, declared by the project (dialect.kfuns)"},
+<       "parameters": [],
+<       "activeParameter": 0
+<     }
+<   ],
+<   "activeSignature": 0,
+<   "activeParameter": 0
+< }
+> signature lib/obj/a.c 4:117
+< {
+<   "signatures": [
+<     {
+<       "label": "varargs void set_weight(int grams, string why...)",
+<       "documentation": {
+<         "kind": "markdown",
+<         "value": "Sets the weight.  \n  1\\. \\*Not\\* below zero.\n\n\\# See query\\_weight().\n\n/std/base.c:10"
+<       },
+<       "parameters": [{"label": [24, 33]}, {"label": [35, 48]}],
+<       "activeParameter": 1
+<     }
+<   ],
+<   "activeSignature": 0,
+<   "activeParameter": 1
+< }
+> signature lib/obj/a.c 4:134
+< {
+<   "signatures": [
+<     {
+<       "label": "void create()",
+<       "documentation": {"kind": "markdown", "value": "/std/side.c:1"},
+<       "parameters": [],
+<       "activeParameter": 0
+<     }
+<   ],
+<   "activeSignature": 0,
+<   "activeParameter": 0
+< }
+> signature lib/obj/a.c 4:156
+< {
+<   "signatures": [
+<     {
+<       "label": "void f(object ob)",
+<       "documentation": {"kind": "markdown", "value": "/obj/a.c:5"},
+<       "parameters": [{"label": [7, 16]}],
+<       "activeParameter": 0
+<     }
+<   ],
+<   "activeSignature": 0,
+<   "activeParameter": 0
+< }
+# an unknown receiver has none, nor has a place outside a call
+> signature lib/obj/a.c 4:84
+< null
+> signature lib/obj/a.c 4:20
+< null
+# while a call is written
+> change lib/obj/a.c 4:20-4:20 "set_weight(1, "
+> signature lib/obj/a.c 4:34
+< {
+<   "signatures": [
+<     {
+<       "label": "varargs void set_weight(int grams, string why...)",
+<       "documentation": {
+<         "kind": "markdown",
+<         "value": "Sets the weight.  \n  1\\. \\*Not\\* below zero.\n\n\\# See query\\_weight().\n\n/std/base.c:10"
+<       },
+<       "parameters": [{"label": [24, 33]}, {"label": [35, 48]}],
+<       "activeParameter": 1
+<     }
+<   ],
+<   "activeSignature": 0,
+<   "activeParameter": 1
+< }
+> shutdown
+< null
+> exit
+< "the server exited after shutdown"

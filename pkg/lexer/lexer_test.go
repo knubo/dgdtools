@@ -1,6 +1,7 @@
 package lexer
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -113,7 +114,7 @@ func TestKeywordsAndDialect(t *testing.T) {
 		kinds(t, "private static nomask atomic varargs"))
 	// "function" is an identifier unless closures are enabled.
 	assert.Equal(t, []token.Kind{token.Ident}, kinds(t, "function"))
-	fc := Lex("t.c", []byte("function"), Dialect{SlashSlash: true, Closures: true})
+	fc := Lex("t.c", []byte("function"), token.Dialect{SlashSlash: true, Closures: true})
 	require.NoError(t, fc.CheckRoundTrip())
 	assert.Equal(t, token.KwFunction, fc.Tokens[0].Kind)
 	// "status" is NOT a keyword (pre-DGD leftover in old corpora).
@@ -146,7 +147,7 @@ func TestComments(t *testing.T) {
 		kinds(t, "/* /* */ x /"), "inner /* does not nest")
 
 	// // disabled without SlashSlash: two Slash tokens.
-	f2 := Lex("t.c", []byte("a // b"), Dialect{SlashSlash: false})
+	f2 := Lex("t.c", []byte("a // b"), token.Dialect{SlashSlash: false})
 	require.NoError(t, f2.CheckRoundTrip())
 	var ks []token.Kind
 	for _, tok := range f2.Significant() {
@@ -178,12 +179,20 @@ func TestCharConstants(t *testing.T) {
 	assert.Equal(t, []token.Kind{token.CharLit}, kinds(t, `'\\'`))
 	assert.Equal(t, []token.Kind{token.CharLit}, kinds(t, `'\x1b'`))
 	assert.Equal(t, []token.Kind{token.CharLit}, kinds(t, `'\007'`))
-	// Empty and multi-char constants are Illegal.
-	for _, src := range []string{"''", "'ab'"} {
+	assert.Equal(t, []token.Kind{token.CharLit}, kinds(t, `'\x'`), "no digits: the letter x")
+	assert.Equal(t, []token.Kind{token.CharLit}, kinds(t, `'\X'`), "the letter X")
+	// Empty and multi-char constants are Illegal. The driver knows the
+	// hexadecimal escape as \x only: after \X, digits are more characters.
+	for _, src := range []string{"''", "'ab'", `'\X41'`, `'\x414'`} {
 		f := Lex("t.c", []byte(src), Default)
 		require.NoError(t, f.CheckRoundTrip())
 		assert.True(t, f.HasIllegal(), "src=%q", src)
+		require.Len(t, f.Errs, 1, "src=%q", src)
 	}
+	f := Lex("t.c", []byte(`'\X41'`), Default)
+	assert.Equal(t, "illegal character constant", f.Errs[0].Msg)
+	// In a string it is three characters, and nobody's error.
+	assert.Equal(t, []token.Kind{token.StringLit}, kinds(t, `"\X41"`))
 }
 
 func TestDirectives(t *testing.T) {
@@ -235,6 +244,23 @@ func TestLineEndings(t *testing.T) {
 			assert.Equal(t, token.Pos{Line: 3, Col: 1}, f.Pos(f.Tokens[i].Off))
 		}
 	}
+}
+
+// A backslash at the end of a line is a splice outside a directive too:
+// DGD removes it with the line break before it reads tokens.
+func TestSplice(t *testing.T) {
+	f := Lex("t.c", []byte("x = 1 +\\\n2;\ny \\\r\n;\n#define A 1 \\\n + 2\n"), Default)
+	require.NoError(t, f.CheckRoundTrip())
+	assert.False(t, f.HasIllegal())
+	var splices []string
+	for _, tok := range f.Tokens {
+		if tok.Kind == token.Splice {
+			splices = append(splices, string(f.Text(tok)))
+		}
+	}
+	assert.Equal(t, []string{"\\\n", "\\\r\n"}, splices, "the directive keeps its own")
+	assert.True(t, token.Splice.IsTrivia())
+	assert.Equal(t, token.Pos{Line: 2, Col: 1}, f.Pos(f.Tokens[slices.IndexFunc(f.Tokens, func(t token.Token) bool { return t.Kind == token.IntLit && string(f.Text(t)) == "2" })].Off))
 }
 
 func TestInheritForms(t *testing.T) {

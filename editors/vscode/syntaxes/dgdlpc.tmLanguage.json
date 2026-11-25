@@ -1,0 +1,416 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "DGD LPC",
+  "scopeName": "source.dgdlpc",
+  "comment": "The lexical layer of DGD LPC, as pkg/lexer of dgdtools reads it. Tested by `go test ./editors`, which runs this file: every pattern stays inside the regular expression syntax Go and Oniguruma share, plus (?=...) at the end of a top-level alternative. No \\d \\w \\s, no $, no lookbehind, no backreferences; a line ends in \\n.",
+  "patterns": [
+    { "include": "#directives" },
+    { "include": "#function-definition" },
+    { "include": "#code" }
+  ],
+  "repository": {
+    "code": {
+      "patterns": [
+        { "include": "#comments" },
+        { "include": "#strings" },
+        { "include": "#characters" },
+        { "include": "#numbers" },
+        { "include": "#keywords" },
+        { "include": "#array" },
+        { "include": "#mapping" },
+        { "include": "#subscript" },
+        { "include": "#names" },
+        { "include": "#operators" },
+        { "include": "#punctuation" }
+      ]
+    },
+    "directive-code": {
+      "comment": "Code inside a directive: the same tokens, but a literal left open ends with the directive's logical line.",
+      "patterns": [
+        { "include": "#line-continuation" },
+        { "include": "#comments" },
+        { "include": "#strings" },
+        { "include": "#characters" },
+        { "include": "#numbers" },
+        { "include": "#keywords" },
+        { "include": "#directive-array" },
+        { "include": "#directive-mapping" },
+        { "include": "#directive-subscript" },
+        { "include": "#names" },
+        { "include": "#operators" },
+        { "include": "#punctuation" }
+      ]
+    },
+    "comments": {
+      "patterns": [
+        { "include": "#comment-block" },
+        { "include": "#comment-line" }
+      ]
+    },
+    "comment-block": {
+      "name": "comment.block.dgdlpc",
+      "begin": "/\\*",
+      "end": "\\*/",
+      "beginCaptures": { "0": { "name": "punctuation.definition.comment.begin.dgdlpc" } },
+      "endCaptures": { "0": { "name": "punctuation.definition.comment.end.dgdlpc" } }
+    },
+    "comment-line": {
+      "comment": "dialect.slash_slash, on by default. A grammar cannot read the project's dialect, and this rule is safe without it: where the driver was built without SLASHSLASH, '//' outside a string is a syntax error, so no valid file has one for this rule to miscolour. It is a rule of its own so that it can be taken out in one place.",
+      "name": "comment.line.double-slash.dgdlpc",
+      "match": "(//).*",
+      "captures": { "1": { "name": "punctuation.definition.comment.dgdlpc" } }
+    },
+    "strings": {
+      "comment": "A string ends at its quote or, unterminated, with the line; backslash-newline continues it.",
+      "name": "string.quoted.double.dgdlpc",
+      "begin": "\"",
+      "end": "(\")|(?=\\n)",
+      "beginCaptures": { "0": { "name": "punctuation.definition.string.begin.dgdlpc" } },
+      "endCaptures": { "1": { "name": "punctuation.definition.string.end.dgdlpc" } },
+      "patterns": [
+        { "include": "#line-continuation" },
+        { "include": "#escape" }
+      ]
+    },
+    "escape": {
+      "comment": "The driver's escapes: up to three octal digits, \\x and up to two hex digits, or any other character standing for itself.",
+      "name": "constant.character.escape.dgdlpc",
+      "match": "\\\\(?:[0-7]{1,3}|x[0-9A-Fa-f]{0,2}|.)"
+    },
+    "line-continuation": {
+      "name": "constant.character.escape.line-continuation.dgdlpc",
+      "match": "\\\\\\n"
+    },
+    "characters": {
+      "comment": "Exactly one character or escape between the quotes; anything else is not a character constant.",
+      "name": "string.quoted.single.dgdlpc",
+      "match": "(')(?:[^\\\\'\\n]|(\\\\(?:[0-7]{1,3}|x[0-9A-Fa-f]{0,2}|.)))(')",
+      "captures": {
+        "1": { "name": "punctuation.definition.string.begin.dgdlpc" },
+        "2": { "name": "constant.character.escape.dgdlpc" },
+        "3": { "name": "punctuation.definition.string.end.dgdlpc" }
+      }
+    },
+    "numbers": {
+      "patterns": [
+        {
+          "name": "constant.numeric.integer.hexadecimal.dgdlpc",
+          "match": "\\b0[xX][0-9A-Fa-f]*"
+        },
+        {
+          "comment": "1..2 is a range of two integers, never a float.",
+          "name": "constant.numeric.integer.decimal.dgdlpc",
+          "match": "\\b[0-9]+(?=\\.\\.)"
+        },
+        {
+          "name": "constant.numeric.float.dgdlpc",
+          "match": "\\b[0-9]+\\.[0-9]*(?:[eE][+-]?[0-9]+)?|\\b[0-9]+[eE][+-]?[0-9]+|\\.[0-9]+(?:[eE][+-]?[0-9]+)?"
+        },
+        {
+          "name": "constant.numeric.integer.decimal.dgdlpc",
+          "match": "\\b[0-9]+"
+        }
+      ]
+    },
+    "keywords": {
+      "comment": "The driver's reserved words, checked against editors/common/dgdlpc.json. 'function' is not here: it is reserved only with dialect.closures, and without it a plain identifier, free to be a variable's or a parameter's name.",
+      "patterns": [
+        {
+          "comment": "inherit LABEL \"/path\" or inherit LABEL PATH_MACRO: a name with a path after it is the label.",
+          "match": "\\b(inherit)[ \\t]+([A-Za-z_][A-Za-z0-9_]*)(?=[ \\t]+[\"A-Za-z_])",
+          "captures": {
+            "1": { "name": "keyword.other.inherit.dgdlpc" },
+            "2": { "name": "entity.name.namespace.dgdlpc" }
+          }
+        },
+        {
+          "name": "keyword.control.dgdlpc",
+          "match": "\\b(?:break|case|catch|continue|default|do|else|for|goto|if|return|rlimits|switch|try|while)\\b"
+        },
+        {
+          "name": "keyword.other.inherit.dgdlpc",
+          "match": "\\b(?:inherit)\\b"
+        },
+        {
+          "name": "keyword.other.operator.dgdlpc",
+          "match": "\\b(?:operator)\\b"
+        },
+        {
+          "name": "keyword.operator.new.dgdlpc",
+          "match": "\\b(?:new)\\b"
+        },
+        {
+          "name": "constant.language.nil.dgdlpc",
+          "match": "\\b(?:nil)\\b"
+        },
+        {
+          "name": "storage.type.dgdlpc",
+          "match": "\\b(?:float|int|mapping|mixed|object|string|void)\\b"
+        },
+        {
+          "name": "storage.modifier.dgdlpc",
+          "match": "\\b(?:atomic|nomask|private|static|varargs)\\b"
+        }
+      ]
+    },
+    "names": {
+      "comment": "By pattern only. Which name is a macro, a kfun or an inherited function is what the language server's semantic tokens know.",
+      "patterns": [
+        {
+          "comment": "label::function()",
+          "name": "entity.name.namespace.dgdlpc",
+          "match": "\\b[A-Za-z_][A-Za-z0-9_]*(?=[ \\t]*::)"
+        },
+        {
+          "comment": "ALL_CAPS: a macro by convention.",
+          "name": "constant.other.caps.dgdlpc",
+          "match": "\\b_*[A-Z][A-Z0-9_]+\\b"
+        },
+        {
+          "name": "entity.name.function.call.dgdlpc",
+          "match": "\\b[A-Za-z_][A-Za-z0-9_]*(?=[ \\t]*\\()"
+        },
+        {
+          "comment": "Any other identifier: consumed whole, given no scope.",
+          "match": "\\b[A-Za-z_][A-Za-z0-9_]*"
+        }
+      ]
+    },
+    "function-definition": {
+      "comment": "A name before '(' on a line that starts at column 0 with nothing but names and '*' before it: `static int *query(`, and the formatter's `query(` on a line of its own. A statement that starts at column 0 is read the same way; its keywords stay keywords.",
+      "match": "^((?:[A-Za-z_][A-Za-z0-9_]*[ \\t*]+)*)([A-Za-z_][A-Za-z0-9_]*)(?=[ \\t]*\\()",
+      "captures": {
+        "1": {
+          "patterns": [
+            { "include": "#keywords" },
+            { "include": "#names" },
+            { "include": "#operators" }
+          ]
+        },
+        "2": {
+          "patterns": [
+            { "include": "#keywords" },
+            {
+              "name": "entity.name.function.definition.dgdlpc",
+              "match": "[A-Za-z_][A-Za-z0-9_]*"
+            }
+          ]
+        }
+      }
+    },
+    "array": {
+      "name": "meta.array.dgdlpc",
+      "begin": "\\(\\{",
+      "end": "\\}\\)",
+      "beginCaptures": { "0": { "name": "punctuation.definition.array.begin.dgdlpc" } },
+      "endCaptures": { "0": { "name": "punctuation.definition.array.end.dgdlpc" } },
+      "patterns": [
+        { "include": "#directives" },
+        { "include": "#code" }
+      ]
+    },
+    "mapping": {
+      "comment": "'])' closes a mapping only where '([' opened one: in f(a[i]) the subscript rule has taken the ']'.",
+      "name": "meta.mapping.dgdlpc",
+      "begin": "\\(\\[",
+      "end": "\\]\\)",
+      "beginCaptures": { "0": { "name": "punctuation.definition.mapping.begin.dgdlpc" } },
+      "endCaptures": { "0": { "name": "punctuation.definition.mapping.end.dgdlpc" } },
+      "patterns": [
+        { "include": "#directives" },
+        { "include": "#code" }
+      ]
+    },
+    "subscript": {
+      "name": "meta.brackets.dgdlpc",
+      "begin": "\\[",
+      "end": "\\]",
+      "beginCaptures": { "0": { "name": "punctuation.section.brackets.begin.dgdlpc" } },
+      "endCaptures": { "0": { "name": "punctuation.section.brackets.end.dgdlpc" } },
+      "patterns": [
+        { "include": "#directives" },
+        { "include": "#code" }
+      ]
+    },
+    "directive-array": {
+      "name": "meta.array.dgdlpc",
+      "begin": "\\(\\{",
+      "end": "(\\}\\))|(?=\\n)",
+      "beginCaptures": { "0": { "name": "punctuation.definition.array.begin.dgdlpc" } },
+      "endCaptures": { "1": { "name": "punctuation.definition.array.end.dgdlpc" } },
+      "patterns": [ { "include": "#directive-code" } ]
+    },
+    "directive-mapping": {
+      "name": "meta.mapping.dgdlpc",
+      "begin": "\\(\\[",
+      "end": "(\\]\\))|(?=\\n)",
+      "beginCaptures": { "0": { "name": "punctuation.definition.mapping.begin.dgdlpc" } },
+      "endCaptures": { "1": { "name": "punctuation.definition.mapping.end.dgdlpc" } },
+      "patterns": [ { "include": "#directive-code" } ]
+    },
+    "directive-subscript": {
+      "name": "meta.brackets.dgdlpc",
+      "begin": "\\[",
+      "end": "(\\])|(?=\\n)",
+      "beginCaptures": { "0": { "name": "punctuation.section.brackets.begin.dgdlpc" } },
+      "endCaptures": { "1": { "name": "punctuation.section.brackets.end.dgdlpc" } },
+      "patterns": [ { "include": "#directive-code" } ]
+    },
+    "operators": {
+      "comment": "Longest first: the order of these rules is the lexer's maximal munch.",
+      "patterns": [
+        { "name": "keyword.operator.ellipsis.dgdlpc", "match": "\\.\\.\\." },
+        { "name": "keyword.operator.range.dgdlpc", "match": "\\.\\." },
+        { "name": "keyword.operator.scope.dgdlpc", "match": "::" },
+        { "name": "keyword.operator.arrow.dgdlpc", "match": "->" },
+        { "name": "keyword.operator.assignment.compound.dgdlpc", "match": "<<=|>>=|\\+=|-=|\\*=|/=|%=|&=|\\|=|\\^=" },
+        { "name": "keyword.operator.instance.dgdlpc", "match": "<-" },
+        { "name": "keyword.operator.bitwise.shift.dgdlpc", "match": "<<|>>" },
+        { "name": "keyword.operator.comparison.dgdlpc", "match": "==|!=|<=|>=" },
+        { "name": "keyword.operator.logical.dgdlpc", "match": "&&|\\|\\|" },
+        { "name": "keyword.operator.increment-decrement.dgdlpc", "match": "\\+\\+|--" },
+        { "name": "keyword.operator.preprocessor.dgdlpc", "match": "##|#" },
+        { "name": "keyword.operator.assignment.dgdlpc", "match": "=" },
+        { "name": "keyword.operator.comparison.dgdlpc", "match": "[<>]" },
+        { "name": "keyword.operator.logical.dgdlpc", "match": "!" },
+        { "name": "keyword.operator.arithmetic.dgdlpc", "match": "[-+*/%]" },
+        { "name": "keyword.operator.bitwise.dgdlpc", "match": "[&|^~]" },
+        { "name": "keyword.operator.ternary.dgdlpc", "match": "\\?" }
+      ]
+    },
+    "punctuation": {
+      "patterns": [
+        { "name": "punctuation.terminator.statement.dgdlpc", "match": ";" },
+        { "name": "punctuation.separator.comma.dgdlpc", "match": "," },
+        { "name": "punctuation.separator.colon.dgdlpc", "match": ":" },
+        { "name": "punctuation.separator.dot.dgdlpc", "match": "\\." },
+        { "name": "punctuation.section.parens.begin.dgdlpc", "match": "\\(" },
+        { "name": "punctuation.section.parens.end.dgdlpc", "match": "\\)" },
+        { "name": "punctuation.section.block.begin.dgdlpc", "match": "\\{" },
+        { "name": "punctuation.section.block.end.dgdlpc", "match": "\\}" },
+        { "name": "punctuation.section.brackets.end.dgdlpc", "match": "\\]" }
+      ]
+    },
+    "directives": {
+      "comment": "'#' first on its line begins a directive, which runs to the end of the logical line. The names are the driver's, checked against editors/common/dgdlpc.json.",
+      "patterns": [
+        { "include": "#directive-include" },
+        { "include": "#directive-define-function" },
+        { "include": "#directive-define" },
+        { "include": "#directive-conditional" },
+        { "include": "#directive-error" },
+        { "include": "#directive-other" },
+        { "include": "#directive-unknown" }
+      ]
+    },
+    "directive-include": {
+      "name": "meta.preprocessor.include.dgdlpc",
+      "begin": "^[ \\t]*((#)[ \\t]*include)\\b",
+      "end": "(?=\\n)",
+      "beginCaptures": {
+        "1": { "name": "keyword.control.directive.include.dgdlpc" },
+        "2": { "name": "punctuation.definition.directive.dgdlpc" }
+      },
+      "patterns": [
+        { "include": "#line-continuation" },
+        { "include": "#comments" },
+        {
+          "name": "string.quoted.double.include.dgdlpc",
+          "match": "(\")(?:[^\"\\\\\\n]|\\\\.)*(\")",
+          "captures": {
+            "1": { "name": "punctuation.definition.string.begin.dgdlpc" },
+            "2": { "name": "punctuation.definition.string.end.dgdlpc" }
+          }
+        },
+        {
+          "name": "string.quoted.other.lt-gt.include.dgdlpc",
+          "match": "(<)[^>\\n]*(>)",
+          "captures": {
+            "1": { "name": "punctuation.definition.string.begin.dgdlpc" },
+            "2": { "name": "punctuation.definition.string.end.dgdlpc" }
+          }
+        },
+        { "include": "#directive-code" }
+      ]
+    },
+    "directive-define-function": {
+      "comment": "#define NAME(a, b): the '(' directly after the name makes it a macro with parameters.",
+      "name": "meta.preprocessor.macro.dgdlpc",
+      "begin": "^[ \\t]*((#)[ \\t]*define)[ \\t]+([A-Za-z_][A-Za-z0-9_]*)(\\()([^)\\n]*)(\\))",
+      "end": "(?=\\n)",
+      "beginCaptures": {
+        "1": { "name": "keyword.control.directive.define.dgdlpc" },
+        "2": { "name": "punctuation.definition.directive.dgdlpc" },
+        "3": { "name": "entity.name.function.preprocessor.dgdlpc" },
+        "4": { "name": "punctuation.definition.parameters.begin.dgdlpc" },
+        "5": {
+          "patterns": [
+            { "include": "#comment-block" },
+            { "name": "variable.parameter.preprocessor.dgdlpc", "match": "[A-Za-z_][A-Za-z0-9_]*" },
+            { "name": "punctuation.separator.parameters.dgdlpc", "match": "," }
+          ]
+        },
+        "6": { "name": "punctuation.definition.parameters.end.dgdlpc" }
+      },
+      "patterns": [ { "include": "#directive-code" } ]
+    },
+    "directive-define": {
+      "name": "meta.preprocessor.macro.dgdlpc",
+      "begin": "^[ \\t]*((#)[ \\t]*define)\\b(?:[ \\t]+([A-Za-z_][A-Za-z0-9_]*))?",
+      "end": "(?=\\n)",
+      "beginCaptures": {
+        "1": { "name": "keyword.control.directive.define.dgdlpc" },
+        "2": { "name": "punctuation.definition.directive.dgdlpc" },
+        "3": { "name": "entity.name.function.preprocessor.dgdlpc" }
+      },
+      "patterns": [ { "include": "#directive-code" } ]
+    },
+    "directive-conditional": {
+      "name": "meta.preprocessor.conditional.dgdlpc",
+      "begin": "^[ \\t]*((#)[ \\t]*(?:if|ifdef|ifndef|elif|else|endif))\\b",
+      "end": "(?=\\n)",
+      "beginCaptures": {
+        "1": { "name": "keyword.control.directive.conditional.dgdlpc" },
+        "2": { "name": "punctuation.definition.directive.dgdlpc" }
+      },
+      "patterns": [
+        { "name": "keyword.control.directive.defined.dgdlpc", "match": "\\bdefined\\b" },
+        { "include": "#directive-code" }
+      ]
+    },
+    "directive-error": {
+      "comment": "The rest of the line is a message, not code: only comments and a continuation mean anything in it.",
+      "name": "meta.preprocessor.error.dgdlpc",
+      "begin": "^[ \\t]*((#)[ \\t]*error)\\b",
+      "end": "(?=\\n)",
+      "beginCaptures": {
+        "1": { "name": "keyword.control.directive.error.dgdlpc" },
+        "2": { "name": "punctuation.definition.directive.dgdlpc" }
+      },
+      "patterns": [
+        { "include": "#line-continuation" },
+        { "include": "#comments" }
+      ]
+    },
+    "directive-other": {
+      "name": "meta.preprocessor.dgdlpc",
+      "begin": "^[ \\t]*((#)[ \\t]*(?:line|pragma|undef))\\b",
+      "end": "(?=\\n)",
+      "beginCaptures": {
+        "1": { "name": "keyword.control.directive.dgdlpc" },
+        "2": { "name": "punctuation.definition.directive.dgdlpc" }
+      },
+      "patterns": [ { "include": "#directive-code" } ]
+    },
+    "directive-unknown": {
+      "comment": "Any other '#' first on its line is still a directive to the lexer; its name gets no keyword scope.",
+      "name": "meta.preprocessor.dgdlpc",
+      "begin": "^[ \\t]*(#)",
+      "end": "(?=\\n)",
+      "beginCaptures": {
+        "1": { "name": "punctuation.definition.directive.dgdlpc" }
+      },
+      "patterns": [ { "include": "#directive-code" } ]
+    }
+  }
+}

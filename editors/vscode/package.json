@@ -1,0 +1,232 @@
+{
+  "name": "dgdtools",
+  "displayName": "DGD LPC (dgdtools)",
+  "description": "DGD-dialect LPC: syntax highlighting, and the dgdtools language server (diagnostics as you type, fixes, formatting, navigation, completion, rename) for the language dgdlpc.",
+  "version": "0.0.1",
+  "publisher": "mmcdole",
+  "license": "MIT",
+  "icon": "icon.png",
+  "galleryBanner": {
+    "color": "#08053f",
+    "theme": "dark"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mmcdole/dgdtools.git",
+    "directory": "editors/vscode"
+  },
+  "engines": {
+    "vscode": "^1.91.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Linters",
+    "Formatters"
+  ],
+  "keywords": [
+    "lpc",
+    "dgd",
+    "mud",
+    "lpmud"
+  ],
+  "main": "./dist/extension.js",
+  "activationEvents": [
+    "workspaceContains:**/dgdtools.yml",
+    "workspaceContains:**/.dgdtools.yml"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": "limited",
+      "description": "In a workspace that is not trusted, the workspace's own values of dgdtools.path and dgdtools.logFile are ignored: the server that runs is the one you chose.",
+      "restrictedConfigurations": [
+        "dgdtools.path",
+        "dgdtools.logFile"
+      ]
+    },
+    "virtualWorkspaces": {
+      "supported": "limited",
+      "description": "The language server reads files on disk. In a virtual workspace there is highlighting only."
+    }
+  },
+  "contributes": {
+    "languages": [
+      {
+        "id": "dgdlpc",
+        "aliases": [
+          "LPC (DGD)",
+          "DGD LPC",
+          "dgdlpc"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "dgdlpc",
+        "scopeName": "source.dgdlpc",
+        "path": "./syntaxes/dgdlpc.tmLanguage.json"
+      }
+    ],
+    "semanticTokenModifiers": [
+      {
+        "id": "inherited",
+        "description": "A function or a global variable the object inherits."
+      },
+      {
+        "id": "local",
+        "description": "A local variable of a function."
+      },
+      {
+        "id": "macro",
+        "description": "A macro that stands for a type or for specifiers."
+      }
+    ],
+    "semanticTokenScopes": [
+      {
+        "language": "dgdlpc",
+        "scopes": {
+          "namespace": [
+            "entity.name.namespace.dgdlpc"
+          ],
+          "type": [
+            "storage.type.dgdlpc"
+          ],
+          "modifier": [
+            "storage.modifier.dgdlpc"
+          ],
+          "keyword": [
+            "storage.type.dgdlpc"
+          ],
+          "macro": [
+            "entity.name.function.preprocessor.dgdlpc"
+          ],
+          "function": [
+            "entity.name.function.call.dgdlpc"
+          ],
+          "function.declaration": [
+            "entity.name.function.definition.dgdlpc"
+          ],
+          "function.definition": [
+            "entity.name.function.definition.dgdlpc"
+          ],
+          "function.defaultLibrary": [
+            "support.function.dgdlpc"
+          ],
+          "method": [
+            "entity.name.function.member.dgdlpc"
+          ],
+          "method.defaultLibrary": [
+            "support.function.dgdlpc"
+          ],
+          "variable": [
+            "variable.other.dgdlpc"
+          ],
+          "variable.local": [
+            "variable.other.local.dgdlpc"
+          ],
+          "parameter": [
+            "variable.parameter.dgdlpc"
+          ]
+        }
+      }
+    ],
+    "configurationDefaults": {
+      "[dgdlpc]": {
+        "files.autoGuessEncoding": true,
+        "editor.wordBasedSuggestions": "off"
+      }
+    },
+    "commands": [
+      {
+        "command": "dgdtools.restartServer",
+        "title": "Restart Server",
+        "category": "dgdtools"
+      },
+      {
+        "command": "dgdtools.associateFolder",
+        "title": "Use DGD LPC for This Folder's .c/.h Files",
+        "category": "dgdtools"
+      },
+      {
+        "command": "dgdtools.dissociateFolder",
+        "title": "Use C for This Folder's .c/.h Files",
+        "category": "dgdtools"
+      }
+    ],
+    "menus": {
+      "explorer/context": [
+        {
+          "command": "dgdtools.associateFolder",
+          "when": "explorerResourceIsFolder && dgdtools.active",
+          "group": "2_workspace@90"
+        },
+        {
+          "command": "dgdtools.dissociateFolder",
+          "when": "explorerResourceIsFolder && dgdtools.active",
+          "group": "2_workspace@91"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "dgdtools",
+      "properties": {
+        "dgdtools.path": {
+          "type": "string",
+          "default": "",
+          "scope": "machine-overridable",
+          "markdownDescription": "The `dgdtools` executable to run as the language server: an absolute path (`~` is your home directory), or a command name to look up on `PATH`. Empty: the `dgdtools` this extension came with (the package for your platform has one), else `dgdtools` on `PATH`."
+        },
+        "dgdtools.profile": {
+          "type": "string",
+          "default": "",
+          "scope": "resource",
+          "markdownDescription": "The mudlib profile to work against in a folder that has no `dgdtools.yml`: a name or a file, as `profile:` in a config file. A config file always wins over this."
+        },
+        "dgdtools.libPath": {
+          "type": "string",
+          "default": "",
+          "scope": "resource",
+          "markdownDescription": "The mudlib path of a folder that has no `dgdtools.yml`: where it sits in the mudlib (for example `/players/me`), as `lib_path:` in a config file. A config file always wins over this."
+        },
+        "dgdtools.logFile": {
+          "type": "string",
+          "default": "",
+          "scope": "machine-overridable",
+          "markdownDescription": "A file the server appends its debug log to (`dgdtools lsp --log FILE`): an absolute path (`~` is your home directory). Empty: no log."
+        },
+        "dgdtools.trace.server": {
+          "type": "string",
+          "enum": [
+            "messages",
+            "verbose"
+          ],
+          "enumDescriptions": [
+            "The name of each message, and how long a request took.",
+            "The content of each message too."
+          ],
+          "default": "messages",
+          "scope": "window",
+          "markdownDescription": "How much of what the editor and the server say to each other is traced. The trace is made while the log level of the *dgdtools* channel of the Output panel is *Trace* (the gear of the panel, or *Developer: Set Log Level…*), and is shown there."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "esbuild src/extension.ts --bundle --platform=node --format=cjs --target=node20 --external:vscode --sourcemap --outfile=dist/extension.js",
+    "check": "tsc -p .",
+    "test": "node --test \"src/**/*.test.ts\" \"scripts/**/*.test.mts\"",
+    "vscode:prepublish": "npm run check && npm run build -- --minify"
+  },
+  "dependencies": {
+    "jsonc-parser": "3.3.1",
+    "vscode-languageclient": "11.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.0",
+    "@types/vscode": "1.91.0",
+    "@vscode/vsce": "4.1.1",
+    "esbuild": "0.28.2",
+    "ovsx": "1.4.0",
+    "typescript": "7.0.2"
+  }
+}

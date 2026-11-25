@@ -3,7 +3,7 @@
 // Two files compare equal when their non-trivia tokens match pairwise in
 // kind and exact bytes. Whitespace, newlines, and comments are ignored —
 // so equality proves a diff is formatting-only and cannot have changed
-// program behavior. This is the safety gate for dgdfmt: the formatter
+// program behavior. This is the formatter's safety gate: it
 // refuses to write output whose token stream diverges from its input.
 //
 // The only permitted normalization is trailing space/tab trimming at the
@@ -86,25 +86,4 @@ func tokensEqual(a *token.File, at token.Token, b *token.File, bt token.Token) b
 
 func trimTrailingBlanks(s []byte) []byte {
 	return bytes.TrimRight(s, " \t")
-}
-
-// Context returns up to n significant tokens on each side of token index i,
-// rendered as strings — for divergence display.
-func Context(f *token.File, i, n int) (before, after []string) {
-	if i < 0 {
-		return nil, nil
-	}
-	for j := i - 1; j >= 0 && len(before) < n; j-- {
-		t := f.Tokens[j]
-		if !t.Kind.IsTrivia() && t.Kind != token.EOF {
-			before = append([]string{string(f.Text(t))}, before...)
-		}
-	}
-	for j := i + 1; j < len(f.Tokens) && len(after) < n; j++ {
-		t := f.Tokens[j]
-		if !t.Kind.IsTrivia() && t.Kind != token.EOF {
-			after = append(after, string(f.Text(t)))
-		}
-	}
-	return before, after
 }

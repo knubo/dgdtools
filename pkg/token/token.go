@@ -24,6 +24,7 @@ const (
 	// Trivia.
 	Space        // run of spaces, tabs, \v, \f
 	Newline      // exactly one line terminator: \n, \r\n, or bare \r
+	Splice       // a backslash and the line terminator after it, which DGD removes
 	LineComment  // // to end of line (dialect-gated)
 	BlockComment // /* ... */, possibly spanning lines
 
@@ -120,13 +121,11 @@ const (
 	CaretEq    // ^=
 	ShlEq      // <<=
 	ShrEq      // >>=
-
-	kindCount
 )
 
 var kindNames = [...]string{
 	Illegal: "Illegal", EOF: "EOF", Directive: "Directive",
-	Space: "Space", Newline: "Newline",
+	Space: "Space", Newline: "Newline", Splice: "Splice",
 	LineComment: "LineComment", BlockComment: "BlockComment",
 	Ident: "Ident", IntLit: "IntLit", FloatLit: "FloatLit",
 	StringLit: "StringLit", CharLit: "CharLit",
@@ -164,6 +163,76 @@ func (k Kind) IsTrivia() bool { return k >= Space && k <= BlockComment }
 
 // IsKeyword reports whether the kind is a reserved word.
 func (k Kind) IsKeyword() bool { return k >= KwAtomic && k <= KwWhile }
+
+// IsSpecifier reports whether the kind is a class specifier keyword.
+func (k Kind) IsSpecifier() bool {
+	switch k {
+	case KwPrivate, KwStatic, KwAtomic, KwNomask, KwVarargs:
+		return true
+	}
+	return false
+}
+
+// IsType reports whether the kind is a type keyword.
+func (k Kind) IsType() bool {
+	switch k {
+	case KwInt, KwFloat, KwString, KwObject, KwMapping, KwMixed, KwVoid, KwFunction:
+		return true
+	}
+	return false
+}
+
+// IsAssign reports whether the kind is an assignment operator.
+func (k Kind) IsAssign() bool {
+	return k == Assign || (k >= PlusEq && k <= ShrEq)
+}
+
+// Precedence returns the binding strength of a binary operator, from 1
+// (||) to 10 (* / %), or 0 when the kind is not one. Assignment and ?:
+// bind looser than every binary operator and are not included.
+func (k Kind) Precedence() int {
+	switch k {
+	case LOr:
+		return 1
+	case LAnd:
+		return 2
+	case Pipe:
+		return 3
+	case Caret:
+		return 4
+	case Amp:
+		return 5
+	case EqEq, NotEq:
+		return 6
+	case Lt, Gt, LtEq, GtEq:
+		return 7
+	case Shl, Shr:
+		return 8
+	case Plus, Minus:
+		return 9
+	case Star, Slash, Percent:
+		return 10
+	}
+	return 0
+}
+
+// IsIdent reports whether s is spelled like an identifier.
+func IsIdent(s string) bool {
+	if s == "" || (s[0] >= '0' && s[0] <= '9') {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		if !IsIdentByte(s[i]) {
+			return false
+		}
+	}
+	return true
+}
+
+// IsIdentByte reports whether c can appear in an identifier.
+func IsIdentByte(c byte) bool {
+	return c == '_' || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
+}
 
 // Keywords maps the DGD 1.7 reserved words to their kinds. "function" is
 // included here; the lexer excludes it unless the dialect enables closures.

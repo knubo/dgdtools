@@ -1,0 +1,9 @@
+lib/obj/key.c:9:19: error: function 'do_unlok' is not defined in /obj/key (this_object) (called via add_action) [R001 callable-not-found]
+lib/obj/key.c:12:9: error: adjacent string literals are a syntax error in DGD; join them with '+' [E002 adjacent-strings]
+lib/obj/key.c:20:5: warning: unreachable code [S004 unreachable-code]
+    lib/obj/key.c:19:5: note: control leaves here
+lib/room/a b.c:3:1: error: 'hidden' in /std/room is static — call_other from another object returns nil [R002 static-crossobj]
+    dgdtools-profile://my lib/std/room.c:5:12: note: defined here
+    lib/std/base.c:2:1: note: inherited through here
+/elsewhere/loose.c:1:1: info: file is not formatted (run `dgdtools format`)
+second line, 100% of it [C003 unformatted]

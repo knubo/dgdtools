@@ -1,0 +1,327 @@
+# The kernel functions of DGD that a program can call by name: each as
+# the driver declares it (src/kfun/*.cpp: the FUNCDEF tables and the
+# prototypes they name, which have types and no parameter names), under
+# the line that says what it does (the comment of the function in C).
+#
+# Written from the driver's source, and held to it, by
+#   DGD_SRC=<dgd checkout> go test ./pkg/kfun -run TestDriverSource [-update]
+# Not to be edited.
+#
+# source: DGD 1.7.9
+
+// compute acos
+float acos(float)
+
+// allocate an array
+mixed *allocate(int)
+
+// allocate an array
+float *allocate_float(int)
+
+// allocate an array of integers
+int *allocate_int(int)
+
+// compute asin
+float asin(float)
+
+// add two arbitrary precision numbers
+string asn_add(string, string, varargs string)
+
+// logical and of arbitrary precision numbers
+string asn_and(string, string)
+
+int asn_cmp(string, string)
+
+// divide arbitrary precision numbers
+string asn_div(string, string, varargs string)
+
+// left shift an arbitrary precision number
+string asn_lshift(string, int, varargs string)
+
+// modulus of arbitrary precision number
+string asn_mod(string, string)
+
+// modular inverse of arbitrary precision number
+string asn_modinv(string, string)
+
+// multiply arbitrary precision numbers
+string asn_mult(string, string, varargs string)
+
+// logical or of arbitrary precision numbers
+string asn_or(string, string)
+
+// power of an arbitrary precision number
+string asn_pow(string, string, varargs string)
+
+// right shift of arbitrary precision number
+string asn_rshift(string, int)
+
+// subtract arbitrary precision numbers
+string asn_sub(string, string, varargs string)
+
+// logical xor of arbitrary precision numbers
+string asn_xor(string, string)
+
+// compute atan
+float atan(float)
+
+// compute atan2
+float atan2(float, float)
+
+// block input for the current object
+void block_input(int)
+
+// call a function in another object
+mixed call_other(mixed, string, mixed...)
+
+// start a call_out
+int call_out(string, mixed, mixed...)
+
+// start a summand call_out
+int call_out_summand(string, mixed, float, mixed...)
+
+// prepare to call a function when this object is next touched
+int call_touch(object)
+
+// return the entire call_other chain
+mixed **call_trace()
+
+// round the argument upwards
+float ceil(float)
+
+// clone a new object
+object clone_object(object)
+
+// compile an object
+object compile_object(string, string...)
+
+// connect to a server
+void connect(string, int, varargs string)
+
+// connect by datagrams to a server
+void connect_datagram(int, string, int, varargs string)
+
+// compute cos
+float cos(float)
+
+// compute cosh
+float cosh(float)
+
+// hash_string("crypt", ...)
+string crypt(string, varargs string)
+
+// convert a time value to a string
+string ctime(int)
+
+// set the challenge for a datagram connection to attach
+void datagram_challenge(string)
+
+// decrypt a string
+mixed decrypt(string, mixed...)
+
+// destruct an object
+void destruct_object(object)
+
+// dump state
+void dump_state(varargs int)
+
+// handle an editor command
+string editor(varargs string)
+
+// encrypt a string
+mixed encrypt(string, mixed...)
+
+// cause an error
+void error(string)
+
+// compute exp
+float exp(float)
+
+// explode a string
+string *explode(string, string)
+
+// return the absolute value of a float
+float fabs(float)
+
+// find the loaded object for a given object name
+object find_object(string)
+
+// round the argument downwards
+float floor(float)
+
+// compute fmod
+float fmod(float, float)
+
+// split a float into a fraction and an exponent
+mixed *frexp(float)
+
+// return the name of the program a function is in
+string function_object(string, object)
+
+// get directory filelist + info
+mixed **get_dir(string)
+
+// Compute a 16 bit cyclic redundancy code for a string
+int hash_crc16(string, string...)
+
+// Compute a 32 bit cyclic redundancy code for a string
+int hash_crc32(string, string...)
+
+// hash a string
+string hash_string(string, string, string...)
+
+// implode an array
+string implode(string *, string)
+
+// check whether an object is an instance of a type
+int instanceof(object, string)
+
+// is finite?
+int isfinite(float)
+
+// is infinite?
+int isinf(float)
+
+// is NaN?
+int isnan(float)
+
+// make a float from a fraction and an exponent
+float ldexp(float, int)
+
+// compute log
+float log(float)
+
+// compute log10
+float log10(float)
+
+// create a directory
+int make_dir(string)
+
+// return the array of mapping indices
+mixed *map_indices(mapping)
+
+// return the number of index/value pairs in a mapping
+int map_sizeof(mapping)
+
+// return the array of mapping values
+mixed *map_values(mapping)
+
+// return the current time in milliseconds
+mixed *millitime()
+
+// split float into fraction and integer part
+float *modf(float)
+
+// create a new non-persistent object
+object new_object(object)
+
+// return the name of an object
+string object_name(object)
+
+// parse a string
+mixed *parse_string(string, string, varargs int)
+
+// compute pow
+float pow(float, float)
+
+// preprocess a file
+string *preprocess_file(string, string...)
+
+// return the previous object in the call_other chain
+object previous_object(varargs int)
+
+// return the previous program in the function call chain
+string previous_program(varargs int)
+
+// query the editing status of an object
+string query_editor(object)
+
+// return the ip name of a user
+string query_ip_name(object)
+
+// return the ip number of a user
+string query_ip_number(object)
+
+// return a random number
+int random(int)
+
+// read a string from file
+string read_file(string, varargs int, int)
+
+// remove a call_out
+mixed remove_call_out(int)
+
+// remove an empty directory
+int remove_dir(string)
+
+// remove a file
+int remove_file(string)
+
+// rename a file
+int rename_file(string, string)
+
+// restore the variables of the current object from file
+int restore_object(string)
+
+// save the variables of the current object
+void save_object(string)
+
+// close output stream
+void send_close()
+
+// send a datagram to a user (non networkpackage function)
+int send_datagram(string)
+
+// send a message to a user
+int send_message(mixed)
+
+// shut down the mud
+void shutdown(varargs int)
+
+// compute sin
+float sin(float)
+
+// compute sinh
+float sinh(float)
+
+// return the size of an array
+int sizeof(mixed *)
+
+// compute sqrt
+float sqrt(float)
+
+// scan a string
+int sscanf(string, string, lvalue...)
+
+// return an array with status information about the gamedriver or an object
+mixed *status(varargs mixed)
+
+// return the length of a string
+int strlen(string)
+
+// swap out all objects
+void swapout()
+
+// compute tan
+float tan(float)
+
+// compute tanh
+float tanh(float)
+
+// return the current object
+object this_object()
+
+// return the current user object (if any)
+object this_user()
+
+// return the current time
+int time()
+
+// return the type of a value
+int typeof(mixed)
+
+// return the array of users
+object *users()
+
+// write a string to a file
+int write_file(string, string, varargs int)

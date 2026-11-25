@@ -1,0 +1,302 @@
+What changes around the open documents: a header on disk, a file that
+appears and goes, the project's configuration, and the settings an editor
+has for a folder without one.
+
+-- lib/dgdtools.yml --
+root: .
+include_dirs: [/include]
+profile_build:
+  driver_config: ../mud.dgd
+-- mud.dgd --
+include_dirs = ({ "/include" });
+-- lib/include/paths.h --
+#define STORE "/obj/store"
+-- lib/obj/store.c --
+void put(string what) {}
+-- lib/obj/a.c --
+#include <paths.h>
+void f() { STORE->put("x", 1); "/obj/chest"->open(); }
+-- wizard/b.c --
+void g() { "/players/ann/c"->nofn(); }
+-- wizard/c.c --
+void fn() {}
+-- script --
+settings wizard {"libPath": "/players/ann"}
+initialize lib wizard
+received workspace/configuration
+open lib/obj/a.c
+diagnostics lib/obj/a.c
+# The patterns, and the one file the project is configured by that they
+# do not reach: the driver's configuration, beside the lib.
+received client/registerCapability
+received window/logMessage
+
+# The header changes on disk: STORE is another object.
+write lib/include/paths.h "#define STORE \"/obj/nowhere\"\n"
+watched changed lib/include/paths.h
+diagnostics lib/obj/a.c
+# A file appears.
+write lib/obj/chest.c "void open() {}\n"
+watched created lib/obj/chest.c
+diagnostics lib/obj/a.c
+# The configuration changes: a rule is turned off.
+write lib/dgdtools.yml "root: .\ninclude_dirs: [/include]\nlint:\n  rules:\n    target-object-missing: off\n"
+watched changed lib/dgdtools.yml
+diagnostics lib/obj/a.c
+# The project no longer reads the driver's configuration: the watchers
+# are registered again without it.
+received client/unregisterCapability
+received client/registerCapability
+
+# A folder without a config file, and what the settings say of it.
+open wizard/b.c
+diagnostics wizard/b.c
+received window/logMessage
+settings wizard {}
+configuration
+diagnostics wizard/b.c
+shutdown
+exit
+-- transcript --
+> settings wizard {"libPath": "/players/ann"}
+> initialize lib wizard
+< {
+<   "capabilities": {
+<     "positionEncoding": "utf-16",
+<     "textDocumentSync": {"openClose": true, "change": 2},
+<     "codeActionProvider": {"codeActionKinds": ["quickfix", "refactor.rewrite", "source.fixAll.dgdtools"]},
+<     "completionProvider": {"triggerCharacters": [">", ":", "\"", "/", "<"], "resolveProvider": true},
+<     "definitionProvider": true,
+<     "referencesProvider": true,
+<     "documentHighlightProvider": true,
+<     "hoverProvider": true,
+<     "signatureHelpProvider": {"triggerCharacters": ["(", ","], "retriggerCharacters": [")"]},
+<     "documentSymbolProvider": true,
+<     "workspaceSymbolProvider": true,
+<     "documentFormattingProvider": true,
+<     "documentRangeFormattingProvider": true,
+<     "semanticTokensProvider": {
+<       "legend": {
+<         "tokenTypes": [
+<           "namespace",
+<           "type",
+<           "parameter",
+<           "variable",
+<           "function",
+<           "method",
+<           "macro",
+<           "keyword",
+<           "modifier"
+<         ],
+<         "tokenModifiers": ["declaration", "definition", "static", "defaultLibrary", "inherited", "local", "macro"]
+<       },
+<       "range": true,
+<       "full": {"delta": true}
+<     },
+<     "renameProvider": {"prepareProvider": true},
+<     "workspace": {
+<       "workspaceFolders": {"supported": true, "changeNotifications": true},
+<       "textDocumentContent": {"schemes": ["dgdtools-profile"]},
+<       "fileOperations": {
+<         "willRename": {
+<           "filters": [
+<             {"scheme": "file", "pattern": {"glob": "**/*.{c,h}", "matches": "file"}},
+<             {"scheme": "file", "pattern": {"glob": "**", "matches": "folder"}}
+<           ]
+<         }
+<       }
+<     }
+<   },
+<   "serverInfo": {"name": "dgdtools", "version": "test"}
+< }
+> received workspace/configuration
+< {
+<   "items": [
+<     {"scopeUri": "file://$ROOT/lib", "section": "dgdtools"},
+<     {"scopeUri": "file://$ROOT/wizard", "section": "dgdtools"}
+<   ]
+< }
+> open lib/obj/a.c
+> diagnostics lib/obj/a.c
+< {
+<   "uri": "file://$ROOT/lib/obj/a.c",
+<   "version": 1,
+<   "diagnostics": [
+<     {
+<       "range": {"start": {"line": 1, "character": 18}, "end": {"line": 1, "character": 21}},
+<       "severity": 2,
+<       "code": "R005",
+<       "codeDescription": {"href": "https://github.com/mmcdole/dgdtools/blob/main/docs/rules.md#callback-arity"},
+<       "source": "dgdtools",
+<       "message": "'put' in /obj/store takes at most 1 argument(s); this call passes 2 (extras are dropped)",
+<       "relatedInformation": [
+<         {
+<           "location": {
+<             "uri": "file://$ROOT/lib/obj/store.c",
+<             "range": {"start": {"line": 0, "character": 5}, "end": {"line": 0, "character": 8}}
+<           },
+<           "message": "defined here"
+<         }
+<       ]
+<     },
+<     {
+<       "range": {"start": {"line": 1, "character": 45}, "end": {"line": 1, "character": 49}},
+<       "severity": 1,
+<       "code": "R004",
+<       "codeDescription": {
+<         "href": "https://github.com/mmcdole/dgdtools/blob/main/docs/rules.md#target-object-missing"
+<       },
+<       "source": "dgdtools",
+<       "message": "object /obj/chest does not exist (called via ->)"
+<     }
+<   ]
+< }
+# The patterns, and the one file the project is configured by that they
+# do not reach: the driver's configuration, beside the lib.
+> received client/registerCapability
+< {
+<   "registrations": [
+<     {
+<       "id": "dgdtools-watch-1",
+<       "method": "workspace/didChangeWatchedFiles",
+<       "registerOptions": {
+<         "watchers": [
+<           {"globPattern": "**/*.{c,h}"},
+<           {"globPattern": "**/dgdtools.yml"},
+<           {"globPattern": "**/.dgdtools.yml"},
+<           {"globPattern": "**/.editorconfig"},
+<           {"globPattern": "**/*.profile"},
+<           {"globPattern": "**/dgdtools-baseline.json"}
+<         ]
+<       }
+<     }
+<   ]
+< }
+< {
+<   "registrations": [
+<     {
+<       "id": "dgdtools-watch-2",
+<       "method": "workspace/didChangeWatchedFiles",
+<       "registerOptions": {
+<         "watchers": [
+<           {"globPattern": "**/*.{c,h}"},
+<           {"globPattern": "**/dgdtools.yml"},
+<           {"globPattern": "**/.dgdtools.yml"},
+<           {"globPattern": "**/.editorconfig"},
+<           {"globPattern": "**/*.profile"},
+<           {"globPattern": "**/dgdtools-baseline.json"},
+<           {"globPattern": {"baseUri": "file://$ROOT", "pattern": "mud.dgd"}}
+<         ]
+<       }
+<     }
+<   ]
+< }
+> received window/logMessage
+< {"message": "project $ROOT/lib/dgdtools.yml: mudlib $ROOT/lib", "type": 3}
+# The header changes on disk: STORE is another object.
+> write lib/include/paths.h "#define STORE \"/obj/nowhere\"\n"
+> watched changed lib/include/paths.h
+> diagnostics lib/obj/a.c
+< {
+<   "uri": "file://$ROOT/lib/obj/a.c",
+<   "version": 1,
+<   "diagnostics": [
+<     {
+<       "range": {"start": {"line": 1, "character": 18}, "end": {"line": 1, "character": 21}},
+<       "severity": 1,
+<       "code": "R004",
+<       "codeDescription": {
+<         "href": "https://github.com/mmcdole/dgdtools/blob/main/docs/rules.md#target-object-missing"
+<       },
+<       "source": "dgdtools",
+<       "message": "object /obj/nowhere does not exist (called via ->)"
+<     },
+<     {
+<       "range": {"start": {"line": 1, "character": 45}, "end": {"line": 1, "character": 49}},
+<       "severity": 1,
+<       "code": "R004",
+<       "codeDescription": {
+<         "href": "https://github.com/mmcdole/dgdtools/blob/main/docs/rules.md#target-object-missing"
+<       },
+<       "source": "dgdtools",
+<       "message": "object /obj/chest does not exist (called via ->)"
+<     }
+<   ]
+< }
+# A file appears.
+> write lib/obj/chest.c "void open() {}\n"
+> watched created lib/obj/chest.c
+> diagnostics lib/obj/a.c
+< {
+<   "uri": "file://$ROOT/lib/obj/a.c",
+<   "version": 1,
+<   "diagnostics": [
+<     {
+<       "range": {"start": {"line": 1, "character": 18}, "end": {"line": 1, "character": 21}},
+<       "severity": 1,
+<       "code": "R004",
+<       "codeDescription": {
+<         "href": "https://github.com/mmcdole/dgdtools/blob/main/docs/rules.md#target-object-missing"
+<       },
+<       "source": "dgdtools",
+<       "message": "object /obj/nowhere does not exist (called via ->)"
+<     }
+<   ]
+< }
+# The configuration changes: a rule is turned off.
+> write lib/dgdtools.yml "root: .\ninclude_dirs: [/include]\nlint:\n  rules:\n    target-object-missing: off\n"
+> watched changed lib/dgdtools.yml
+> diagnostics lib/obj/a.c
+< {"uri": "file://$ROOT/lib/obj/a.c", "version": 1, "diagnostics": []}
+# The project no longer reads the driver's configuration: the watchers
+# are registered again without it.
+> received client/unregisterCapability
+< {"unregisterations": [{"id": "dgdtools-watch-1", "method": "workspace/didChangeWatchedFiles"}]}
+< {"unregisterations": [{"id": "dgdtools-watch-2", "method": "workspace/didChangeWatchedFiles"}]}
+> received client/registerCapability
+< {
+<   "registrations": [
+<     {
+<       "id": "dgdtools-watch-3",
+<       "method": "workspace/didChangeWatchedFiles",
+<       "registerOptions": {
+<         "watchers": [
+<           {"globPattern": "**/*.{c,h}"},
+<           {"globPattern": "**/dgdtools.yml"},
+<           {"globPattern": "**/.dgdtools.yml"},
+<           {"globPattern": "**/.editorconfig"},
+<           {"globPattern": "**/*.profile"},
+<           {"globPattern": "**/dgdtools-baseline.json"}
+<         ]
+<       }
+<     }
+<   ]
+< }
+# A folder without a config file, and what the settings say of it.
+> open wizard/b.c
+> diagnostics wizard/b.c
+< {
+<   "uri": "file://$ROOT/wizard/b.c",
+<   "version": 1,
+<   "diagnostics": [
+<     {
+<       "range": {"start": {"line": 0, "character": 29}, "end": {"line": 0, "character": 33}},
+<       "severity": 1,
+<       "code": "R001",
+<       "codeDescription": {"href": "https://github.com/mmcdole/dgdtools/blob/main/docs/rules.md#callable-not-found"},
+<       "source": "dgdtools",
+<       "message": "function 'nofn' is not defined in /players/ann/c (called via ->)"
+<     }
+<   ]
+< }
+> received window/logMessage
+< {"message": "project $ROOT/lib/dgdtools.yml: mudlib $ROOT/lib", "type": 3}
+< {"message": "no dgdtools.yml: $ROOT/wizard is /players/ann", "type": 3}
+> settings wizard {}
+> configuration
+> diagnostics wizard/b.c
+< {"uri": "file://$ROOT/wizard/b.c", "version": 1, "diagnostics": []}
+> shutdown
+< null
+> exit
+< "the server exited after shutdown"

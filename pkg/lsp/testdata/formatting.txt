@@ -1,0 +1,240 @@
+Formatting a document and a range of it: the project's settings, not the
+editor's (the script's requests ask for tabs of eight), as one edit for
+each stretch of whitespace that changes.
+
+-- lib/dgdtools.yml --
+root: .
+format:
+  indent_width: 2
+-- lib/obj/a.c --
+int
+f(int a)
+{
+  if (a > 1) {
+return a+1;
+        }
+  return   0;
+}
+
+int g(){return 1;}
+-- lib/obj/c.c --
+void
+f()
+{
+  x = 1;
+/* Comments above a range */
+    /* that are not in it. */
+      y=2;
+}
+-- lib/obj/bad.c --
+int f() { return '; }
+-- script --
+initialize lib
+open lib/obj/a.c
+
+# Lines 5 and 6 only (a range that ends at the start of line 7).
+format lib/obj/a.c 4:0-6:0
+# The whole document.
+format lib/obj/a.c
+# Formatted, there is nothing to do.
+format lib/obj/a.c
+format lib/obj/a.c 0:0-4:0
+
+# A range whose first line has comments above it, as an editor sends
+# the selection of one line: its edits are on that line.
+open lib/obj/c.c
+format lib/obj/c.c 6:0-6:10
+
+# A text the formatter refuses gets no edits, and a line in the log.
+open lib/obj/bad.c
+diagnostics lib/obj/bad.c
+format lib/obj/bad.c
+received window/logMessage
+# A document that is not open, and one that is no file.
+request textDocument/formatting {"textDocument":{"uri":"file:///nowhere.c"},"options":{}}
+shutdown
+exit
+-- transcript --
+> initialize lib
+< {
+<   "capabilities": {
+<     "positionEncoding": "utf-16",
+<     "textDocumentSync": {"openClose": true, "change": 2},
+<     "codeActionProvider": {"codeActionKinds": ["quickfix", "refactor.rewrite", "source.fixAll.dgdtools"]},
+<     "completionProvider": {"triggerCharacters": [">", ":", "\"", "/", "<"], "resolveProvider": true},
+<     "definitionProvider": true,
+<     "referencesProvider": true,
+<     "documentHighlightProvider": true,
+<     "hoverProvider": true,
+<     "signatureHelpProvider": {"triggerCharacters": ["(", ","], "retriggerCharacters": [")"]},
+<     "documentSymbolProvider": true,
+<     "workspaceSymbolProvider": true,
+<     "documentFormattingProvider": true,
+<     "documentRangeFormattingProvider": true,
+<     "semanticTokensProvider": {
+<       "legend": {
+<         "tokenTypes": [
+<           "namespace",
+<           "type",
+<           "parameter",
+<           "variable",
+<           "function",
+<           "method",
+<           "macro",
+<           "keyword",
+<           "modifier"
+<         ],
+<         "tokenModifiers": ["declaration", "definition", "static", "defaultLibrary", "inherited", "local", "macro"]
+<       },
+<       "range": true,
+<       "full": {"delta": true}
+<     },
+<     "renameProvider": {"prepareProvider": true},
+<     "workspace": {
+<       "workspaceFolders": {"supported": true, "changeNotifications": true},
+<       "textDocumentContent": {"schemes": ["dgdtools-profile"]},
+<       "fileOperations": {
+<         "willRename": {
+<           "filters": [
+<             {"scheme": "file", "pattern": {"glob": "**/*.{c,h}", "matches": "file"}},
+<             {"scheme": "file", "pattern": {"glob": "**", "matches": "folder"}}
+<           ]
+<         }
+<       }
+<     }
+<   },
+<   "serverInfo": {"name": "dgdtools", "version": "test"}
+< }
+> open lib/obj/a.c
+# Lines 5 and 6 only (a range that ends at the start of line 7).
+> format lib/obj/a.c 4:0-6:0
+< [
+<   {
+<     "range": {"start": {"line": 4, "character": 0}, "end": {"line": 4, "character": 0}},
+<     "newText": "    "
+<   },
+<   {
+<     "range": {"start": {"line": 4, "character": 8}, "end": {"line": 4, "character": 8}},
+<     "newText": " "
+<   },
+<   {
+<     "range": {"start": {"line": 4, "character": 9}, "end": {"line": 4, "character": 9}},
+<     "newText": " "
+<   },
+<   {
+<     "range": {"start": {"line": 5, "character": 2}, "end": {"line": 5, "character": 8}},
+<     "newText": ""
+<   }
+< ]
+| int\n
+| f(int a)\n
+| {\n
+|   if (a > 1) {\n
+|     return a + 1;\n
+|   }\n
+|   return   0;\n
+| }\n
+| \n
+| int g(){return 1;}\n
+# The whole document.
+> format lib/obj/a.c
+< [
+<   {
+<     "range": {"start": {"line": 6, "character": 9}, "end": {"line": 6, "character": 11}},
+<     "newText": ""
+<   },
+<   {
+<     "range": {"start": {"line": 9, "character": 7}, "end": {"line": 9, "character": 7}},
+<     "newText": " "
+<   },
+<   {
+<     "range": {"start": {"line": 9, "character": 8}, "end": {"line": 9, "character": 8}},
+<     "newText": " "
+<   },
+<   {
+<     "range": {"start": {"line": 9, "character": 17}, "end": {"line": 9, "character": 17}},
+<     "newText": " "
+<   }
+< ]
+| int\n
+| f(int a)\n
+| {\n
+|   if (a > 1) {\n
+|     return a + 1;\n
+|   }\n
+|   return 0;\n
+| }\n
+| \n
+| int g() { return 1; }\n
+# Formatted, there is nothing to do.
+> format lib/obj/a.c
+< []
+> format lib/obj/a.c 0:0-4:0
+< []
+# A range whose first line has comments above it, as an editor sends
+# the selection of one line: its edits are on that line.
+> open lib/obj/c.c
+> format lib/obj/c.c 6:0-6:10
+< [
+<   {
+<     "range": {"start": {"line": 6, "character": 2}, "end": {"line": 6, "character": 6}},
+<     "newText": ""
+<   },
+<   {
+<     "range": {"start": {"line": 6, "character": 7}, "end": {"line": 6, "character": 7}},
+<     "newText": " "
+<   },
+<   {
+<     "range": {"start": {"line": 6, "character": 8}, "end": {"line": 6, "character": 8}},
+<     "newText": " "
+<   }
+< ]
+| void\n
+| f()\n
+| {\n
+|   x = 1;\n
+| /* Comments above a range */\n
+|     /* that are not in it. */\n
+|   y = 2;\n
+| }\n
+# A text the formatter refuses gets no edits, and a line in the log.
+> open lib/obj/bad.c
+> diagnostics lib/obj/bad.c
+< {
+<   "uri": "file://$ROOT/lib/obj/bad.c",
+<   "version": 1,
+<   "diagnostics": [
+<     {
+<       "range": {"start": {"line": 0, "character": 21}, "end": {"line": 0, "character": 21}},
+<       "severity": 1,
+<       "code": "E001",
+<       "codeDescription": {"href": "https://github.com/mmcdole/dgdtools/blob/main/docs/rules.md#syntax-error"},
+<       "source": "dgdtools",
+<       "message": "missing '}' to close '{' opened on line 1",
+<       "relatedInformation": [
+<         {
+<           "location": {
+<             "uri": "file://$ROOT/lib/obj/bad.c",
+<             "range": {"start": {"line": 0, "character": 8}, "end": {"line": 0, "character": 9}}
+<           },
+<           "message": "opened here"
+<         }
+<       ]
+<     }
+<   ]
+< }
+> format lib/obj/bad.c
+< null
+> received window/logMessage
+< {"message": "project $ROOT/lib/dgdtools.yml: mudlib $ROOT/lib", "type": 3}
+< {
+<   "message": "not formatted: $ROOT/lib/obj/bad.c:1:18: file contains unlexable content; refusing to format (unterminated character constant)",
+<   "type": 3
+< }
+# A document that is not open, and one that is no file.
+> request textDocument/formatting {"textDocument":{"uri":"file:///nowhere.c"},"options":{}}
+< null
+> shutdown
+< null
+> exit
+< "the server exited after shutdown"

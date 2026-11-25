@@ -1,0 +1,18 @@
+>/*
+#^^ dgdlpcComment
+> * Tokens the lexer has that only a macro body can hold: outside a
+#^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ dgdlpcComment
+> * directive they are tokens still, and no valid file has them.
+#^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ dgdlpcComment
+> */
+#^^^ dgdlpcComment
+>static void
+#^^^^^^ dgdlpcSpecifier
+#       ^^^^ dgdlpcType
+>stray()
+#^^^^^ dgdlpcFunction
+>{
+>    a . b;
+>    a # b;
+>    a ## b;
+>}

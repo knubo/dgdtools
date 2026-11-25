@@ -1,0 +1,226 @@
+Refactorings as code actions: the prototype of a function called before
+the file defines it, put above the function of the first call; and the
+path of the one file of the lib a missing #include may have meant, a
+quick fix that is not preferred (it may not be the file meant).
+
+-- lib/dgdtools.yml --
+root: .
+include_dirs: [/include]
+-- lib/include/std.h --
+#define STD 1
+-- lib/players/ann/defs.h --
+#define ANN 1
+-- lib/players/ann/obj/a.c --
+#include "defs.h"
+
+void f() {
+    helper(1);
+}
+
+int helper(int n) { return n; }
+-- script --
+initialize lib
+open lib/players/ann/obj/a.c
+diagnostics lib/players/ann/obj/a.c
+actions lib/players/ann/obj/a.c 0:12-0:12 quickfix
+apply 0
+actions lib/players/ann/obj/a.c 3:6-3:6
+apply 0
+actions lib/players/ann/obj/a.c 7:6-7:6 refactor
+shutdown
+exit
+-- transcript --
+> initialize lib
+< {
+<   "capabilities": {
+<     "positionEncoding": "utf-16",
+<     "textDocumentSync": {"openClose": true, "change": 2},
+<     "codeActionProvider": {"codeActionKinds": ["quickfix", "refactor.rewrite", "source.fixAll.dgdtools"]},
+<     "completionProvider": {"triggerCharacters": [">", ":", "\"", "/", "<"], "resolveProvider": true},
+<     "definitionProvider": true,
+<     "referencesProvider": true,
+<     "documentHighlightProvider": true,
+<     "hoverProvider": true,
+<     "signatureHelpProvider": {"triggerCharacters": ["(", ","], "retriggerCharacters": [")"]},
+<     "documentSymbolProvider": true,
+<     "workspaceSymbolProvider": true,
+<     "documentFormattingProvider": true,
+<     "documentRangeFormattingProvider": true,
+<     "semanticTokensProvider": {
+<       "legend": {
+<         "tokenTypes": [
+<           "namespace",
+<           "type",
+<           "parameter",
+<           "variable",
+<           "function",
+<           "method",
+<           "macro",
+<           "keyword",
+<           "modifier"
+<         ],
+<         "tokenModifiers": ["declaration", "definition", "static", "defaultLibrary", "inherited", "local", "macro"]
+<       },
+<       "range": true,
+<       "full": {"delta": true}
+<     },
+<     "renameProvider": {"prepareProvider": true},
+<     "workspace": {
+<       "workspaceFolders": {"supported": true, "changeNotifications": true},
+<       "textDocumentContent": {"schemes": ["dgdtools-profile"]},
+<       "fileOperations": {
+<         "willRename": {
+<           "filters": [
+<             {"scheme": "file", "pattern": {"glob": "**/*.{c,h}", "matches": "file"}},
+<             {"scheme": "file", "pattern": {"glob": "**", "matches": "folder"}}
+<           ]
+<         }
+<       }
+<     }
+<   },
+<   "serverInfo": {"name": "dgdtools", "version": "test"}
+< }
+> open lib/players/ann/obj/a.c
+> diagnostics lib/players/ann/obj/a.c
+< {
+<   "uri": "file://$ROOT/lib/players/ann/obj/a.c",
+<   "version": 1,
+<   "diagnostics": [
+<     {
+<       "range": {"start": {"line": 0, "character": 0}, "end": {"line": 0, "character": 17}},
+<       "severity": 1,
+<       "code": "E006",
+<       "codeDescription": {"href": "https://github.com/mmcdole/dgdtools/blob/main/docs/rules.md#include-not-found"},
+<       "source": "dgdtools",
+<       "message": "cannot find include file \"defs.h\""
+<     }
+<   ]
+< }
+> actions lib/players/ann/obj/a.c 0:12-0:12 quickfix
+< [
+<   {
+<     "title": "Include \"/players/ann/defs.h\"",
+<     "kind": "quickfix",
+<     "diagnostics": [
+<       {
+<         "range": {"start": {"line": 0, "character": 0}, "end": {"line": 0, "character": 17}},
+<         "severity": 1,
+<         "code": "E006",
+<         "codeDescription": {"href": "https://github.com/mmcdole/dgdtools/blob/main/docs/rules.md#include-not-found"},
+<         "source": "dgdtools",
+<         "message": "cannot find include file \"defs.h\""
+<       }
+<     ],
+<     "edit": {
+<       "documentChanges": [
+<         {
+<           "textDocument": {"uri": "file://$ROOT/lib/players/ann/obj/a.c", "version": 1},
+<           "edits": [
+<             {
+<               "range": {"start": {"line": 0, "character": 9}, "end": {"line": 0, "character": 17}},
+<               "newText": "\"/players/ann/defs.h\""
+<             }
+<           ]
+<         }
+<       ]
+<     }
+<   },
+<   {
+<     "title": "Suppress include-not-found for this line",
+<     "kind": "quickfix",
+<     "diagnostics": [
+<       {
+<         "range": {"start": {"line": 0, "character": 0}, "end": {"line": 0, "character": 17}},
+<         "severity": 1,
+<         "code": "E006",
+<         "codeDescription": {"href": "https://github.com/mmcdole/dgdtools/blob/main/docs/rules.md#include-not-found"},
+<         "source": "dgdtools",
+<         "message": "cannot find include file \"defs.h\""
+<       }
+<     ],
+<     "edit": {
+<       "documentChanges": [
+<         {
+<           "textDocument": {"uri": "file://$ROOT/lib/players/ann/obj/a.c", "version": 1},
+<           "edits": [
+<             {
+<               "range": {"start": {"line": 0, "character": 0}, "end": {"line": 0, "character": 0}},
+<               "newText": "/* dgdtools-ignore lint/include-not-found */\n"
+<             }
+<           ]
+<         }
+<       ]
+<     }
+<   },
+<   {
+<     "title": "Suppress include-not-found for this file",
+<     "kind": "quickfix",
+<     "diagnostics": [
+<       {
+<         "range": {"start": {"line": 0, "character": 0}, "end": {"line": 0, "character": 17}},
+<         "severity": 1,
+<         "code": "E006",
+<         "codeDescription": {"href": "https://github.com/mmcdole/dgdtools/blob/main/docs/rules.md#include-not-found"},
+<         "source": "dgdtools",
+<         "message": "cannot find include file \"defs.h\""
+<       }
+<     ],
+<     "edit": {
+<       "documentChanges": [
+<         {
+<           "textDocument": {"uri": "file://$ROOT/lib/players/ann/obj/a.c", "version": 1},
+<           "edits": [
+<             {
+<               "range": {"start": {"line": 0, "character": 0}, "end": {"line": 0, "character": 0}},
+<               "newText": "/* dgdtools-ignore-start lint/include-not-found */\n"
+<             }
+<           ]
+<         }
+<       ]
+<     }
+<   }
+< ]
+> apply 0
+| #include \"/players/ann/defs.h\"\n
+| \n
+| void f() {\n
+|     helper(1);\n
+| }\n
+| \n
+| int helper(int n) { return n; }\n
+> actions lib/players/ann/obj/a.c 3:6-3:6
+< [
+<   {
+<     "title": "Add the prototype of 'helper' before its first call",
+<     "kind": "refactor.rewrite",
+<     "edit": {
+<       "documentChanges": [
+<         {
+<           "textDocument": {"uri": "file://$ROOT/lib/players/ann/obj/a.c", "version": 2},
+<           "edits": [
+<             {
+<               "range": {"start": {"line": 2, "character": 0}, "end": {"line": 2, "character": 0}},
+<               "newText": "int helper(int n);\n\n"
+<             }
+<           ]
+<         }
+<       ]
+<     }
+<   }
+< ]
+> apply 0
+| #include \"/players/ann/defs.h\"\n
+| \n
+| int helper(int n);\n
+| \n
+| void f() {\n
+|     helper(1);\n
+| }\n
+| \n
+| int helper(int n) { return n; }\n
+> actions lib/players/ann/obj/a.c 7:6-7:6 refactor
+< []
+> shutdown
+< null
+> exit
+< "the server exited after shutdown"

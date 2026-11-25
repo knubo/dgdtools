@@ -3,7 +3,7 @@
 // The scanner is byte-oriented and never transcodes: bytes >= 0x80 pass
 // through untouched inside strings, char constants, and comments, and become
 // Illegal tokens elsewhere. Lexing never fails and never panics; malformed
-// input produces Illegal tokens plus diagnostics, and the round-trip
+// input produces Illegal tokens plus errors, and the round-trip
 // invariant (every byte belongs to exactly one token) holds regardless.
 //
 // Dialect notes (DGD 1.7): "//" comments exist only when Dialect.SlashSlash
@@ -16,20 +16,16 @@ package lexer
 import (
 	"fmt"
 
-	"github.com/mmcdole/dgdtools/pkg/diag"
 	"github.com/mmcdole/dgdtools/pkg/token"
 )
-
-// Dialect selects the compile-time language variants of the target driver.
-type Dialect = token.Dialect
 
 // Default is the pragmatic dialect: // comments on ("//" is never a legal
 // DGD token sequence outside strings, so accepting it is harmless),
 // closures off (stock DGD ships without CLOSURES).
-var Default = Dialect{SlashSlash: true, Closures: false}
+var Default = token.Dialect{SlashSlash: true, Closures: false}
 
 // Lex tokenizes src. The returned File always satisfies CheckRoundTrip.
-func Lex(path string, src []byte, d Dialect) *token.File {
+func Lex(path string, src []byte, d token.Dialect) *token.File {
 	lx := &lexer{
 		f:           &token.File{Path: path, Src: src, Dialect: d},
 		src:         src,
@@ -37,6 +33,9 @@ func Lex(path string, src []byte, d Dialect) *token.File {
 		atLineStart: true,
 	}
 	lx.f.Lines = append(lx.f.Lines, 0)
+	// LPC has a token in four or five bytes: room for that many saves
+	// growing the slice token by token, most of what lexing allocates.
+	lx.f.Tokens = make([]token.Token, 0, len(src)/4)
 	lx.run()
 	return lx.f
 }
@@ -45,7 +44,7 @@ type lexer struct {
 	f       *token.File
 	src     []byte
 	pos     int
-	dialect Dialect
+	dialect token.Dialect
 
 	// atLineStart is true when only whitespace and comments have appeared
 	// since the last newline; a '#' here starts a directive (matching cpp).
@@ -63,7 +62,7 @@ func (lx *lexer) run() {
 func (lx *lexer) emit(k token.Kind, start int) {
 	lx.f.Tokens = append(lx.f.Tokens, token.Token{Kind: k, Off: uint32(start), End: uint32(lx.pos)})
 	switch k {
-	case token.Space, token.LineComment, token.BlockComment, token.EOF:
+	case token.Space, token.Splice, token.LineComment, token.BlockComment, token.EOF:
 		// no effect on line-start state
 	case token.Newline:
 		lx.atLineStart = true
@@ -73,20 +72,7 @@ func (lx *lexer) emit(k token.Kind, start int) {
 }
 
 func (lx *lexer) errorf(off int, format string, args ...any) {
-	p := lx.posOf(off)
-	lx.f.Errs = append(lx.f.Errs, diag.Diagnostic{
-		Path: lx.f.Path, Line: p.Line, Col: p.Col,
-		Severity: diag.Error, Message: fmt.Sprintf(format, args...),
-	})
-}
-
-// posOf computes a position from the line starts recorded so far.
-func (lx *lexer) posOf(off int) token.Pos {
-	line := len(lx.f.Lines)
-	for line > 1 && lx.f.Lines[line-1] > uint32(off) {
-		line--
-	}
-	return token.Pos{Line: line, Col: off - int(lx.f.Lines[line-1]) + 1}
+	lx.f.Errs = append(lx.f.Errs, token.Error{Off: uint32(off), Msg: fmt.Sprintf(format, args...)})
 }
 
 func (lx *lexer) peek(ahead int) byte {
@@ -145,6 +131,13 @@ func (lx *lexer) scanToken() {
 		lx.newline()
 		lx.emit(token.Newline, start)
 
+	case c == '\\' && (lx.peek(1) == '\n' || lx.peek(1) == '\r'):
+		// A line splice: DGD removes a backslash and the line break after
+		// it wherever they are, before it reads tokens.
+		lx.pos++
+		lx.newline()
+		lx.emit(token.Splice, start)
+
 	case c == '/':
 		lx.scanSlash(start)
 
@@ -164,9 +157,8 @@ func (lx *lexer) scanToken() {
 		for lx.pos < len(lx.src) && isIdentPart(lx.src[lx.pos]) {
 			lx.pos++
 		}
-		word := string(lx.src[start:lx.pos])
 		kind := token.Ident
-		if kw, ok := token.Keywords[word]; ok && (kw != token.KwFunction || lx.dialect.Closures) {
+		if kw, ok := token.Keywords[string(lx.src[start:lx.pos])]; ok && (kw != token.KwFunction || lx.dialect.Closures) {
 			kind = kw
 		}
 		lx.emit(kind, start)
@@ -292,7 +284,18 @@ func (lx *lexer) scanString(start int) {
 			if !lx.newline() && lx.pos < len(lx.src) {
 				lx.pos++
 			}
-		case '\n', '\r':
+		case '\r':
+			if lx.peek(1) != '\n' {
+				// A bare carriage return is ordinary string content to
+				// DGD (only \n ends a line); it is not a line break
+				// here either.
+				lx.pos++
+				continue
+			}
+			lx.errorf(start, "unterminated string literal")
+			lx.emit(token.Illegal, start)
+			return
+		case '\n':
 			lx.errorf(start, "unterminated string literal")
 			lx.emit(token.Illegal, start)
 			return
@@ -340,6 +343,7 @@ func (lx *lexer) scanChar(start int) {
 // scanEscapeTail consumes the body of an escape sequence after the
 // backslash: up to 3 octal digits, \x plus up to 2 hex digits, or one
 // arbitrary character (DGD: unknown escape means the literal character).
+// As in the driver the x is lower case only: \X is the letter X.
 func (lx *lexer) scanEscapeTail() {
 	if lx.pos >= len(lx.src) {
 		return
@@ -350,7 +354,7 @@ func (lx *lexer) scanEscapeTail() {
 		for n := 0; n < 3 && lx.pos < len(lx.src) && lx.src[lx.pos] >= '0' && lx.src[lx.pos] <= '7'; n++ {
 			lx.pos++
 		}
-	case c == 'x' || c == 'X':
+	case c == 'x':
 		lx.pos++
 		for n := 0; n < 2 && lx.pos < len(lx.src) && isHexDigit(lx.src[lx.pos]); n++ {
 			lx.pos++

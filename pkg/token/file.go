@@ -4,8 +4,6 @@ import (
 	"fmt"
 	"iter"
 	"sort"
-
-	"github.com/mmcdole/dgdtools/pkg/diag"
 )
 
 // Dialect selects the compile-time language variants of the target driver.
@@ -22,9 +20,16 @@ type File struct {
 	Path    string
 	Src     []byte
 	Dialect Dialect
-	Tokens  []Token // contiguous; last element is a zero-length EOF token
+	Tokens  []Token  // contiguous; last element is a zero-length EOF token
 	Lines   []uint32 // byte offset of each line start; Lines[0] == 0
-	Errs    []diag.Diagnostic
+	Errs    []Error  // one for each Illegal token
+}
+
+// Error is a lexical error: what is wrong with the Illegal token that
+// starts at byte offset Off.
+type Error struct {
+	Off uint32
+	Msg string
 }
 
 // Text returns the token's bytes as a zero-copy subslice of Src.
@@ -62,6 +67,14 @@ func (f *File) Pos(off uint32) Pos {
 		i = 0
 	}
 	return Pos{Line: i + 1, Col: int(off-f.Lines[i]) + 1}
+}
+
+// TokenAt returns the index in Tokens of the token the byte at offset
+// off belongs to; an offset at or past the end of the source is the EOF
+// token's.
+func (f *File) TokenAt(off uint32) int {
+	i := sort.Search(len(f.Tokens), func(i int) bool { return f.Tokens[i].End > off })
+	return min(i, len(f.Tokens)-1)
 }
 
 // CheckRoundTrip verifies the lossless invariant: tokens are contiguous,

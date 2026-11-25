@@ -1,0 +1,234 @@
+A client with nothing beyond the protocol's core: diagnostics without
+tags, links and related locations, and edits by URI with no version.
+
+-- lib/dgdtools.yml --
+root: .
+include_dirs: [/include]
+lint:
+  rules:
+    unused-suppression: warning
+-- lib/std/base.c --
+int foo(int a) { return a; }
+-- lib/obj/a.c --
+void f()
+{
+    string s;
+
+    s = "one" "two";
+    "/std/base"->foo(1, 2); /* dgdtools-ignore lint/sscanf-format */
+}
+-- script --
+initialize plain lib
+open lib/obj/a.c
+diagnostics lib/obj/a.c
+actions lib/obj/a.c 4:15-5:18 quickfix
+watchers
+received workspace/configuration
+shutdown
+exit
+-- transcript --
+> initialize plain lib
+< {
+<   "capabilities": {
+<     "positionEncoding": "utf-16",
+<     "textDocumentSync": {"openClose": true, "change": 2},
+<     "codeActionProvider": {"codeActionKinds": ["quickfix", "refactor.rewrite", "source.fixAll.dgdtools"]},
+<     "completionProvider": {"triggerCharacters": [">", ":", "\"", "/", "<"], "resolveProvider": true},
+<     "definitionProvider": true,
+<     "referencesProvider": true,
+<     "documentHighlightProvider": true,
+<     "hoverProvider": true,
+<     "signatureHelpProvider": {"triggerCharacters": ["(", ","], "retriggerCharacters": [")"]},
+<     "documentSymbolProvider": true,
+<     "workspaceSymbolProvider": true,
+<     "documentFormattingProvider": true,
+<     "documentRangeFormattingProvider": true,
+<     "semanticTokensProvider": {
+<       "legend": {
+<         "tokenTypes": [
+<           "namespace",
+<           "type",
+<           "parameter",
+<           "variable",
+<           "function",
+<           "method",
+<           "macro",
+<           "keyword",
+<           "modifier"
+<         ],
+<         "tokenModifiers": ["declaration", "definition", "static", "defaultLibrary", "inherited", "local", "macro"]
+<       },
+<       "range": true,
+<       "full": {"delta": true}
+<     },
+<     "renameProvider": true,
+<     "workspace": {
+<       "workspaceFolders": {"supported": true, "changeNotifications": true},
+<       "textDocumentContent": {"schemes": ["dgdtools-profile"]},
+<       "fileOperations": {
+<         "willRename": {
+<           "filters": [
+<             {"scheme": "file", "pattern": {"glob": "**/*.{c,h}", "matches": "file"}},
+<             {"scheme": "file", "pattern": {"glob": "**", "matches": "folder"}}
+<           ]
+<         }
+<       }
+<     }
+<   },
+<   "serverInfo": {"name": "dgdtools", "version": "test"}
+< }
+> open lib/obj/a.c
+> diagnostics lib/obj/a.c
+< {
+<   "uri": "file://$ROOT/lib/obj/a.c",
+<   "version": 1,
+<   "diagnostics": [
+<     {
+<       "range": {"start": {"line": 4, "character": 14}, "end": {"line": 4, "character": 19}},
+<       "severity": 1,
+<       "code": "E002",
+<       "source": "dgdtools",
+<       "message": "adjacent string literals are a syntax error in DGD; join them with '+'"
+<     },
+<     {
+<       "range": {"start": {"line": 5, "character": 17}, "end": {"line": 5, "character": 20}},
+<       "severity": 2,
+<       "code": "R005",
+<       "source": "dgdtools",
+<       "message": "'foo' in /std/base takes at most 1 argument(s); this call passes 2 (extras are dropped)"
+<     },
+<     {
+<       "range": {"start": {"line": 5, "character": 47}, "end": {"line": 5, "character": 65}},
+<       "severity": 2,
+<       "code": "C006",
+<       "source": "dgdtools",
+<       "message": "nothing to ignore: no sscanf-format finding on line 6"
+<     }
+<   ]
+< }
+> actions lib/obj/a.c 4:15-5:18 quickfix
+< [
+<   {
+<     "title": "insert '+' between the strings",
+<     "kind": "quickfix",
+<     "diagnostics": [
+<       {
+<         "range": {"start": {"line": 4, "character": 14}, "end": {"line": 4, "character": 19}},
+<         "severity": 1,
+<         "code": "E002",
+<         "source": "dgdtools",
+<         "message": "adjacent string literals are a syntax error in DGD; join them with '+'"
+<       }
+<     ],
+<     "isPreferred": true,
+<     "edit": {
+<       "changes": {
+<         "file://$ROOT/lib/obj/a.c": [
+<           {
+<             "range": {"start": {"line": 4, "character": 13}, "end": {"line": 4, "character": 13}},
+<             "newText": " +"
+<           }
+<         ]
+<       }
+<     }
+<   },
+<   {
+<     "title": "Suppress adjacent-strings for this line",
+<     "kind": "quickfix",
+<     "diagnostics": [
+<       {
+<         "range": {"start": {"line": 4, "character": 14}, "end": {"line": 4, "character": 19}},
+<         "severity": 1,
+<         "code": "E002",
+<         "source": "dgdtools",
+<         "message": "adjacent string literals are a syntax error in DGD; join them with '+'"
+<       }
+<     ],
+<     "edit": {
+<       "changes": {
+<         "file://$ROOT/lib/obj/a.c": [
+<           {
+<             "range": {"start": {"line": 4, "character": 0}, "end": {"line": 4, "character": 0}},
+<             "newText": "    /* dgdtools-ignore lint/adjacent-strings */\n"
+<           }
+<         ]
+<       }
+<     }
+<   },
+<   {
+<     "title": "Suppress adjacent-strings for this file",
+<     "kind": "quickfix",
+<     "diagnostics": [
+<       {
+<         "range": {"start": {"line": 4, "character": 14}, "end": {"line": 4, "character": 19}},
+<         "severity": 1,
+<         "code": "E002",
+<         "source": "dgdtools",
+<         "message": "adjacent string literals are a syntax error in DGD; join them with '+'"
+<       }
+<     ],
+<     "edit": {
+<       "changes": {
+<         "file://$ROOT/lib/obj/a.c": [
+<           {
+<             "range": {"start": {"line": 0, "character": 0}, "end": {"line": 0, "character": 0}},
+<             "newText": "/* dgdtools-ignore-start lint/adjacent-strings */\n"
+<           }
+<         ]
+<       }
+<     }
+<   },
+<   {
+<     "title": "Suppress callback-arity for this line",
+<     "kind": "quickfix",
+<     "diagnostics": [
+<       {
+<         "range": {"start": {"line": 5, "character": 17}, "end": {"line": 5, "character": 20}},
+<         "severity": 2,
+<         "code": "R005",
+<         "source": "dgdtools",
+<         "message": "'foo' in /std/base takes at most 1 argument(s); this call passes 2 (extras are dropped)"
+<       }
+<     ],
+<     "edit": {
+<       "changes": {
+<         "file://$ROOT/lib/obj/a.c": [
+<           {
+<             "range": {"start": {"line": 5, "character": 65}, "end": {"line": 5, "character": 65}},
+<             "newText": ", lint/callback-arity"
+<           }
+<         ]
+<       }
+<     }
+<   },
+<   {
+<     "title": "Suppress callback-arity for this file",
+<     "kind": "quickfix",
+<     "diagnostics": [
+<       {
+<         "range": {"start": {"line": 5, "character": 17}, "end": {"line": 5, "character": 20}},
+<         "severity": 2,
+<         "code": "R005",
+<         "source": "dgdtools",
+<         "message": "'foo' in /std/base takes at most 1 argument(s); this call passes 2 (extras are dropped)"
+<       }
+<     ],
+<     "edit": {
+<       "changes": {
+<         "file://$ROOT/lib/obj/a.c": [
+<           {
+<             "range": {"start": {"line": 0, "character": 0}, "end": {"line": 0, "character": 0}},
+<             "newText": "/* dgdtools-ignore-start lint/callback-arity */\n"
+<           }
+<         ]
+<       }
+<     }
+<   }
+< ]
+> watchers
+< null
+> received workspace/configuration
+> shutdown
+< null
+> exit
+< "the server exited after shutdown"

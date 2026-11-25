@@ -3,8 +3,10 @@
 package format
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -14,21 +16,29 @@ import (
 	"testing"
 
 	"github.com/mmcdole/dgdtools/pkg/lexer"
+	"github.com/mmcdole/dgdtools/pkg/token"
 )
 
-// TestCorpusFormatGate formats every cleanly-lexable corpus file and relies
-// on Format's internal gate: output token stream must equal the input's and
-// the engine must be idempotent. Any gate trip is an engine bug.
-func TestCorpusFormatGate(t *testing.T) {
+// corpus runs check on every .c and .h file under LPC_CORPUS that lexes
+// cleanly, on all CPUs. A non-nil error or a panic is a failure.
+func corpus(t *testing.T, check func(f *token.File) error) {
 	root := os.Getenv("LPC_CORPUS")
 	if root == "" {
 		t.Skip("LPC_CORPUS not set")
 	}
 
 	paths := make(chan string, 1024)
-	var formatted, refused, failures atomic.Int64
+	var checked, refused, failures atomic.Int64
 	var mu sync.Mutex
 	var sample []string
+	fail := func(msg string) {
+		failures.Add(1)
+		mu.Lock()
+		if len(sample) < 30 {
+			sample = append(sample, msg)
+		}
+		mu.Unlock()
+	}
 
 	var wg sync.WaitGroup
 	for range runtime.NumCPU() {
@@ -43,28 +53,16 @@ func TestCorpusFormatGate(t *testing.T) {
 				func() {
 					defer func() {
 						if r := recover(); r != nil {
-							failures.Add(1)
-							mu.Lock()
-							if len(sample) < 30 {
-								sample = append(sample, fmt.Sprintf("%s: PANIC: %v", path, r))
-							}
-							mu.Unlock()
+							fail(fmt.Sprintf("%s: PANIC: %v", path, r))
 						}
 					}()
-					f := lexer.Lex(path, src, lexer.Default)
-					_, err := Format(f, Options{})
-					switch {
+					switch err := check(lexer.Lex(path, src, lexer.Default)); {
 					case err == nil:
-						formatted.Add(1)
+						checked.Add(1)
 					case errors.Is(err, ErrIllegal):
 						refused.Add(1)
 					default:
-						failures.Add(1)
-						mu.Lock()
-						if len(sample) < 30 {
-							sample = append(sample, err.Error())
-						}
-						mu.Unlock()
+						fail(err.Error())
 					}
 				}()
 			}
@@ -84,8 +82,70 @@ func TestCorpusFormatGate(t *testing.T) {
 	wg.Wait()
 
 	t.Logf("corpus: %d formatted, %d refused (illegal), %d gate failures",
-		formatted.Load(), refused.Load(), failures.Load())
+		checked.Load(), refused.Load(), failures.Load())
 	for _, s := range sample {
 		t.Errorf("  FAIL: %s", s)
 	}
+}
+
+// TestCorpusFormatGate formats every cleanly-lexable corpus file and relies
+// on Format's internal gate: output token stream must equal the input's and
+// the engine must be idempotent. Any gate trip is an engine bug. Each file
+// is formatted with spaces and with tabs.
+func TestCorpusFormatGate(t *testing.T) {
+	corpus(t, func(f *token.File) error {
+		if _, err := Format(f, Options{}); err != nil {
+			return err
+		}
+		_, err := Format(f, Options{IndentStyle: Tabs})
+		return err
+	})
+}
+
+// TestCorpusLines formats ranges of lines of every corpus file: the gate
+// must hold for any range, its edits must touch only its lines, every line
+// as a range gives what Format gives, and a range of a formatted file
+// changes nothing.
+func TestCorpusLines(t *testing.T) {
+	corpus(t, func(f *token.File) error {
+		whole, err := Format(f, Options{})
+		if err != nil {
+			return err
+		}
+		n := len(f.Lines)
+		all, err := Lines(f, Options{}, []LineRange{{1, n}})
+		if err != nil {
+			return fmt.Errorf("all lines: %w", err)
+		}
+		if !bytes.Equal(all, whole) {
+			return fmt.Errorf("%s: all lines as a range differ from Format", f.Path)
+		}
+		// Three ranges per file, chosen by its name.
+		h := fnv.New32a()
+		h.Write([]byte(f.Path))
+		seed := int(h.Sum32() >> 1)
+		var ranges []LineRange
+		for i := range 3 {
+			a := 1 + (seed>>(8*i))%n
+			ranges = append(ranges, LineRange{a, a + (seed>>(4*i))%12})
+		}
+		for _, rs := range [][]LineRange{ranges[:1], ranges} {
+			out, err := Lines(f, Options{}, rs)
+			if err != nil {
+				return fmt.Errorf("lines %v: %w", rs, err)
+			}
+			if err := editsWithin(f, out, rs); err != nil {
+				return err
+			}
+		}
+		g := lexer.Lex(f.Path, whole, f.Dialect)
+		out, err := Lines(g, Options{}, ranges)
+		if err != nil {
+			return fmt.Errorf("lines %v of the formatted file: %w", ranges, err)
+		}
+		if !bytes.Equal(out, whole) {
+			return fmt.Errorf("%s: lines %v of the formatted file change it", f.Path, ranges)
+		}
+		return nil
+	})
 }

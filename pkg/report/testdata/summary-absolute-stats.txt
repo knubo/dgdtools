@@ -1,0 +1,16 @@
+note: profile my lib (12 stubs) from /work/my lib.profile
+error: /work/mud/lib/obj/bug.c: internal error in rule no-effect-statement (please report): index out of range
+warning: /work/mud/lib/obj/locked.c: cannot be read: permission denied
+41 files: 3 errors, 1 warning, 1 info; 7 in baseline; 2 suppressed by comments; 3 more over a per-file limit
+       1  adjacent-strings
+       1  callable-not-found
+       1  static-crossobj
+       1  unformatted
+       1  unreachable-code
+not verified (never reported as findings):
+       1  inherit path(s) the macro evaluator could not resolve
+       2  #include(s) that could not be resolved but are not provably missing
+       3  file(s) with an incomplete symbol table
+      80  of 120 late-bound call sites with an unknown receiver
+       4  syntax error(s) withheld as possible macro artifacts
+       5  finding(s) withheld inside #if branches that could not be decided
