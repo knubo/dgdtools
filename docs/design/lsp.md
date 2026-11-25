@@ -2600,7 +2600,10 @@ grammars alone can ship in the first.
   test now makes (as many places as the library finds for 51
   functions), 371 MB since the memory work of architecture.md, section
   4.1 (638 MB just before it). `TestCorpusMemory` measures what the
-  server holds and its latencies, with heap profiles (same section).
+  server holds and its latencies, with heap profiles, and the peak
+  resident size after the scan, after the session's files and at the
+  end (same section; the whole-lib `dgdtools lint`'s memory is there
+  too).
   Not built: the VS Code integration test (the client is the
   next step).
 - **As built, definitions (step 4).** In `pkg/resolve`: every kind of

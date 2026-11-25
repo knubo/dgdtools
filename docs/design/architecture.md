@@ -546,8 +546,9 @@ in JSON and are what an editor applies. `adjacent-strings` carries one
 safety gate comparable to the formatter's token equality.
 
 **Performance/caching:** a whole-lib run is parallel over files and
-takes 7 to 8 s for 108,116 files with the default rules, and 12 to 13 s with
-every rule on and half a million findings written as JSON (12 CPUs). A
+takes 4 s for 108,116 files with the default rules, and 6 to 6.5 s with
+every rule on and 670,000 findings written as JSON or SARIF (12 CPUs,
+the lib on a local disk; see "Memory of a run" below). A
 persistent on-disk cache would save little and adds invalidation risk,
 so there is none. The in-process index is lazy and invalidatable, which
 is what a long-lived server needs.
@@ -588,9 +589,63 @@ counts of every corpus test. The scan's time is within its noise (3.0
 to 3.3 s from run to run on the same commit; most of it is opening
 files). What is left: the Uses' records (75 MB) and their names (30 MB
 of handles, 20 MB in `unique`'s map), the functions (43 MB), the
-reverse edges (35 MB), the units themselves (17 MB). The peak resident
-size is the scan's garbage, not what is kept. `TestCorpusSession`'s
+reverse edges (35 MB), the units themselves (17 MB). `TestCorpusSession`'s
 2,003 files end with 371 MB (638 MB before).
+
+The peak resident size in the table is not the scan's: the test now
+logs it after the scan as well, after the session's files and at the
+end, and on the same lib they are 0.66 to 0.72 GB, 0.87 to 0.92 GB and
+1.25 to 1.46 GB. The scan's peak is twice its heap at the end, which is
+how Go's collector paces itself (`GOGC=100`): it lets the heap grow to
+twice what was live after the last collection. The end's is the
+references of `add_item`: the server encodes 140,000 locations through
+jsonrpc2, which encodes the result again, and the test's client
+decodes them in the same process. The scan's garbage, most of it
+reading the Uses, was cut where it was waste (below); it costs the scan
+3 % of its time in collection, and the scan's time and peak are as they
+were.
+
+**Memory of a run over the whole lib.** `dgdtools lint` over the
+VikingMUD lib peaked at 2.9 GB resident with the default rules and 6.5
+to 7.8 GB with every rule on and SARIF written (5.3 to 5.5 GB for JSON,
+4.0 to 4.2 GB for human or GitHub output). Measured with `/usr/bin/time
+-l` and heap profiles taken after a collection at the end of each pass,
+of the run and before the report: the heap was 1.3 GB when the files
+were linted and 4.4 GB while SARIF was written. What it held: the
+flattened chain of every object linted (690 MB; a run lints every
+object, and the chain of each, a map of its functions, stayed with the
+generation though nothing asked for it again), the Uses that only a
+search for references reads (140 MB, and a third of what the run
+allocates), the run's Documents and findings, and while the report was
+written a copy of every finding as a document and the whole encoded
+text. Each change, in order (12 CPUs, the lib on a local disk, three
+runs each; output byte for byte the same in every format, exit codes
+too):
+
+| change | default rules: peak RSS | time | every rule, SARIF: peak RSS | time |
+|---|---|---|---|---|
+| before | 2.9–3.0 GB | 5.3–5.5 s | 6.6–7.8 GB | 8.2–8.5 s |
+| the chain of the file a lint is about is not kept | 1.5 | 5.4–5.6 | 6.9–7.2 | 7.7–7.9 |
+| `lint.LintOnly`: no Uses; a file's findings and counts kept, the result's findings in one slice | 0.89–0.94 | 4.3 | 5.7–6.4 | 6.6 |
+| JSON and SARIF written one finding at a time; output buffered | 0.91–0.93 | 4.0–4.2 | 1.4–1.5 | 6.4–6.6 |
+| less garbage lexing and reading the Uses | 0.85–0.92 | 4.0–4.4 | 1.5–1.7 | 6.2–6.5 |
+
+The chain of what an object inherits is kept as before (its inheritors
+ask for it), and so is a chain any other code asks the snapshot for;
+the lint of a file makes its own once, in its `index.Query`, and an
+editor's session keeps and answers what it did. The report's document
+is encoded with a placeholder where the findings go, and they are
+encoded one at a time there, indented as `encoding/json` indents the
+whole. The findings themselves are kept until the run is over: the
+files that wait for the scan (1,268 on this lib, the first the 409th)
+are linted again after the first pass, so no file's findings can be
+written before the first pass is done, and streaming them in order
+would hold nearly as much. What is left at the end of a run with the
+default rules: a heap of 340 MB, the index's units (functions,
+variables, inherits, include closures) and the 222,000 findings, peaking
+at about twice that while files are linted; with every rule on, the
+670,000 findings are another 270 MB. No memory limit is set: the run
+needs none.
 
 ## 5. Missing references and how unknowns degrade
 
