@@ -108,16 +108,19 @@ func linted(t testing.TB, path, text, encoding string) []string {
 	out := []string{}
 	for _, d := range fresh(t, path, text) {
 		r := lsp.Range{Start: lsptest.PositionOf(text, int(d.Start), encoding), End: lsptest.PositionOf(text, int(d.End), encoding)}
-		// A message can quote bytes of the file that are no UTF-8 (a
-		// Latin-1 file, a character cut in two); on the wire it is JSON,
-		// where each such byte is U+FFFD.
-		wire, err := json.Marshal(d.Message)
-		require.NoError(t, err)
-		var message string
-		require.NoError(t, json.Unmarshal(wire, &message))
-		out = append(out, finding(r, map[diag.Severity]int{diag.Error: 1, diag.Warning: 2, diag.Info: 3}[d.Severity], d.Rule, message, len(d.Related)))
+		out = append(out, finding(r, map[diag.Severity]int{diag.Error: 1, diag.Warning: 2, diag.Info: 3}[d.Severity], d.Rule, wire(t, d.Message), len(d.Related)))
 	}
 	return out
+}
+
+// wire returns a message as it arrives: one can quote bytes of the file
+// that are no UTF-8 (a Latin-1 file, a character cut in two), and on the
+// wire it is JSON, where each such byte is U+FFFD.
+func wire(t testing.TB, message string) string {
+	data, err := json.Marshal(message)
+	require.NoError(t, err)
+	require.NoError(t, json.Unmarshal(data, &message))
+	return message
 }
 
 // published are the findings the server last published for the file.

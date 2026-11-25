@@ -71,7 +71,10 @@ s.FS()                             // the files as the tools read them
 ### What is built
 
 `dgdtools lsp` speaks LSP 3.17 on standard input and output. `pkg/lsp`
-is some 1,300 lines over `session.Session`:
+is some 2,100 lines over `session.Session`, the protocol's types among
+them. It makes one session, with `DiscoverOptions{ProfileDirs,
+UserConfig, Folders}` and no working directory: every path it is given
+is absolute.
 
 | file | |
 |---|---|
@@ -974,8 +977,16 @@ grammars alone can ship in the first.
   publication of the text it names, the last of the last);
   `TestCancel`, `TestPanics`, `TestEndings`, `TestLatin1`,
   `TestScanProgress`, `TestLogAndTrace`; `TestNeovimClient` in
-  `editors`. All under `-race`. Not built: the corpus smoke test and the
-  VS Code integration test (the client is the next step).
+  `editors`. All under `-race`. `TestCorpusSession` (`-tags corpus`,
+  `$DGDTOOLS_CONFIG`) is the corpus smoke test: on the VikingMUD lib it
+  opens 2,003 of the 108,117 files (9 of them not UTF-8, opened as
+  Latin-1), types a character into each, takes it out and closes it; what
+  is published equals a whole-lib linter's findings for every file
+  (1,334), before and after; no panic; open to diagnostics 4 ms median,
+  9 ms at the 95th percentile (1 ms of it debounce), 5.4 s for the one
+  document that waited for the first scan of the lib; 357 MB of heap at
+  the end. Not built: the VS Code integration test (the client is the
+  next step).
 - **Edit fuzzing** (`go test -fuzz`): start from a corpus file, apply a
   random sequence of range edits through incremental sync while applying
   the same edits to a plain string; after each step the server's buffer
