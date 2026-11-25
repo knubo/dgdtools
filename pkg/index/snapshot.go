@@ -235,7 +235,8 @@ func (s *Snapshot) resolveIncludeIn(from string, inc pp.Include, exists func(str
 		}
 	}
 	if s.HasLib() {
-		for _, dir := range s.cfg.IncludeDirs {
+		dirs, _ := s.IncludeDirs(s.LibFile(from))
+		for _, dir := range dirs {
 			if try(path.Join(dir, inc.Name)) {
 				return hit, absent
 			}

@@ -330,7 +330,8 @@ func (fm *fileMover) rewrite(u *index.Unit, use index.Use, src []byte) (*Occurre
 				candidates = append(candidates, `"`+rel+`"`)
 			}
 		}
-		for _, d := range snap.IncludeDirs() {
+		incDirs, _ := snap.IncludeDirs(thereLib)
+		for _, d := range incDirs {
 			if rel, ok := strings.CutPrefix(newLib, strings.TrimSuffix(d, "/")+"/"); ok {
 				if inc.Angle {
 					candidates = append(candidates, "<"+rel+">")

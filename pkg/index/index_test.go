@@ -886,6 +886,31 @@ func TestCompletenessFollowsTheLib(t *testing.T) {
 	assert.Len(t, s3.Unit("/obj/a").BadIncludes, 1)
 }
 
+// An include directory that is not absolute is a different one for each
+// file: relative to the file, or, with ~ (the kernel library's ~/include),
+// what the lib's driver object makes of it. Neither is required of a
+// whole lib, and an include that may be in one is not provably missing.
+func TestRelativeIncludeDirs(t *testing.T) {
+	files := map[string]string{
+		"usr/ann/inc/mine.h": "#define MINE 1\n",
+		"usr/ann/a.c":        "#include <mine.h>\n#include <gone.h>\n",
+	}
+	l := newLib(t, files, func(c *config.Config) { c.IncludeDirs = []string{"/include", "inc"} })
+	s := l.ix.Snapshot()
+	require.True(t, s.Complete())
+	a := s.Unit("/usr/ann/a")
+	require.Len(t, a.BadIncludes, 1, "found beside the file; the other is provably missing")
+	assert.Equal(t, "<gone.h>", a.BadIncludes[0].Raw)
+
+	l = newLib(t, files, func(c *config.Config) { c.IncludeDirs = []string{"/include", "~/include"} })
+	s = l.ix.Snapshot()
+	assert.True(t, s.Complete(), "~/include is not required")
+	assert.Empty(t, s.Notes())
+	a = s.Unit("/usr/ann/a")
+	assert.Empty(t, a.BadIncludes, "either may be in ~/include")
+	assert.Equal(t, 2, a.UnknownIncludes)
+}
+
 // An object's name may have dots: its source is the name with ".c".
 func TestObjectNameWithDot(t *testing.T) {
 	l := newLib(t, map[string]string{

@@ -181,8 +181,12 @@ func New(cfg *config.Config, lay Layout, fsys vfs.FS, opts ...Option) *Index {
 		real := func(libFile string) string {
 			return filepath.Join(lay.Root, filepath.FromSlash(strings.TrimPrefix(libFile, "/")))
 		}
+		// An include directory that is not absolute is a different one
+		// for each file (IncludeDirs): no one directory is required.
 		for _, d := range cfg.IncludeDirs {
-			l.required = append(l.required, requirement{name: d, path: real(d), dir: true})
+			if strings.HasPrefix(d, "/") {
+				l.required = append(l.required, requirement{name: d, path: real(d), dir: true})
+			}
 		}
 		if f := cfg.IncludeFile; f != "" {
 			l.required = append(l.required, requirement{name: f, path: real(f)})

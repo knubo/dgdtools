@@ -527,8 +527,10 @@ func (prj *Project) wholeLib(fs vfs.FS) bool {
 	}
 	p := prj.Profile
 	probe := p.IncludeFile
-	if probe == "" && len(p.IncludeDirs) > 0 {
-		probe = p.IncludeDirs[0]
+	for _, d := range p.IncludeDirs {
+		if probe == "" && strings.HasPrefix(d, "/") { // not one relative to each file
+			probe = d
+		}
 	}
 	if probe == "" && len(p.AutoObjects) > 0 {
 		probe = p.AutoObjects[0] + ".c"

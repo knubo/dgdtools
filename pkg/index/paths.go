@@ -107,9 +107,28 @@ func (l *lib) IsVirtual(libPath string) bool {
 	return l.virtual.Match(strings.TrimPrefix(libPath, "/"))
 }
 
-// IncludeDirs are the lib directories an #include searches, in order
-// (the configuration's include_dirs).
-func (l *lib) IncludeDirs() []string { return l.cfg.IncludeDirs }
+// IncludeDirs returns the lib directories an #include in the file at lib
+// path fromLib searches, in order (the configuration's include_dirs), and
+// whether some are left out because only the lib can say where they are.
+//
+// DGD hands each include path to the driver object's include_file, and
+// by default resolves it as it does a "..." include: an absolute one from
+// the lib root, any other from the including file's directory. One that
+// starts with ~ (the kernel library's ~/include, the directory of the
+// file's owner) means what the lib's driver object makes of it.
+func (l *lib) IncludeDirs(fromLib string) (dirs []string, unknown bool) {
+	for _, d := range l.cfg.IncludeDirs {
+		switch {
+		case strings.HasPrefix(d, "/"):
+			dirs = append(dirs, path.Clean(d))
+		case strings.HasPrefix(d, "~") || fromLib == "":
+			unknown = true
+		default:
+			dirs = append(dirs, path.Join(path.Dir(fromLib), d))
+		}
+	}
+	return dirs, unknown
+}
 
 // ObjectPath turns an object path as written in fromLib into an absolute
 // lib path. A path without a leading slash is resolved from the lib root
@@ -203,7 +222,8 @@ func (l *lib) decideCovers(p string) bool {
 func (s *Snapshot) includeProvablyMissing(from string, inc pp.Include) bool {
 	l := s.lib
 	if !l.partial {
-		return s.ext.complete
+		_, unknown := l.IncludeDirs(l.LibFile(from))
+		return s.ext.complete && !unknown
 	}
 	var cands []string
 	if !inc.Angle {
@@ -217,7 +237,11 @@ func (s *Snapshot) includeProvablyMissing(from string, inc pp.Include) bool {
 			cands = append(cands, path.Join("/", path.Dir(rel), inc.Name))
 		}
 	}
-	for _, dir := range l.cfg.IncludeDirs {
+	dirs, unknown := l.IncludeDirs(l.LibFile(from))
+	if unknown {
+		return false
+	}
+	for _, dir := range dirs {
 		cands = append(cands, path.Join(dir, inc.Name))
 	}
 	for _, c := range cands {

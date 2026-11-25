@@ -115,7 +115,8 @@ func (s *Snapshot) IncludeEntries(from, dir string, angle bool) []DirEntry {
 		}
 	}
 	if s.HasLib() {
-		for _, inc := range s.cfg.IncludeDirs {
+		dirs, _ := s.IncludeDirs(s.LibFile(from))
+		for _, inc := range dirs {
 			s.libDir(e, path.Join(inc, dir))
 		}
 	}

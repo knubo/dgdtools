@@ -246,13 +246,14 @@ func (d *Document) PathFixes(ctx context.Context, f diag.Diagnostic) []diag.Fix 
 		if inc.Name == "" {
 			return nil
 		}
-		dirs = append(dirs, s.IncludeDirs()...)
+		incDirs, _ := s.IncludeDirs(lib)
+		dirs = append(dirs, incDirs...)
 		found := s.FilesNamed(ctx, path.Base(inc.Name), dirs)
 		if len(found) != 1 {
 			return nil
 		}
 		target := found[0]
-		for _, c := range includePaths(inc, lib, target, s.IncludeDirs()) {
+		for _, c := range includePaths(inc, lib, target, incDirs) {
 			want, _ := s.ResolveInclude(d.Path, pp.Include{Name: c[1 : len(c)-1], Angle: c[0] == '<'})
 			if want != "" && s.LibFile(want) == target {
 				return []diag.Fix{{Title: "Include " + c, Applicability: diag.Unsafe,
