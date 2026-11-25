@@ -12,7 +12,8 @@ LPC, in one command:
   whitespace changed.
 - **`dgdtools rename`** renames a function, a variable or a macro across
   the mudlib, with its redefinitions and every call that reaches it,
-  and says which places may be the name and nobody can tell.
+  and says which places may be the name and nobody can tell; and moves
+  a file, with every `inherit`, `#include` and object path that names it.
 
 Other LPC tooling targets LDMud or FluffOS and mishandles DGD syntax:
 `({ })` / `([ ])` literals, the `<-` operator, `..` ranges, labeled
@@ -28,6 +29,7 @@ dgdtools explain RULE           what a rule means and why it fires
 dgdtools config [path]          check the configuration of a path and show what it comes to
 dgdtools profile build | show   mudlib profiles
 dgdtools rename SYMBOL NEW      rename across the mudlib; --write writes, else diffs
+dgdtools rename FILE NEW        move a file and rewrite the paths that name it
 dgdtools lsp                    the language server, for an editor to start
 dgdtools version
 ```
@@ -93,7 +95,7 @@ conventions:                 # the mudlib's own habits; none is built in
     bind: [{ object: 0, function: 1 }, { function: 0 }]   # bind(ob, "fn"), bind("fn")
 profile_build:               # what `dgdtools profile build` captures
   name: mymud
-  driver_config: etc/mud.dgd # include_dirs, include_file, auto_object, create
+  driver_config: etc/mud.dgd # include_dirs, include_file, auto_object, create, driver_object
                              # and typechecking are read from the driver's config
   share: ["kernel/**", "lib/**"]             # code every wizard builds on
   checkouts: ["usr/*"]                       # where wizards' own trees live
@@ -133,7 +135,7 @@ only settings can differ from one directory to the next.
 | `lib_path` | The mudlib path of the directory a partial checkout is (`/usr/ann`), when its path on disk does not show it (the profile lists the mudlib's checkout patterns, such as `usr/*`). |
 | `exclude` | Globs, relative to the mudlib root, that directory walks skip. A file named on the command line is always taken. |
 | `dialect` | `slash_slash`, `closures`, `typechecking` (the driver's level; the rules that depend on it are silent while it is unknown), and `kfuns`: the kernel functions the driver has beyond stock DGD's, those of the extension modules it loads, each as a prototype (`"int *rusage()"`, `"string sha256(string text, varargs int rounds)"`). The editor shows them like the driver's own, which are built in. |
-| `include_dirs`, `include_file`, `auto_objects`, `create` | What the driver's config says: the include search path, the header included into every file, the object every object inherits, and the function a new object is initialized by. Usually read from `profile_build.driver_config` or the profile; set here they override both (a mudlib whose auto object receives the driver's `create` call and passes it on as another function names that function). |
+| `include_dirs`, `include_file`, `auto_objects`, `create`, `driver_object` | What the driver's config says: the include search path, the header included into every file, the object every object inherits, the function a new object is initialized by, and the driver object (whose functions the driver calls by name, which a rename refuses). Usually read from `profile_build.driver_config` or the profile; set here they override both (a mudlib whose auto object receives the driver's `create` call and passes it on as another function names that function). |
 | `relative_object_paths` | What `"std/room"` (no leading slash) is relative to. DGD hands every `inherit` and every `call_other("path", …)` to the mudlib's driver object to resolve, so this is the mudlib's choice: `root` (the default, and what the driver's own functions such as `compile_object` do) or `file` (the directory of the file that says it, as in the kernel library). |
 | `conventions` | The mudlib's own habits; nothing here has a default. `specifier_macros: [public]` names empty macros that stand where a specifier does, and `macros: {FOREACH: statement}` says how to read a macro that cannot be classified from its `#define` (`expression`, `empty`, `specifier`, `type`, `string`, `statement`, `opaque`); `defines:` lists names to treat as defined in `#ifdef`. `call_registry`: the mudlib's functions that take the name of a function to call later, each with the argument that names the `function`, optionally the argument that says in which `object` (without it: `this_object()`) and the first of the `args` passed on; a function called in several ways lists its forms. `object_registry`: functions whose string argument is an object path (`compile_object`, `find_object`, `clone_object` are built in). `format_registry`: scanf-style functions and the position of their format string (`sscanf` is built in). `autosave_markers`: names whose mention marks an object as one that saves itself with `save_object`. `virtual_paths`: lib-path globs served by virtual-object daemons. |
 | `profile_build` | For whoever has the whole mudlib: `driver_config` (the DGD driver config), `share` (globs of shared code), `omit` (never put in a profile), `checkouts` (per-wizard tree patterns), `name`. Used by `dgdtools profile build`, and directly when linting the whole mudlib. |
@@ -635,13 +637,31 @@ It refuses, with the reason, a new name that would change what another
 name means (a function, variable or macro already visible where an edit
 lands, a local that would hide the renamed variable, a kfun, a call that
 would reach the renamed function), the function the driver creates
-objects with (`create`), a symbol defined in a mudlib profile, and a
+objects with (`create`) and the driver object's functions the driver
+calls by name (`path_read`, `compile_error`, ...), a symbol defined in a mudlib profile, and a
 variable that `save_object` writes: renamed, the values saved under the
 old name are not restored at the next reboot. `--force` renames that one
 all the same. It warns when an edited file is inherited or included by
 other objects (they keep the program they were compiled with: the rename
 takes effect everywhere at the scheduled reboot) and, in a wizard's
 checkout with a profile, that the rest of the mudlib is not renamed.
+
+With a file instead of a symbol, it moves the file:
+
+```
+dgdtools rename /std/room.c /std/base_room.c       # the diffs, nothing written
+dgdtools rename --write /std/room.c base_room.c    # a name: the same directory
+```
+
+Every `inherit`, `#include` and object path that names the file
+(`clone_object("/std/room")`, `"/std/room"->fn()`) is rewritten as it
+was written: from the mudlib root, relative to the file, from an include
+directory; and so are the moved file's own paths that name a file from
+where it was. Each new path is resolved as the driver will once the file
+has moved. A path made by a macro (`inherit ROOM;`) is possible and not
+changed, since the macro is every user's: the summary lists those
+places. `--write` writes the files and moves the file last. In an
+editor, renaming or moving a file or a folder does the same.
 
 Exit codes: `0` the rename is complete (no possible place left), `1`
 possible places were left, `2` usage or configuration error or a refusal,
@@ -670,7 +690,11 @@ finds the references of a name: every call of a function in the mudlib
 (direct, `::`, `->` and callbacks on objects it can tell), every use of
 a variable, a macro or a local, every `inherit` of an object and
 `#include` of a header, and highlights a name's places in the file, a
-variable read or written. It renames a name everywhere it is meant and
+variable read or written. Renaming or moving a file or a folder in the
+editor rewrites the `inherit` and `#include` lines and object paths that
+name it. It offers to add the prototype of a function called before the
+file defines it, and the path of the one file a missing `#include` or
+`inherit` may have meant. It renames a name everywhere it is meant and
 nowhere else, in the file and across the mudlib, as `dgdtools rename`
 does: the edits to every file in one preview, the places that may be
 the name (a call on an object it cannot tell) shown unticked, and why

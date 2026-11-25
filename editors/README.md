@@ -223,7 +223,17 @@ and what it formats is what `dgdtools format` writes. What it does:
 - **Code actions** on a finding: its fix when it has one, a comment
   that suppresses it for the line (`/* dgdtools-ignore lint/RULE */`) or
   for the file, and "fix all" (`source.fixAll.dgdtools`) for every fix
-  that is safe to apply unseen.
+  that is safe to apply unseen. For a missing `#include` or `inherit`,
+  the path of the one file of the mudlib with that name, when there is
+  one (not preferred: it may not be the file meant). At a call of a
+  function the file defines later, and nothing declares before it, "Add
+  the prototype" (`refactor.rewrite`), which typechecking needs.
+- **Files moved**: renaming or moving a `.c` or `.h` file or a folder
+  in the editor (`workspace/willRenameFiles`) rewrites every `inherit`,
+  `#include` and object path that names it, as `dgdtools rename FILE
+  NEW` does; a path made by a macro is left, and a message says where.
+  VS Code asks for it in its explorer; Neovim's core does not, its file
+  explorer plugins (oil.nvim, nvim-tree) do.
 - **Formatting** of a file or a selection, with the project's settings
   (`format:` in `dgdtools.yml`, else `.editorconfig`), not the editor's.
 - **Go to definition**: from an `#include` to the header, from an
@@ -414,6 +424,8 @@ the mudlib, `TestNeovimCompletion` completes with `CTRL-X CTRL-O`, and
 after an edit, and `TestNeovimRename` renames a local, a private
 function and a public one another file calls (the edit of that file in
 its own buffer), and is told why the create function is not.
+`TestNeovimRefactor` adds a prototype with `vim.lsp.buf.code_action`
+and moves a file as a file explorer plugin does.
 
 ### Vim
 

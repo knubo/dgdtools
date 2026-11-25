@@ -2,17 +2,18 @@
 
 Status: a plan, of which the first three steps of section 12 are built:
 the editor-side grammars of section 10.1, under `editors/`; the server
-itself for steps 1 to 11 of section 8 (live diagnostics, code actions,
+itself for the steps of section 8 (live diagnostics, code actions,
 formatting, go to definition, hover and signature help, the outline of a
 document and the search for a name in the lib, completion, references
-and highlights, semantic tokens, rename in a file and across the lib),
-as `dgdtools lsp` and `pkg/lsp`, with the rename command `dgdtools
-rename`; and the
+and highlights, semantic tokens, rename in a file and across the lib,
+the refactorings of step 12: a file moved, a missing prototype, a
+missing file's path), as `dgdtools lsp` and `pkg/lsp`, with the rename
+command `dgdtools rename`; and the
 VS Code client of
 section 11, in `editors/vscode`, which has been built and checked but
 not yet run in a VS Code. "What is built" below says exactly what, and
-where it differs from the plan. The rest of section 8 (the
-refactorings of step 12) is still a plan.
+where it differs from the plan. What section 8 lists as "later" is
+still a plan.
 The server builds on the library described in
 [architecture.md](architecture.md) (sections 6 and 10),
 [config.md](config.md) and [formatter.md](formatter.md), and on one type
@@ -88,11 +89,12 @@ is absolute.
 | `server.go` | `Serve`, the connection (the only file that knows `sourcegraph/jsonrpc2`), the order of things: notifications one at a time in the goroutine that reads, a goroutine for each request and for each answer; `initialize`, `shutdown`, `exit`; `$/cancelRequest`; panics; the queue of outgoing notifications; what "idle" is |
 | `sync.go` | the open documents and their incremental changes; watched files; workspace folders and the two settings; the file watchers asked of the client |
 | `diagnostics.go` | when a document is linted, and what is published: the timers, the lint that a newer change stops, the whole-lib scan, `diag.Diagnostic` to the protocol's |
-| `actions.go` | `textDocument/codeAction`, `formatting`, `rangeFormatting` |
+| `actions.go` | `textDocument/codeAction` (a finding's fixes, `lint.Document.PathFixes`, `lint.Suppress`, `Document.Prototype`), `formatting`, `rangeFormatting` |
 | `definition.go` | `textDocument/definition`: `lint.Document.Resolve`'s answer as links or locations |
 | `hover.go` | `textDocument/hover` and `textDocument/signatureHelp`: `lint.Document.Hover`'s and `Signature`'s answers laid out as Markdown or plain text |
 | `completion.go` | `textDocument/completion` and `completionItem/resolve`: `lint.Document.Complete`'s items as the protocol's, and the comment above a declaration when an item is asked for |
 | `symbols.go` | `textDocument/documentSymbol` and `workspace/symbol`: `lint.Document.Symbols`' outline and `index.Snapshot.FindSymbols`' matches as the protocol's symbols |
+| `files.go` | `workspace/willRenameFiles`: `rename.Files`' plan of the files moved as a `WorkspaceEdit` of the files as they are, and what was not changed shown |
 | `rename.go` | `textDocument/prepareRename` and `textDocument/rename`: `lint.Document.PrepareRename`'s target as a range and a placeholder, `Rename`'s plan as a `WorkspaceEdit` for every file it edits, the possible edits under change annotations to confirm, a refusal as an error with its reason, and what the plan says beside its edits shown |
 | `references.go` | `textDocument/references` and `textDocument/documentHighlight`: `lint.Document.References`' places as locations, with a note in the log where the answer is not all there is; `Document.Highlights`' as highlights, read and written |
 | `tokens.go` | `textDocument/semanticTokens/full`, `full/delta` and `range`: `lint.Document.Tokens` encoded in the legend (`TokenLegend`), the last answer kept for a delta, and `workspace/semanticTokens/refresh` when a change elsewhere changed a document's tokens |
@@ -104,7 +106,8 @@ is absolute.
 Capabilities announced: `positionEncoding` (`utf-8` when the client
 offers it, else `utf-16`), `textDocumentSync` (open and close,
 incremental changes), `codeActionProvider` (`quickfix`,
-`source.fixAll.dgdtools`; only to a client with code action literals),
+`refactor.rewrite`, `source.fixAll.dgdtools`; only to a client with code
+action literals),
 `completionProvider` (asked for at `>`, `:`, `"`, `/` and `<`, with
 `completionItem/resolve`), `definitionProvider`, `referencesProvider`,
 `documentHighlightProvider`, `hoverProvider`,
@@ -116,7 +119,9 @@ incremental changes), `codeActionProvider` (`quickfix`,
 `full` with `delta`, and `range`), `renameProvider` (with
 `prepareProvider` to a client that says `prepareSupport`),
 `workspace.workspaceFolders` (with change notifications),
-`workspace.textDocumentContent` for the scheme `dgdtools-profile`. Asked
+`workspace.textDocumentContent` for the scheme `dgdtools-profile`,
+`workspace.fileOperations.willRename` for `**/*.{c,h}` files and `**`
+folders. Asked
 of the client when it can: `workspace/configuration`,
 `client/registerCapability` for `workspace/didChangeWatchedFiles`,
 `window/workDoneProgress/create`, `workspace/semanticTokens/refresh`.
@@ -152,7 +157,13 @@ itself knows a macro (`pp.Env.Outside`) ("As built, step 10"); for step
 `rename.File.Force`, `Refusal.Forcible`), the calls whose function's
 name is made at run time (`calls.Facts.Dynamic`, `index.UseDynamic`)
 and a chain's variable without flattening it (`index.Snapshot.ChainVar`)
-("As built, step 11").
+("As built, step 11"); for step 12 the plan of moved files
+(`rename.Files`, `rename.Move`, `Plan.Moves`), an `#include` resolved in
+the lib as it will be (`index.Snapshot.ResolveIncludeIf`), the files of a
+name (`Snapshot.FilesNamed`), a unit's Uses by their Aux
+(`index.Unit.UsesWith`), the two code actions
+(`lint.Document.Prototype`, `PathFixes`) and the driver object of the
+configuration (`config.Config.DriverObject`) ("As built, step 12").
 
 Where what is built is not what the sections below planned, the section
 says so in a paragraph that begins **As built**. In short:
@@ -470,7 +481,7 @@ knows the code base.
 | 9 **built** | `semanticTokens` (section 10.2): what a grammar cannot know. Ships in two parts: 9a macros by class, declarations, inherit labels, calls resolved through the chain (no scopes needed); 9b parameters/locals and unresolved names | tree + view + chain | 9b needs scopes (from 7) | 9a: 2, 9b: 2 |
 | 10 **built** | `prepareRename` and `rename` for the symbols one file decides (section 9): locals and parameters, private functions and variables, macros a `.c` file defines for itself | `pkg/rename` (new) over the tree, the scopes and the file's `pp.Env` | scopes (from 7); `syntax.PathAt` (from 4) | 3 |
 | 11 **built** | Rename across files, in the editor and as `dgdtools rename SYMBOL NEW` (section 9): functions, object globals, header macros; every occurrence classified certain, possible or excluded; edits previewed with change annotations, or written as a patch | `pkg/rename` over the reverse index, who inherits a file (a `Query` on the snapshot), `Chain`, `LookupCallable`, `calls.Extract` | the reverse index (from 8); the whole-lib scan; step 10 | 9 |
-| 12 | Refactorings as code actions (section 9.6): add the missing prototype, fix an `#include` path; renaming a file updates the `inherit` and `#include` lines that name it (`workspace/willRenameFiles`) | `ResolveInclude`, `ObjectPath`, the include and inherit edges `Invalidate` already follows | the reverse index (from 8) for the file rename | 3 |
+| 12 **built** | Refactorings as code actions (section 9.6): add the missing prototype, fix an `#include` path; renaming a file updates the `inherit` and `#include` lines that name it (`workspace/willRenameFiles`) | `ResolveInclude`, `ObjectPath`, the include and inherit edges `Invalidate` already follows | the reverse index (from 8) for the file rename | 3 |
 | later | inlay hints for parameter names, pull diagnostics (`textDocument/diagnostic`, `workspace/diagnostic`), call hierarchy over inherit chains | | | |
 
 **As built, steps 1 to 3.** A diagnostic's `code` is the rule's code
@@ -1554,6 +1565,198 @@ another reason; the driver object's functions, which the driver calls
 by name like `create`, are not refused; a function of the auto object
 renamed reaches every object, which is correct and slow to check.
 
+**As built, step 12.** The refactorings: a file moved, in the editor
+(`workspace/willRenameFiles`) and on the command line (`dgdtools rename
+FILE NEW`), whose engine is `rename.Files` (`pkg/rename/files.go`); two
+code actions, `lint.Document.Prototype` and `Document.PathFixes`
+(`pkg/lint/actions.go`); and what was left of step 11 that is in
+proportion.
+
+```go
+plan, err := rename.Files(ctx, snap, []rename.Move{{From: old, To: new}})  // paths on disk; a directory moves with its files
+plan.Moves        // the files moved, a directory's each
+plan.Edits        // of the files as they are, before the move (an edit of a moved file is at its old path)
+plan.Occurrences  // Certain: an edit; Possible: a path made by a macro or an expression, not edited
+plan.Warnings     // moved base files other objects inherit, a partial checkout
+fix := doc.Prototype(off)        // *diag.Fix, Safe; nil where there is nothing to declare
+fixes := doc.PathFixes(ctx, f)   // []diag.Fix, Unsafe, for include-not-found and target-object-missing
+```
+
+**A file moved.** The places that name a moved file are the Uses of
+kind `UseObject` and `UseInclude` the reverse index already has: every
+`inherit` path, every `#include`, every object path handed to a
+function that takes one (`clone_object`, a registrar's) in every unit
+of the lib; the calls made in a moved object by its path
+(`"/std/room"->fn()`, `call_other("/std/room", "fn")`: the Uses of kind
+`UseFunction`, form `FormPath`, whose Aux is the object,
+`index.Unit.UsesWith`), whose receiver is found in the file's tree; and
+the moved files' own Uses of those kinds, which name a file from where
+they were. Each is rewritten
+as it was written, and the new text is resolved as the driver will
+once the files have moved (`index.Snapshot.ResolveIncludeIf`, which is
+`ResolveInclude` in a lib whose files a function says, and
+`ObjectPath`); a text that does not resolve to the moved file is not
+made. A text that still names the file after the move (a relative
+`#include` of two files moved together) is left alone.
+
+| As written | Rewritten |
+|---|---|
+| `"/std/room"`, `"/std/room.c"` | from the lib's root, `.c` kept or not |
+| `"std/room"` | relative as the lib reads it (`relative_object_paths`): from the root, else from the file |
+| `#include "room.h"` beside the file | relative when the new place is below the file's directory; else from an include directory that has it; else from the root |
+| `#include "../std/room.h"` | as above, and up the tree when no shorter way resolves, as it climbed |
+| `#include <sub/x.h>` | from the include directory that has the new place; else `"/path"` from the root |
+| `"/std/room"->fn()`, `call_other("/std/room", ...)` | the receiver, as an object's path |
+| `ROOM`, `DIR + "room"` | not edited: Possible, "names /std/room.c by the macro ROOM, which other files may use too" |
+
+A macro's `#define` is not edited: its string is every user's, and a
+user that adds to it (`ROOM + "_extra"`) names another file. A path in
+code that is not compiled, in a string no function takes as a path, or
+in a comment is not a Use and is not seen, nor is a header the
+configuration excludes (an attic's) that a file of the lib includes: it
+is no unit of the search. A file moved out of the lib
+leaves its places Possible. Warnings: the moved files other objects
+inherit, with their counts (an object keeps the program it was compiled
+with), and a partial checkout's places outside it.
+
+**The server.** `workspace.fileOperations.willRename` with two filters,
+`**/*.{c,h}` for files and `**` for folders (scheme `file`). The answer
+is a `WorkspaceEdit` of the files as they are, in `documentChanges` with
+an open document's version (the WorkspaceEdit of rename, which both now
+make with `workspaceEdit`); the possible places, the warnings, or why
+nothing could be planned (the scan not done within `scanBudget`) go to
+`window/showMessage`. A refusal is null and a message, never an error:
+the editor's rename goes ahead whatever the server says, so an error
+would only be noise. VS Code's client sends the request for a file or a
+folder renamed in its explorer; Neovim's core does not (its
+`vim.lsp.util.rename` leaves `willRename` off), and file explorer
+plugins (oil.nvim, nvim-tree) do, as `TestNeovimRefactor` does by
+hand. `prepareRename` on an `#include` or an `inherit` path says to
+rename the file itself.
+
+**The command line.** `dgdtools rename FILE NEW`, `FILE` a mudlib path
+with the extension of a source file (`/std/room.c`, `/include/std.h`;
+no `::` and no `:LINE:COL`, so it cannot be taken for the other forms),
+`NEW` a mudlib path or a name for the same directory. The diffs and the
+summary of the symbol forms ("move /std/room.c to /std/place.c", the
+possible places with their reasons); `--write` writes the edits and
+moves the file last, making its directory; exit 1 when a possible place
+is left (there is no `--include-possible` text to make for one), 2 when
+`FILE` is not there or `NEW` is. Moving a directory from the command
+line is not offered: `git mv` and an editor do that, and the editor
+asks the server.
+
+**Add the prototype.** DGD compiles a call to a function it knows
+nothing of yet as a call to an undefined one (`Control::funCall`: an
+implicit prototype), which typechecking, on wherever `typechecking` is
+1 or 2, refuses ("undefined function"); a prototype before the call
+makes it a call to the function. `Document.Prototype(off)` at a call
+`fn()` of a function the file defines after the call, when nothing
+declares the name before it (no inherited object, the auto object, a
+header the file includes, a kfun; an unresolved inherit or a header
+that does not parse is taken to), is the definition's declaration as
+written (`FuncDeclText`) and `;`, at the start of the line of the
+top-level declaration the first call is in, above the comments right
+over it (no blank line between). Not offered for a function without a
+return type or with an untyped parameter (no prototype can be written),
+one whose declaration names a macro defined after that place, or has a
+directive in it. It is `Safe` (the code means what it meant), and a
+`refactor.rewrite` action at the start of the range asked about, not a
+quick fix: the linter has no rule for a call before the definition, and
+none was added (it would be a part of the undefined-function rule of
+section 12, item 5).
+
+**Fix an #include path.** `Document.PathFixes(ctx, f)` for a finding of
+`include-not-found`, and of `target-object-missing` whose path is one
+string as written (an `inherit`, a path handed to `clone_object`): the
+one file of the lib with the missing file's base name
+(`index.Snapshot.FilesNamed`: under the include directories and the
+file's own tree, its directory's parent or its directory at the lib's
+top, on disk and in a profile's stubs; and among the files the index
+has read, the scan's), written as the path was (as for a file moved)
+and resolved to that file. None when no file, or more than one, has the
+name: a choice is the person's. `Unsafe` (the file found may not be the
+one meant), so a quick fix that is not preferred and not in "fix all".
+It is made when asked for, as the suppression comments are, not with
+the lint: the search reads directories, and a lint of the whole lib has
+thousands of missing files.
+
+**What was left of step 11.** Done: the driver object's functions that
+DGD calls by name (`DGD::callDriver`, `Frame::callCritical`:
+`initialize`, `path_read`, `inherit_program`, `compile_error`,
+`runtime_error`, `touch` and the rest), with the redefinitions that are
+one function with them, are refused as `create` is; the driver object
+is the new `driver_object` of the configuration (read from the driver
+config's `driver_object`, carried by a profile). The functions the
+driver calls by name in a connection's object (`open`, `close`,
+`receive_message`, `message_done`, `unconnected`, `receive_datagram`,
+`datagram_attach`) are renamed with a warning: which objects are
+connections, the lib decides, and refusing `open` and `close` in every
+object would refuse a door's. Across files, a file an edit lands in
+that sees the symbol is checked for the macros its code uses whose
+bodies name the new name, as step 10 checks its one file. Not done, and
+why:
+
+- Occurrences in comments and in strings that are no callback or path:
+  not renamed and not listed, as rust-analyzer and gopls do by default;
+  a comment's word is no reference, and listing every one would bury
+  the possible places that matter.
+- An inherit label of a file other files include: still refused. On the
+  VikingMUD lib no header has a labelled inherit.
+- Files that have the old name only in code that is not compiled, and
+  neither see the symbol nor are read again for another reason: the
+  index keeps no Uses of such code, and finding them means reading the
+  whole lib's text for every rename.
+- The auto object's function renamed reaches every object; it is
+  correct, and as slow as it was.
+- A private callback named in `call_out` whose function is private: no
+  rule yet (the owner's decision is pending).
+
+**Measured** (the VikingMUD testmud lib, 110,086 files, 12 CPUs).
+`TestCorpusRenameFiles` moves 13 files and directories, each in turn
+renamed in its directory and moved to another (`/qq_moved/...`): the
+three objects most inherited, the three headers most included, three
+objects that `#include` a file beside them, three small directories. It
+makes the edits and the moves in an overlay that can hide a file, lints
+the whole lib again (34,140 files with diagnostics) and holds every
+file's diagnostics to what they were, but for the moved paths in their
+messages and the columns of the edited lines; the files with a possible
+place, and what inherits or includes them, are left out and counted.
+Every file compared is unchanged.
+
+| moved | edits | possible | left out | plan |
+|---|---:|---:|---:|---:|
+| `/std/include/mudlib.h` to `/qq_moved/...` | 65,325 | 0 | 1 | 1.07 s |
+| `/std/include/levels.h` to `q_levels.h` | 4,776 | 0 | 1 | 0.20 s |
+| `/std/include/std.h` to `/qq_moved/...` | 3,190 | 0 | 1 | 0.16 s |
+| `/std/mod/move.c` to `q_move.c` | 8 | 4 | 4 | 0.14 s |
+| `/std/mod/destroy.c` to `/qq_moved/...` | 5 | 7 | 86 | 0.14 s |
+| `/std/mod/hook.c` to `q_hook.c` | 5 | 12 | 86,746 | 0.09 s |
+| a directory of 3 objects | 0 to 3 | 0 to 10 | 0 to 4 | 0.22 to 0.26 s |
+
+The base objects are mostly inherited by macro (`inherit HOOK;`), so
+their places are possible and listed; `hook.c`'s possible places include
+a call by macro in a file most objects inherit, which leaves most of the
+lib out of the comparison. The one file left out for a header includes
+a header in an attic the configuration excludes, whose own `#include`
+nothing searches. The test found two things to mend: a call made in an
+object by its path (`"/obj/x"->fn()`) names the file, and is now
+rewritten (`Unit.UsesWith`); an edit that lengthens a path moves the
+columns of what follows on its line, which the test now allows. With the check of the macros used where an edit lands,
+`TestCorpusRenameAcross` renames the same 31 symbols of 35 as before
+and refuses the same four, the plans as fast (`add_item` 0.78 s).
+
+Tests: `TestFiles` (`pkg/rename`: each way of writing a path, a header
+to an include directory, a header in one, a directory, out of the lib,
+not of the lib), `TestRenameDriverCalls`, `TestClashThroughMacroAcross`;
+`TestPrototype` and `TestPathFixes` (`pkg/lint`); the transcripts
+`move` (an open document and files not open, a folder moved after a
+file, the message) and `refactor` (the path fix and the prototype), and
+both kinds in every transcript's capabilities; `TestRenameMove`
+(`cmd/dgdtools`); `TestNeovimRefactor` (`editors`: the prototype by
+`vim.lsp.buf.code_action`, a file moved as a file explorer plugin moves
+one); `TestCorpusRenameFiles` on the corpus.
+
 Steps 1 to 3 (9 days) are the "useful every day" milestone: live
 diagnostics, fixes, formatting. Steps 4 to 6 (9 days) make it a
 navigation tool. Steps 7 to 9 (13 days) need two pieces of library work
@@ -2328,7 +2531,8 @@ network.
    step 8").
 7. The rename engine across files with `dgdtools rename` (step 11, 9
    days), **done** (section 8, "As built, step 11"), and the
-   refactorings of step 12 (3 days). The command line
+   refactorings of step 12 (3 days), **done** (section 8, "As built,
+   step 12"). The command line
    comes first: it needs no editor, and it is the form an arch uses for
    a mud-wide rename.
 8. Deferred until asked for: the tree-sitter grammar (6 to 8 days) with
@@ -2650,6 +2854,16 @@ grammars alone can ship in the first.
   `TestRenameForce`, `TestRenameJSON`, `TestRenameErrors`. In
   `editors`: `TestNeovimRename`. On the corpus:
   `TestCorpusRenameAcross` (section 8, "As built, step 11").
+- **As built, the refactorings (step 12).** In `pkg/rename`: `TestFiles`
+  (every way a path is written, a header to and within an include
+  directory, a directory, out of the lib), `TestRenameDriverCalls`,
+  `TestClashThroughMacroAcross`. In `pkg/lint`: `TestPrototype`,
+  `TestPathFixes`. In `pkg/lsp`: the transcripts `move.txt` (the player's
+  `move` sends `workspace/willRenameFiles`, makes and saves the edits,
+  and moves the file or folder on disk) and `refactor.txt`. In
+  `cmd/dgdtools`: `TestRenameMove`. In `editors`: `TestNeovimRefactor`.
+  On the corpus: `TestCorpusRenameFiles` (section 8, "As built, step
+  12").
 - **Edit fuzzing** (`go test -fuzz`): start from a corpus file, apply a
   random sequence of range edits through incremental sync while applying
   the same edits to a plain string; after each step the server's buffer

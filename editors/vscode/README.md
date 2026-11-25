@@ -53,6 +53,13 @@ the linter and formatter for it:
   `save_object` writes, the create function), the editor says why before
   anything changes; a message says what else to know (edited files other
   objects inherit, which take effect at the scheduled reboot).
+- **Files moved**: rename or move a `.c` or `.h` file or a folder in the
+  explorer, and the `inherit` and `#include` lines and object paths that
+  name it are rewritten with it; a path made by a macro is left, and a
+  message says where.
+- **Refactorings** in the light bulb: the path of the one file a missing
+  `#include` or `inherit` may have meant, and "Add the prototype" at a
+  call of a function the file defines later.
 - **Semantic highlighting** over the grammar's: macros (one that stands
   for a type as a type), functions where declared and defined, and in a
   call the object's own, inherited, the auto object's or the driver's,
