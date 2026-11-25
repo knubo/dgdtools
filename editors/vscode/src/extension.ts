@@ -33,8 +33,8 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
     output,
     vscode.commands.registerCommand('dgdtools.restartServer', restart),
-    vscode.commands.registerCommand('dgdtools.associateFolder', (uri?: vscode.Uri) => setAssociation(uri, true)),
-    vscode.commands.registerCommand('dgdtools.dissociateFolder', (uri?: vscode.Uri) => setAssociation(uri, false)),
+    vscode.commands.registerCommand('dgdtools.associateFolder', (uri?: vscode.Uri) => setAssociation(context, uri, true)),
+    vscode.commands.registerCommand('dgdtools.dissociateFolder', (uri?: vscode.Uri) => setAssociation(context, uri, false)),
     // The two settings that are the server's command line. The others
     // the server asks for itself, and is told when they change.
     vscode.workspace.onDidChangeConfiguration((e) => {
@@ -134,6 +134,9 @@ function stubIsLPC(doc: vscode.TextDocument): void {
 interface Place {
   patterns: string[];
   label: string;
+  // The workspace folder it is in, and whether that is the workspace.
+  folder: vscode.WorkspaceFolder;
+  alone: boolean;
 }
 
 function place(dir: vscode.Uri): Place | undefined {
@@ -149,6 +152,8 @@ function place(dir: vscode.Uri): Place | undefined {
   return {
     patterns: associations.patterns(segments, path.basename(folder.uri.fsPath), alone),
     label: [folder.name, ...segments].join('/'),
+    folder,
+    alone,
   };
 }
 
@@ -172,8 +177,10 @@ async function chosenFolder(uri: vscode.Uri | undefined): Promise<vscode.Uri | u
 
 // setAssociation makes the *.c and *.h files of a folder `dgdlpc`, or
 // takes that back, in the settings of the workspace and in no others: on
-// this machine too, a .c file is C everywhere else.
-async function setAssociation(uri: vscode.Uri | undefined, on: boolean): Promise<void> {
+// this machine too, a .c file is C everywhere else. Microsoft's C
+// extensions are not recommended in the workspace folder while it has
+// LPC in it.
+async function setAssociation(context: vscode.ExtensionContext, uri: vscode.Uri | undefined, on: boolean): Promise<void> {
   const dir = await chosenFolder(uri);
   if (!dir) {
     return;
@@ -198,11 +205,78 @@ async function setAssociation(uri: vscode.Uri | undefined, on: boolean): Promise
     return;
   }
   await files.update('associations', next, vscode.ConfigurationTarget.Workspace);
+  try {
+    if (on) {
+      await unwantC(context, where.folder);
+    } else if (!Object.values(next ?? {}).includes(associations.language)) {
+      await wantC(context, where.folder);
+      if (where.alone) {
+        // VS Code leaves `{}` where the last setting was.
+        await removeIfEmpty(vscode.Uri.joinPath(where.folder.uri, '.vscode', 'settings.json'), associations.empty);
+      }
+    }
+  } catch (e) {
+    output.warn(`the workspace's .vscode files: ${String(e)}`);
+  }
   void vscode.window.showInformationMessage(
     on
       ? `dgdtools: the *.c and *.h files of ${where.label} are DGD LPC now (files.associations in the workspace settings).`
       : `dgdtools: the *.c and *.h files of ${where.label} are no longer DGD LPC (files.associations in the workspace settings).`,
   );
+}
+
+// The workspace state's record of the unwanted recommendations the
+// extension added to a workspace folder's .vscode/extensions.json, which
+// are the ones it takes out again.
+const addedKey = (folder: vscode.WorkspaceFolder) => `unwanted:${folder.uri.toString()}`;
+
+async function readText(uri: vscode.Uri): Promise<string | undefined> {
+  try {
+    return new TextDecoder().decode(await vscode.workspace.fs.readFile(uri));
+  } catch {
+    return undefined; // no file
+  }
+}
+
+async function unwantC(context: vscode.ExtensionContext, folder: vscode.WorkspaceFolder): Promise<void> {
+  const file = vscode.Uri.joinPath(folder.uri, '.vscode', 'extensions.json');
+  const { text, added } = associations.addUnwanted(await readText(file));
+  if (added.length === 0) {
+    return;
+  }
+  await vscode.workspace.fs.writeFile(file, new TextEncoder().encode(text));
+  const before = context.workspaceState.get<string[]>(addedKey(folder)) ?? [];
+  await context.workspaceState.update(addedKey(folder), [...new Set([...before, ...added])]);
+}
+
+async function wantC(context: vscode.ExtensionContext, folder: vscode.WorkspaceFolder): Promise<void> {
+  const ours = context.workspaceState.get<string[]>(addedKey(folder)) ?? [];
+  const file = vscode.Uri.joinPath(folder.uri, '.vscode', 'extensions.json');
+  const text = await readText(file);
+  await context.workspaceState.update(addedKey(folder), undefined);
+  if (ours.length === 0 || text === undefined) {
+    return;
+  }
+  const next = associations.removeUnwanted(text, ours);
+  if (next === undefined) {
+    await removeIfEmpty(file, () => true);
+  } else if (next !== text) {
+    await vscode.workspace.fs.writeFile(file, new TextEncoder().encode(next));
+  }
+}
+
+// removeIfEmpty deletes a file of a .vscode folder when there is nothing
+// in it, and the folder when that was its last file.
+async function removeIfEmpty(file: vscode.Uri, isEmpty: (text: string) => boolean): Promise<void> {
+  const text = await readText(file);
+  if (text === undefined || !isEmpty(text)) {
+    return;
+  }
+  await vscode.workspace.fs.delete(file);
+  const dir = vscode.Uri.joinPath(file, '..');
+  if ((await vscode.workspace.fs.readDirectory(dir)).length === 0) {
+    await vscode.workspace.fs.delete(dir);
+  }
 }
 
 // offerAssociations asks, for each folder of the workspace that has a
@@ -228,7 +302,7 @@ async function offerAssociations(context: vscode.ExtensionContext): Promise<void
       never,
     );
     if (choice === yes) {
-      await setAssociation(uri, true);
+      await setAssociation(context, uri, true);
     } else if (choice === never) {
       await context.workspaceState.update(declined, true);
     }

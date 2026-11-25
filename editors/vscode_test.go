@@ -87,8 +87,9 @@ func TestVSCodeClient(t *testing.T) {
 	// the manifest lets the extension into.
 	assert.Equal(t, "^"+pkg.DevDependencies["@types/vscode"], pkg.Engines.VSCode)
 	// What an installed extension needs is in the one file the build
-	// writes: the client library, and nothing that is only a tool.
-	assert.Equal(t, []string{"vscode-languageclient"}, keys(pkg.Dependencies))
+	// writes: the client library and the parser of .vscode's JSON with
+	// comments, and nothing that is only a tool.
+	assert.Equal(t, []string{"jsonc-parser", "vscode-languageclient"}, keys(pkg.Dependencies))
 
 	// Commands: each one contributed is registered, and the other way.
 	var commands []string

@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { add, has, outermost, patterns, remove } from './associations.ts';
+import { parse } from 'jsonc-parser';
+
+import { add, addUnwanted, empty, has, outermost, patterns, remove, removeUnwanted, unwanted } from './associations.ts';
 
 test('patterns', () => {
   // The one folder of a workspace: its settings are its own, and a
@@ -49,4 +51,36 @@ test('outermost', () => {
   assert.deepEqual(outermost(['/mud/lib', '/mud/library', '/mud/lib/std', '/mud/lib'], '/').sort(), ['/mud/lib', '/mud/library'],
     'a name that begins like another is not below it');
   assert.deepEqual(outermost(['C:\\mud\\lib\\std', 'C:\\mud\\lib'], '\\'), ['C:\\mud\\lib']);
+});
+
+test('the C extensions are unwanted, and only what was added goes', () => {
+  // No file: one with the two.
+  const made = addUnwanted(undefined);
+  assert.deepEqual(made.added, unwanted);
+  assert.deepEqual(JSON.parse(made.text), { unwantedRecommendations: unwanted });
+  assert.equal(removeUnwanted(made.text, made.added), undefined, 'nothing left: the file goes');
+
+  // A file of the user's, with a comment: merged into, and given back.
+  const theirs = '{\n  // ours\n  "recommendations": ["mmcdole.dgdtools"],\n  "unwantedRecommendations": ["ms-vscode.cpptools"]\n}\n';
+  const merged = addUnwanted(theirs);
+  assert.deepEqual(merged.added, ['ms-vscode.cpptools-extension-pack'], 'one was there already');
+  assert.match(merged.text, /\/\/ ours/);
+  assert.match(merged.text, /"ms-vscode.cpptools",\s*"ms-vscode.cpptools-extension-pack"/);
+  const back = removeUnwanted(merged.text, merged.added) ?? '';
+  assert.match(back, /\/\/ ours/);
+  assert.deepEqual(parse(back), parse(theirs), 'what the user had, the list laid out again');
+  assert.deepEqual(addUnwanted(merged.text).added, [], 'nothing to add twice');
+
+  // A file with a comment is kept, and so is its list, emptied.
+  assert.equal(removeUnwanted('{\n  // keep\n  "unwantedRecommendations": ["ms-vscode.cpptools"]\n}\n', unwanted),
+    '{\n  // keep\n  "unwantedRecommendations": []\n}\n');
+  assert.equal(removeUnwanted('{"recommendations": []}', unwanted), '{"recommendations": []}');
+  assert.equal(addUnwanted('').text, made.text, 'an empty file is no file');
+});
+
+test('empty', () => {
+  assert.equal(empty('{}'), true);
+  assert.equal(empty('{\n}\n'), true);
+  assert.equal(empty('{\n  // a comment\n}\n'), false);
+  assert.equal(empty('{"a": 1}'), false);
 });

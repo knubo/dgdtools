@@ -3,6 +3,8 @@
 // folder's *.c and *.h files `dgdlpc`. Nothing here knows VS Code:
 // `npm test` runs it under plain Node.
 
+import { applyEdits, modify, parse, stripComments } from 'jsonc-parser';
+
 /** The language id, as the manifest contributes it. */
 export const language = 'dgdlpc';
 
@@ -72,4 +74,64 @@ export function outermost(dirs: readonly string[], sep: string): string[] {
     }
   }
   return kept;
+}
+
+// A folder of DGD LPC is a folder of *.c files Microsoft's C extensions
+// would take for C: the workspace's .vscode/extensions.json says they
+// are not wanted there, so VS Code does not recommend them.
+
+/** The extensions a folder of DGD LPC does not want recommended. */
+export const unwanted = ['ms-vscode.cpptools', 'ms-vscode.cpptools-extension-pack'];
+
+const key = 'unwantedRecommendations';
+const style = { formattingOptions: { insertSpaces: true, tabSize: 2, eol: '\n' } };
+
+function list(text: string): unknown[] {
+  const value = (parse(text) as Record<string, unknown> | undefined)?.[key];
+  return Array.isArray(value) ? value : [];
+}
+
+/**
+ * The text of an extensions.json (undefined: there is none) with the C
+ * extensions among its unwanted recommendations, everything else as it
+ * was, and those of them it added.
+ */
+export function addUnwanted(text: string | undefined): { text: string; added: string[] } {
+  let out = text?.trim() ? text : '{}\n';
+  const added = unwanted.filter((id) => !list(out).includes(id));
+  for (const id of added) {
+    const path = Array.isArray((parse(out) as Record<string, unknown> | undefined)?.[key]) ? [key, -1] : [key];
+    const value = path.length === 1 ? [id] : id;
+    out = applyEdits(out, modify(out, path, value, { ...style, isArrayInsertion: path.length === 2 }));
+  }
+  return { text: out, added };
+}
+
+/**
+ * The text of an extensions.json without the unwanted recommendations
+ * `ours` (what addUnwanted added), the list going when it is left empty
+ * and the file has no comment (which might be about it); undefined when
+ * nothing at all is left in the file, which then goes.
+ */
+export function removeUnwanted(text: string, ours: readonly string[]): string | undefined {
+  let out = text;
+  for (const id of ours) {
+    const at = list(out).indexOf(id);
+    if (at >= 0) {
+      out = applyEdits(out, modify(out, [key, at], undefined, style));
+    }
+  }
+  if (list(out).length === 0 && Array.isArray((parse(out) as Record<string, unknown> | undefined)?.[key]) && stripComments(out) === out) {
+    out = applyEdits(out, modify(out, [key], undefined, style));
+  }
+  return empty(out) ? undefined : out;
+}
+
+/**
+ * Whether the text of a settings file is an empty object and nothing
+ * else (no comment either): what VS Code leaves when the last setting
+ * of a file is taken out.
+ */
+export function empty(text: string): boolean {
+  return /^\s*\{\s*\}\s*$/.test(text);
 }

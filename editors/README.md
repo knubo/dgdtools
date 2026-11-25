@@ -110,8 +110,11 @@ own `.vscode/settings.json`:
 That is the form for the folder that is open. For a folder below it, or
 for one folder of a workspace with several, the patterns name the
 folder, since the setting is the whole window's: `**/lib/**/*.c` and
-`**/lib/**/*.h` for a folder `lib`. **dgdtools: Stop Treating This
-Folder as an LPC Lib** takes out what the first command put in. A single
+`**/lib/**/*.h` for a folder `lib`. The command also lists
+Microsoft's C extensions in `.vscode/extensions.json` as
+`unwantedRecommendations`. **dgdtools: Stop Treating This Folder as an
+LPC Lib** takes out what the first command put in, and deletes a file it
+leaves empty. A single
 file can be switched with *Change Language Mode* → *DGD LPC*.
 
 A lib whose files are Latin-1 should also say so, or saving a file

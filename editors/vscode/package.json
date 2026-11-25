@@ -63,7 +63,8 @@
     ],
     "configurationDefaults": {
       "[dgdlpc]": {
-        "files.autoGuessEncoding": true
+        "files.autoGuessEncoding": true,
+        "editor.wordBasedSuggestions": "off"
       }
     },
     "commands": [
@@ -148,6 +149,7 @@
     "vscode:prepublish": "npm run check && npm run build -- --minify"
   },
   "dependencies": {
+    "jsonc-parser": "3.3.1",
     "vscode-languageclient": "11.0.1"
   },
   "devDependencies": {

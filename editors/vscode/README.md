@@ -74,6 +74,16 @@ workspace's settings and never to your own:
 }
 ```
 
+It also adds Microsoft's C extensions to the folder's
+`.vscode/extensions.json` as `unwantedRecommendations`, so that VS Code
+does not recommend them for its `.c` files. The inverse command takes
+out what the first put in and nothing else, and deletes a file it leaves
+empty.
+
+Word-based suggestions are off for `dgdlpc` by default
+(`editor.wordBasedSuggestions`): the server's completion knows the
+names.
+
 A lib whose files are Latin-1 should say that too, or saving a file
 opened as UTF-8 damages it:
 
