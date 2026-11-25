@@ -357,6 +357,22 @@ type Document struct {
 
 	stats    fileStats
 	resolver *resolve.Resolver
+
+	tokensOnce sync.Once
+	tokens     []resolve.SemanticToken
+}
+
+// Tokens returns the semantic tokens of the document (the document's
+// resolve.Resolver's Tokens): what analysis knows of its names that a
+// grammar cannot. They are made once, on first need, and shared; the
+// caller must not modify them.
+func (d *Document) Tokens() []resolve.SemanticToken {
+	d.tokensOnce.Do(func() {
+		if d.resolver != nil {
+			d.tokens = d.resolver.Tokens()
+		}
+	})
+	return d.tokens
 }
 
 // Resolve says what the token at byte offset off of the document refers
