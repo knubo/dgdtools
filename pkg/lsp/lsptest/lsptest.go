@@ -195,7 +195,8 @@ type Capabilities struct {
 	Encodings []string
 	// Plain is a client that has nothing beyond the protocol's core: no
 	// settings to ask for, no file watchers, no related information,
-	// tags or rule links on diagnostics, edits without versions.
+	// tags or rule links on diagnostics, edits without versions,
+	// definitions as locations and not as links.
 	Plain bool
 	// Options are the initializationOptions.
 	Options any
@@ -219,6 +220,7 @@ func (c *Client) Initialize(caps Capabilities, folders ...string) json.RawMessag
 			"textDocument": map[string]any{
 				"publishDiagnostics": map[string]any{"relatedInformation": rich, "codeDescriptionSupport": rich},
 				"codeAction":         map[string]any{"codeActionLiteralSupport": map[string]any{}},
+				"definition":         map[string]any{"linkSupport": rich},
 			},
 			"window": map[string]any{"workDoneProgress": rich},
 		},

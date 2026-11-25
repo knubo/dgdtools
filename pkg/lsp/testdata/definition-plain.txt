@@ -1,0 +1,75 @@
+Go to definition, for a client that reads locations only and counts in
+UTF-8: the same places, without the range of what was asked about.
+
+-- lib/dgdtools.yml --
+include_dirs: [/include]
+-- lib/include/std.h --
+/* Grundläggande */ #define BASE "/std/base"
+-- lib/std/base.c --
+/* blåbær */ void create() {}
+-- lib/obj/a.c --
+#include <std.h>
+inherit BASE;
+void create() { /* først */ ::create(); }
+-- script --
+initialize plain utf-8 lib
+open lib/obj/a.c
+definition lib/obj/a.c 0:12
+definition lib/obj/a.c 1:10
+definition lib/obj/a.c 2:33
+definition lib/obj/a.c 2:6
+definition lib/obj/a.c 2:0
+shutdown
+exit
+-- transcript --
+> initialize plain utf-8 lib
+< {
+<   "capabilities": {
+<     "positionEncoding": "utf-8",
+<     "textDocumentSync": {"openClose": true, "change": 2},
+<     "codeActionProvider": {"codeActionKinds": ["quickfix", "source.fixAll.dgdtools"]},
+<     "definitionProvider": true,
+<     "documentFormattingProvider": true,
+<     "documentRangeFormattingProvider": true,
+<     "workspace": {
+<       "workspaceFolders": {"supported": true, "changeNotifications": true},
+<       "textDocumentContent": {"schemes": ["dgdtools-profile"]}
+<     }
+<   },
+<   "serverInfo": {"name": "dgdtools", "version": "test"}
+< }
+> open lib/obj/a.c
+> definition lib/obj/a.c 0:12
+< [
+<   {
+<     "uri": "file://$ROOT/lib/include/std.h",
+<     "range": {"start": {"line": 0, "character": 0}, "end": {"line": 0, "character": 0}}
+<   }
+< ]
+> definition lib/obj/a.c 1:10
+< [
+<   {
+<     "uri": "file://$ROOT/lib/std/base.c",
+<     "range": {"start": {"line": 0, "character": 0}, "end": {"line": 0, "character": 0}}
+<   }
+< ]
+> definition lib/obj/a.c 2:33
+< [
+<   {
+<     "uri": "file://$ROOT/lib/std/base.c",
+<     "range": {"start": {"line": 0, "character": 20}, "end": {"line": 0, "character": 26}}
+<   }
+< ]
+> definition lib/obj/a.c 2:6
+< [
+<   {
+<     "uri": "file://$ROOT/lib/obj/a.c",
+<     "range": {"start": {"line": 2, "character": 5}, "end": {"line": 2, "character": 11}}
+<   }
+< ]
+> definition lib/obj/a.c 2:0
+< null
+> shutdown
+< null
+> exit
+< "the server exited after shutdown"

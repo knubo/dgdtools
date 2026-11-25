@@ -8,8 +8,8 @@
 // positions. The texts, the projects and the linters are a
 // session.Session's, and every answer is the library's: diagnostics are
 // lint.Document's, fixes are diag.Fix, suppression comments are
-// lint.Suppress, formatting is format.Source. docs/design/lsp.md has the
-// design.
+// lint.Suppress, formatting is format.Source, what a name refers to is
+// resolve.At. docs/design/lsp.md has the design.
 //
 // Notifications that change something (a document, a file on disk, the
 // workspace) are applied one at a time, in the order they arrive, each
@@ -211,6 +211,7 @@ type capabilities struct {
 	documentChanges     bool // edits that name a document's version
 	related, tags, href bool // what a diagnostic may carry
 	progress            bool // window/workDoneProgress
+	links               bool // a definition as LocationLinks
 }
 
 // encoding names the position encoding in use.
@@ -360,6 +361,12 @@ func (s *server) request(ctx context.Context, method string, params json.RawMess
 			return nil, err
 		}
 		result, err = s.codeAction(ctx, &p)
+	case "textDocument/definition":
+		var p DefinitionParams
+		if err := unmarshal(params, &p); err != nil {
+			return nil, err
+		}
+		result, err = s.definition(ctx, &p)
 	case "textDocument/formatting":
 		var p DocumentFormattingParams
 		if err := unmarshal(params, &p); err != nil {
@@ -486,6 +493,7 @@ func (s *server) initialize(params json.RawMessage) (any, error) {
 		tags:            c.TextDocument.PublishDiagnostics.TagSupport != nil,
 		href:            c.TextDocument.PublishDiagnostics.CodeDescriptionSupport,
 		progress:        c.Window.WorkDoneProgress,
+		links:           c.TextDocument.Definition.LinkSupport,
 	}
 	// A column is a byte offset wherever the client can count that way;
 	// UTF-16 is what every client can.
@@ -518,6 +526,7 @@ func (s *server) initialize(params json.RawMessage) (any, error) {
 	res := &InitializeResult{ServerInfo: ServerInfo{Name: "dgdtools", Version: s.opt.Version}}
 	res.Capabilities.PositionEncoding = s.caps.encoding()
 	res.Capabilities.TextDocumentSync = TextDocumentSyncOptions{OpenClose: true, Change: SyncIncremental}
+	res.Capabilities.DefinitionProvider = true
 	res.Capabilities.DocumentFormattingProvider = true
 	res.Capabilities.DocumentRangeFormattingProvider = true
 	if c.TextDocument.CodeAction.CodeActionLiteralSupport != nil {

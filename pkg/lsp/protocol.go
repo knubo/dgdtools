@@ -79,6 +79,9 @@ type InitializeParams struct {
 			CodeAction struct {
 				CodeActionLiteralSupport *struct{} `json:"codeActionLiteralSupport"`
 			} `json:"codeAction"`
+			Definition struct {
+				LinkSupport bool `json:"linkSupport"`
+			} `json:"definition"`
 		} `json:"textDocument"`
 		Window struct {
 			WorkDoneProgress bool `json:"workDoneProgress"`
@@ -105,6 +108,7 @@ type ServerCapabilities struct {
 	PositionEncoding                string                  `json:"positionEncoding"`
 	TextDocumentSync                TextDocumentSyncOptions `json:"textDocumentSync"`
 	CodeActionProvider              *CodeActionOptions      `json:"codeActionProvider,omitempty"`
+	DefinitionProvider              bool                    `json:"definitionProvider"`
 	DocumentFormattingProvider      bool                    `json:"documentFormattingProvider"`
 	DocumentRangeFormattingProvider bool                    `json:"documentRangeFormattingProvider"`
 	Workspace                       struct {
@@ -293,6 +297,22 @@ type WorkspaceEdit struct {
 type TextDocumentEdit struct {
 	TextDocument VersionedTextDocumentIdentifier `json:"textDocument"`
 	Edits        []TextEdit                      `json:"edits"`
+}
+
+type DefinitionParams struct {
+	TextDocument TextDocumentIdentifier `json:"textDocument"`
+	Position     Position               `json:"position"`
+}
+
+// LocationLink is a Location that also says what at the place asked
+// about names it (OriginSelectionRange). TargetSelectionRange is the
+// name at the target and TargetRange the whole of what is declared
+// there; the server gives the name for both.
+type LocationLink struct {
+	OriginSelectionRange Range  `json:"originSelectionRange"`
+	TargetURI            string `json:"targetUri"`
+	TargetRange          Range  `json:"targetRange"`
+	TargetSelectionRange Range  `json:"targetSelectionRange"`
 }
 
 type DocumentFormattingParams struct {

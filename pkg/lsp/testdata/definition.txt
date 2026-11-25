@@ -1,0 +1,243 @@
+Go to definition, for a client that reads links: where what the cursor is
+on is declared, with the range of what names it. Nothing for what nothing
+is known of.
+
+-- lib/dgdtools.yml --
+include_dirs: [/include]
+auto_objects: [/sys/auto]
+conventions:
+  call_registry:
+    add_action: { function: 0 }
+-- lib/include/std.h --
+#define BASE "/std/base"
+#define DAEMON "/sys/daemon"
+-- lib/sys/auto.c --
+void notify(string s) {}
+-- lib/sys/daemon.c --
+void register(object o) {}
+-- lib/std/base.c --
+int weight;
+void create() {}
+int query_weight() { return weight; }
+-- lib/obj/a.c --
+#include <std.h>
+inherit base BASE;
+
+void create() {
+    ::create();
+    base::create();
+    weight = query_weight();
+    notify("x");
+    DAEMON->register(this_object());
+    add_action("cmd", "x");
+    call_other(this_player(), "cmd");
+    sizeof(({ }));
+}
+int cmd(string s) { return 1; }
+-- script --
+initialize lib
+open lib/obj/a.c
+
+# An #include goes to the header and an inherit statement to the object
+# inherited, however its path is written; a label to where it is given.
+definition lib/obj/a.c 0:12
+definition lib/obj/a.c 1:14
+definition lib/obj/a.c 5:5
+
+# Functions: the inherited one, by :: and by its label; one of the chain;
+# the auto object's; that of an object named by a macro; a callback named
+# by a string.
+definition lib/obj/a.c 4:8
+definition lib/obj/a.c 5:12
+definition lib/obj/a.c 6:15
+definition lib/obj/a.c 7:6
+definition lib/obj/a.c 8:14
+definition lib/obj/a.c 9:17
+
+# A global variable of an inherited object, and a macro.
+definition lib/obj/a.c 6:5
+definition lib/obj/a.c 8:6
+
+# The place is that of the text the editor has: a file that is open and
+# changed is the buffer, and the answer follows it.
+open lib/std/base.c
+change lib/std/base.c 0:0-0:0 "/* the weight, in grams */\n"
+definition lib/obj/a.c 6:5
+
+# Nothing: a receiver nobody knows, a function of the driver's, a keyword.
+definition lib/obj/a.c 10:32
+definition lib/obj/a.c 11:6
+definition lib/obj/a.c 3:1
+
+# A cursor at the end of a name is on it; a position past the text is
+# its end.
+definition lib/obj/a.c 6:10
+definition lib/obj/a.c 99:0
+
+# A document that is not open is not answered for.
+definition lib/sys/daemon.c 0:6
+shutdown
+exit
+-- transcript --
+> initialize lib
+< {
+<   "capabilities": {
+<     "positionEncoding": "utf-16",
+<     "textDocumentSync": {"openClose": true, "change": 2},
+<     "codeActionProvider": {"codeActionKinds": ["quickfix", "source.fixAll.dgdtools"]},
+<     "definitionProvider": true,
+<     "documentFormattingProvider": true,
+<     "documentRangeFormattingProvider": true,
+<     "workspace": {
+<       "workspaceFolders": {"supported": true, "changeNotifications": true},
+<       "textDocumentContent": {"schemes": ["dgdtools-profile"]}
+<     }
+<   },
+<   "serverInfo": {"name": "dgdtools", "version": "test"}
+< }
+> open lib/obj/a.c
+# An #include goes to the header and an inherit statement to the object
+# inherited, however its path is written; a label to where it is given.
+> definition lib/obj/a.c 0:12
+< [
+<   {
+<     "originSelectionRange": {"start": {"line": 0, "character": 9}, "end": {"line": 0, "character": 16}},
+<     "targetUri": "file://$ROOT/lib/include/std.h",
+<     "targetRange": {"start": {"line": 0, "character": 0}, "end": {"line": 0, "character": 0}},
+<     "targetSelectionRange": {"start": {"line": 0, "character": 0}, "end": {"line": 0, "character": 0}}
+<   }
+< ]
+> definition lib/obj/a.c 1:14
+< [
+<   {
+<     "originSelectionRange": {"start": {"line": 1, "character": 13}, "end": {"line": 1, "character": 17}},
+<     "targetUri": "file://$ROOT/lib/std/base.c",
+<     "targetRange": {"start": {"line": 0, "character": 0}, "end": {"line": 0, "character": 0}},
+<     "targetSelectionRange": {"start": {"line": 0, "character": 0}, "end": {"line": 0, "character": 0}}
+<   }
+< ]
+> definition lib/obj/a.c 5:5
+< [
+<   {
+<     "originSelectionRange": {"start": {"line": 5, "character": 4}, "end": {"line": 5, "character": 8}},
+<     "targetUri": "file://$ROOT/lib/obj/a.c",
+<     "targetRange": {"start": {"line": 1, "character": 8}, "end": {"line": 1, "character": 12}},
+<     "targetSelectionRange": {"start": {"line": 1, "character": 8}, "end": {"line": 1, "character": 12}}
+<   }
+< ]
+# Functions: the inherited one, by :: and by its label; one of the chain;
+# the auto object's; that of an object named by a macro; a callback named
+# by a string.
+> definition lib/obj/a.c 4:8
+< [
+<   {
+<     "originSelectionRange": {"start": {"line": 4, "character": 6}, "end": {"line": 4, "character": 12}},
+<     "targetUri": "file://$ROOT/lib/std/base.c",
+<     "targetRange": {"start": {"line": 1, "character": 5}, "end": {"line": 1, "character": 11}},
+<     "targetSelectionRange": {"start": {"line": 1, "character": 5}, "end": {"line": 1, "character": 11}}
+<   }
+< ]
+> definition lib/obj/a.c 5:12
+< [
+<   {
+<     "originSelectionRange": {"start": {"line": 5, "character": 10}, "end": {"line": 5, "character": 16}},
+<     "targetUri": "file://$ROOT/lib/std/base.c",
+<     "targetRange": {"start": {"line": 1, "character": 5}, "end": {"line": 1, "character": 11}},
+<     "targetSelectionRange": {"start": {"line": 1, "character": 5}, "end": {"line": 1, "character": 11}}
+<   }
+< ]
+> definition lib/obj/a.c 6:15
+< [
+<   {
+<     "originSelectionRange": {"start": {"line": 6, "character": 13}, "end": {"line": 6, "character": 25}},
+<     "targetUri": "file://$ROOT/lib/std/base.c",
+<     "targetRange": {"start": {"line": 2, "character": 4}, "end": {"line": 2, "character": 16}},
+<     "targetSelectionRange": {"start": {"line": 2, "character": 4}, "end": {"line": 2, "character": 16}}
+<   }
+< ]
+> definition lib/obj/a.c 7:6
+< [
+<   {
+<     "originSelectionRange": {"start": {"line": 7, "character": 4}, "end": {"line": 7, "character": 10}},
+<     "targetUri": "file://$ROOT/lib/sys/auto.c",
+<     "targetRange": {"start": {"line": 0, "character": 5}, "end": {"line": 0, "character": 11}},
+<     "targetSelectionRange": {"start": {"line": 0, "character": 5}, "end": {"line": 0, "character": 11}}
+<   }
+< ]
+> definition lib/obj/a.c 8:14
+< [
+<   {
+<     "originSelectionRange": {"start": {"line": 8, "character": 12}, "end": {"line": 8, "character": 20}},
+<     "targetUri": "file://$ROOT/lib/sys/daemon.c",
+<     "targetRange": {"start": {"line": 0, "character": 5}, "end": {"line": 0, "character": 13}},
+<     "targetSelectionRange": {"start": {"line": 0, "character": 5}, "end": {"line": 0, "character": 13}}
+<   }
+< ]
+> definition lib/obj/a.c 9:17
+< [
+<   {
+<     "originSelectionRange": {"start": {"line": 9, "character": 16}, "end": {"line": 9, "character": 19}},
+<     "targetUri": "file://$ROOT/lib/obj/a.c",
+<     "targetRange": {"start": {"line": 13, "character": 4}, "end": {"line": 13, "character": 7}},
+<     "targetSelectionRange": {"start": {"line": 13, "character": 4}, "end": {"line": 13, "character": 7}}
+<   }
+< ]
+# A global variable of an inherited object, and a macro.
+> definition lib/obj/a.c 6:5
+< [
+<   {
+<     "originSelectionRange": {"start": {"line": 6, "character": 4}, "end": {"line": 6, "character": 10}},
+<     "targetUri": "file://$ROOT/lib/std/base.c",
+<     "targetRange": {"start": {"line": 0, "character": 4}, "end": {"line": 0, "character": 10}},
+<     "targetSelectionRange": {"start": {"line": 0, "character": 4}, "end": {"line": 0, "character": 10}}
+<   }
+< ]
+> definition lib/obj/a.c 8:6
+< [
+<   {
+<     "originSelectionRange": {"start": {"line": 8, "character": 4}, "end": {"line": 8, "character": 10}},
+<     "targetUri": "file://$ROOT/lib/include/std.h",
+<     "targetRange": {"start": {"line": 1, "character": 8}, "end": {"line": 1, "character": 14}},
+<     "targetSelectionRange": {"start": {"line": 1, "character": 8}, "end": {"line": 1, "character": 14}}
+<   }
+< ]
+# The place is that of the text the editor has: a file that is open and
+# changed is the buffer, and the answer follows it.
+> open lib/std/base.c
+> change lib/std/base.c 0:0-0:0 "/* the weight, in grams */\n"
+> definition lib/obj/a.c 6:5
+< [
+<   {
+<     "originSelectionRange": {"start": {"line": 6, "character": 4}, "end": {"line": 6, "character": 10}},
+<     "targetUri": "file://$ROOT/lib/std/base.c",
+<     "targetRange": {"start": {"line": 1, "character": 4}, "end": {"line": 1, "character": 10}},
+<     "targetSelectionRange": {"start": {"line": 1, "character": 4}, "end": {"line": 1, "character": 10}}
+<   }
+< ]
+# Nothing: a receiver nobody knows, a function of the driver's, a keyword.
+> definition lib/obj/a.c 10:32
+< null
+> definition lib/obj/a.c 11:6
+< null
+> definition lib/obj/a.c 3:1
+< null
+# A cursor at the end of a name is on it; a position past the text is
+# its end.
+> definition lib/obj/a.c 6:10
+< [
+<   {
+<     "originSelectionRange": {"start": {"line": 6, "character": 4}, "end": {"line": 6, "character": 10}},
+<     "targetUri": "file://$ROOT/lib/std/base.c",
+<     "targetRange": {"start": {"line": 1, "character": 4}, "end": {"line": 1, "character": 10}},
+<     "targetSelectionRange": {"start": {"line": 1, "character": 4}, "end": {"line": 1, "character": 10}}
+<   }
+< ]
+> definition lib/obj/a.c 99:0
+< null
+# A document that is not open is not answered for.
+> definition lib/sys/daemon.c 0:6
+< null
+> shutdown
+< null
+> exit
+< "the server exited after shutdown"
