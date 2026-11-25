@@ -178,12 +178,20 @@ func TestCharConstants(t *testing.T) {
 	assert.Equal(t, []token.Kind{token.CharLit}, kinds(t, `'\\'`))
 	assert.Equal(t, []token.Kind{token.CharLit}, kinds(t, `'\x1b'`))
 	assert.Equal(t, []token.Kind{token.CharLit}, kinds(t, `'\007'`))
-	// Empty and multi-char constants are Illegal.
-	for _, src := range []string{"''", "'ab'"} {
+	assert.Equal(t, []token.Kind{token.CharLit}, kinds(t, `'\x'`), "no digits: the letter x")
+	assert.Equal(t, []token.Kind{token.CharLit}, kinds(t, `'\X'`), "the letter X")
+	// Empty and multi-char constants are Illegal. The driver knows the
+	// hexadecimal escape as \x only: after \X, digits are more characters.
+	for _, src := range []string{"''", "'ab'", `'\X41'`, `'\x414'`} {
 		f := Lex("t.c", []byte(src), Default)
 		require.NoError(t, f.CheckRoundTrip())
 		assert.True(t, f.HasIllegal(), "src=%q", src)
+		require.Len(t, f.Errs, 1, "src=%q", src)
 	}
+	f := Lex("t.c", []byte(`'\X41'`), Default)
+	assert.Equal(t, "illegal character constant", f.Errs[0].Msg)
+	// In a string it is three characters, and nobody's error.
+	assert.Equal(t, []token.Kind{token.StringLit}, kinds(t, `"\X41"`))
 }
 
 func TestDirectives(t *testing.T) {

@@ -360,15 +360,18 @@ func (b *builder) block(s *syntax.BlockStmt, level int, inSwitch bool) {
 	if b.mine(s.First) && b.f.Tokens[s.First].Kind == token.LBrace {
 		b.info[s.First] = brace
 	}
-	if s.Last > s.First && b.mine(s.Last) && b.f.Tokens[s.Last].Kind == token.RBrace {
-		b.info[s.Last] = brace
-	}
 	for _, c := range s.Stmts {
 		if label, ok := c.(*syntax.CaseStmt); ok && inSwitch {
 			b.switchCase(label, level)
 		} else {
 			b.stmt(c, level+1)
 		}
+	}
+	// Last, so that the brace is the block's whatever is inside: a
+	// statement that is missing (`if (x) }`) is reported at the brace it
+	// was looked for at, and must not take the brace for itself.
+	if s.Last > s.First && b.mine(s.Last) && b.f.Tokens[s.Last].Kind == token.RBrace {
+		b.info[s.Last] = brace
 	}
 }
 

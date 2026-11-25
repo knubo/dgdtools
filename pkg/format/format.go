@@ -5,8 +5,8 @@
 // bytes verbatim and synthesizes only the whitespace between them. Safety is
 // enforced twice: structurally (there is no code path that alters a
 // significant token) and by the gate in Format, which re-lexes the output,
-// requires token-stream equality with the input (tokcmp), and requires
-// idempotence, before any byte is returned.
+// requires token-stream equality with the input (tokcmp), the same
+// comments, and idempotence, before any byte is returned.
 //
 // It works in two steps. The plan (plan.go) reads the file the way every
 // other tool does, with pp and syntax, and records for each token what the
@@ -198,12 +198,50 @@ func gated(f *token.File, o Options, sel *selection) (out []byte, err error) {
 	if eq, div := tokcmp.Compare(f, relexed); !eq {
 		return nil, fmt.Errorf("%s: %w: input %s vs output %s", f.Path, ErrGateFailure, div.APos, div.BPos)
 	}
+	if !sameComments(f, relexed) {
+		return nil, fmt.Errorf("%s: %w: a comment is not what it was", f.Path, ErrGateFailure)
+	}
 	// A selection is by gap, and the gaps of the output are those of the
 	// input: the same selection applies to it.
 	if again := engine(relexed, o, sel); !bytes.Equal(again, out) {
 		return nil, fmt.Errorf("%s: %w", f.Path, ErrNotIdempotent)
 	}
 	return out, nil
+}
+
+// sameComments reports whether b has the comments of a, in their order:
+// each byte for byte, but for the indentation of a block comment's
+// further lines, which moves with the comment.
+func sameComments(a, b *token.File) bool {
+	next := func(f *token.File, i int) int {
+		for ; i < len(f.Tokens); i++ {
+			if k := f.Tokens[i].Kind; k == token.LineComment || k == token.BlockComment {
+				return i
+			}
+		}
+		return -1
+	}
+	i, j := next(a, 0), next(b, 0)
+	for ; i >= 0 && j >= 0; i, j = next(a, i+1), next(b, j+1) {
+		x, y := a.Text(a.Tokens[i]), b.Text(b.Tokens[j])
+		if !bytes.Equal(x, y) && !bytes.Equal(unindented(x), unindented(y)) {
+			return false
+		}
+	}
+	return i < 0 && j < 0
+}
+
+// unindented returns a comment without the blanks its lines after the
+// first begin with.
+func unindented(comment []byte) []byte {
+	var out []byte
+	for k, line := range splitKeepEndings(comment) {
+		if k > 0 {
+			line = bytes.TrimLeft(line, " \t")
+		}
+		out = append(out, line...)
+	}
+	return out
 }
 
 // engine performs the actual layout. It must be deterministic. A nil

@@ -333,6 +333,7 @@ func (lx *lexer) scanChar(start int) {
 // scanEscapeTail consumes the body of an escape sequence after the
 // backslash: up to 3 octal digits, \x plus up to 2 hex digits, or one
 // arbitrary character (DGD: unknown escape means the literal character).
+// As in the driver the x is lower case only: \X is the letter X.
 func (lx *lexer) scanEscapeTail() {
 	if lx.pos >= len(lx.src) {
 		return
@@ -343,7 +344,7 @@ func (lx *lexer) scanEscapeTail() {
 		for n := 0; n < 3 && lx.pos < len(lx.src) && lx.src[lx.pos] >= '0' && lx.src[lx.pos] <= '7'; n++ {
 			lx.pos++
 		}
-	case c == 'x' || c == 'X':
+	case c == 'x':
 		lx.pos++
 		for n := 0; n < 2 && lx.pos < len(lx.src) && isHexDigit(lx.src[lx.pos]); n++ {
 			lx.pos++

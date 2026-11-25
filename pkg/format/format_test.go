@@ -1,6 +1,7 @@
 package format
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -9,6 +10,7 @@ import (
 	"github.com/mmcdole/dgdtools/pkg/config"
 	"github.com/mmcdole/dgdtools/pkg/lexer"
 	"github.com/mmcdole/dgdtools/pkg/pp"
+	"github.com/mmcdole/dgdtools/pkg/token"
 )
 
 func fmtSrc(t *testing.T, src string, o Options) string {
@@ -379,6 +381,90 @@ func TestErrorRegions(t *testing.T) {
 	// A macro whose arguments are not expressions.
 	in = body("x = NEW(int   *, 3)+1;\n")
 	assert.Equal(t, body("    x = NEW(int *, 3) + 1;\n"), fmtSrc(t, in, Options{}))
+}
+
+// A literal inside a literal is one level further in, whichever of the
+// two kinds each is, and closes where it began.
+func TestNestedLiterals(t *testing.T) {
+	want := body(`    m = ([
+        "a": ({
+            1,
+            2,
+        }),
+        "b": 2,
+        "c": ([
+            "x": ({ 1,
+                2 }),
+            /* about d */
+        ]),
+        "d": foo(1,
+            2) +
+            3,
+    ]);
+    x = ({ ([ "a": 1,
+            "b": 2 ]),
+        ({
+            3,
+        }),
+    });
+    y = a[
+        b];
+`)
+	flat := strings.ReplaceAll(want, "\n        ", "\n")
+	flat = strings.ReplaceAll(strings.ReplaceAll(flat, "\n    ", "\n"), "\n    ", "\n")
+	require.NotContains(t, flat, "\n ")
+	assert.Equal(t, want, fmtSrc(t, flat, Options{}))
+	assert.Equal(t, want, fmtSrc(t, want, Options{}))
+	// At the top level too.
+	decl := "mapping m = ([\n    \"a\": ({\n        1,\n    }),\n    \"b\": ([\n        \"c\": 2,\n    ]),\n]);\n"
+	assert.Equal(t, decl, fmtSrc(t, strings.ReplaceAll(decl, "\n    ", "\n"), Options{}))
+}
+
+// A control statement whose body is missing before the brace that closes
+// the block: the brace is the block's, and the result is a fixed point.
+func TestMissingBody(t *testing.T) {
+	for in, want := range map[string]string{
+		"f(){\nif(1)}":                                          "f()\n{\n    if (1)\n}\n",
+		"void f()\n{\n    if (x) }\n":                           "void\nf()\n{\n    if (x)\n}\n",
+		"void f()\n{\n    while (x) }\n":                        "void\nf()\n{\n    while (x)\n}\n",
+		"void f()\n{\n    for (;;) }\n":                         "void\nf()\n{\n    for (;;)\n}\n",
+		"void f()\n{\n    if (x) { if (y) } }\n":                "void\nf()\n{\n    if (x) { if (y) }\n}\n",
+		"void f()\n{\n    x = \"a\" \"b\";\n    if (x = 1) }\n": "void\nf()\n{\n    x = \"a\" \"b\";\n    if (x = 1)\n}\n",
+	} {
+		assert.Equal(t, want, fmtSrc(t, in, Options{}), "%q", in)
+		assert.Equal(t, want, fmtSrc(t, want, Options{}), "%q", in)
+	}
+}
+
+// Texts no compiler takes, found by FuzzFormat: the formatter still gives
+// back the tokens it was given.
+func TestOddTokensStayWhatTheyAre(t *testing.T) {
+	for in, want := range map[string]string{
+		// A '#' in a line is no directive, and is not made one.
+		"A(){#0\n00": "A()\n{ # 0\n    00\n",
+		// A number does not take the '.' after it.
+		"int x = 0 .a;\n": "int x = 0 .a;\n",
+		// A directive that ends the file without ending.
+		"#define A \\":   "#define A \\",
+		"#define A /* b": "#define A /* b",
+		"#/*\n":          "#/*\n",
+		"#endif":         "#endif\n",
+	} {
+		assert.Equal(t, want, fmtSrc(t, in, Options{}), "%q", in)
+	}
+}
+
+// The gate holds the comments too: all of them, in order, with nothing
+// changed but where a block comment's further lines begin.
+func TestGateComparesComments(t *testing.T) {
+	lex := func(src string) *token.File { return lexer.Lex("t.c", []byte(src), lexer.Default) }
+	same := func(a, b string) bool { return sameComments(lex(a), lex(b)) }
+	assert.True(t, same("int x; // one\n/* two\n   more */\n", "int x;   // one\n    /* two\n\t\tmore */\n"))
+	assert.False(t, same("int x; // one\n", "int x;\n"), "a comment is gone")
+	assert.False(t, same("int x;\n", "int x; /* new */\n"))
+	assert.False(t, same("/* a */ /* b */\n", "/* b */ /* a */\n"), "order")
+	assert.False(t, same("// one \n", "// one\n"), "a line comment keeps its bytes")
+	assert.False(t, same("/* two\n   more  */\n", "/* two\n   more */\n"), "only the indentation of a line may differ")
 }
 
 func TestOptionsFor(t *testing.T) {

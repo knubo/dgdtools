@@ -5,6 +5,7 @@ import (
 	"slices"
 
 	"github.com/mmcdole/dgdtools/pkg/directive"
+	"github.com/mmcdole/dgdtools/pkg/lexer"
 	"github.com/mmcdole/dgdtools/pkg/token"
 )
 
@@ -312,7 +313,9 @@ func (p *printer) layout(gap []token.Token, next int, resumed, tail bool) {
 			p.buf.WriteString(p.sep(next))
 			return
 		}
-		if p.plan.has(next, breakBefore) || p.plan.has(p.prev, breakAfter) {
+		// A '#' that is not a directive's stays in its line: at the start
+		// of one it would be a directive.
+		if k := p.f.Tokens[next].Kind; (p.plan.has(next, breakBefore) || p.plan.has(p.prev, breakAfter)) && k != token.Hash && k != token.HashHash {
 			p.writeNewline(nil)
 			p.indent(next, p.indentOf(next))
 			return
@@ -420,9 +423,21 @@ func (p *printer) finish(gap []token.Token) {
 			lastSpace = nil
 		}
 	}
-	if p.buf.Len() > 0 {
+	if p.buf.Len() > 0 && !p.runsOn() {
 		p.writeNewline(nil)
 	}
+}
+
+// runsOn reports whether the file ends in a directive that a line break
+// would not end: one that stops at a backslash, or inside a comment. It
+// has no line to go on to, and is not given one.
+func (p *printer) runsOn() bool {
+	if p.prevKind != token.Directive {
+		return false
+	}
+	text := p.f.Text(p.f.Tokens[p.prev])
+	again := lexer.Lex(p.f.Path, append(bytes.Clone(text), '\n'), p.f.Dialect)
+	return again.Tokens[0].Len() != len(text)
 }
 
 // shouldCuddle reports whether the token at next, currently on its own
@@ -491,11 +506,16 @@ func (p *printer) writeNewline(orig []byte) {
 	}
 }
 
-// braces counts the braces open inside the current statement.
-func (p *printer) braces() int {
+// depth counts what is open inside the current statement that holds
+// lines of its own: the braces, and the brackets of mapping literals.
+// Each indents the lines inside it by one level, so a literal inside a
+// literal is one level further in. A parenthesis or an index bracket
+// does not: a line inside one continues its statement, however many are
+// open.
+func (p *printer) depth() int {
 	n := 0
 	for _, fr := range p.stack {
-		if fr.kind == token.LBrace {
+		if fr.kind == token.LBrace || fr.kind == token.LBracket && fr.literal {
 			n++
 		}
 	}
@@ -522,16 +542,21 @@ func (p *printer) indentOf(i int) int {
 	if x.flags&head != 0 {
 		return int(x.level)
 	}
-	// Inside a statement: the braces open in it, and one more for a line
+	// Inside a statement: what is open in it, and one more for a line
 	// that continues it.
-	level := int(x.level) + p.braces()
+	level := int(x.level) + p.depth()
 	switch t.Kind {
 	case token.RBrace:
-		if p.braces() > 0 {
+		if p.depth() > 0 {
 			level--
 		}
-	case token.RParen, token.RBracket:
-		// Closing a continuation bracket sits at the base level.
+	case token.RBracket:
+		// The bracket of a mapping stands where the mapping began; one
+		// that closes a continuation sits at the base level.
+		if p.topLiteral(token.LBracket) {
+			level--
+		}
+	case token.RParen:
 	case token.KwCase, token.KwDefault:
 		if p.inSwitch() {
 			level--
@@ -563,13 +588,16 @@ func (p *printer) commentIndent(i int) int {
 		}
 		return int(x.level)
 	case x.flags&known == 0:
-		return int(x.level) + p.braces()
+		return int(x.level) + p.depth()
 	}
 	switch t.Kind {
 	case token.RBrace:
-		return int(x.level) + p.braces()
+		return int(x.level) + p.depth()
 	case token.RParen, token.RBracket:
-		return int(x.level) + p.braces() + 1
+		if t.Kind == token.RBracket && p.topLiteral(token.LBracket) {
+			return int(x.level) + p.depth()
+		}
+		return int(x.level) + p.depth() + 1
 	}
 	return p.indentOf(i)
 }
@@ -582,7 +610,7 @@ func (p *printer) commentIndent(i int) int {
 // an operator.
 func (p *printer) continues(x info) bool {
 	if n := len(p.stack); n > 0 {
-		if k := p.stack[n-1].kind; k == token.LParen || k == token.LBracket {
+		if fr := p.stack[n-1]; fr.kind == token.LParen || fr.kind == token.LBracket && !fr.literal {
 			return true
 		}
 	} else if x.flags&known != 0 {
@@ -911,7 +939,8 @@ func (p *printer) mergeRisk(next token.Token) bool {
 	case '#':
 		return b == '#'
 	}
-	return false
+	// A number takes a lone '.' for its own.
+	return p.prevKind == token.IntLit && next.Kind == token.Dot
 }
 
 // emitComment writes a comment; multi-line block comments are shifted
