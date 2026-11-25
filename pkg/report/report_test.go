@@ -128,6 +128,9 @@ func TestFormats(t *testing.T) {
 	require.NoError(t, report.Write(&b, "json", &lint.Result{}, rules, report.Options{Version: "v1.2.3"}))
 	golden(t, "empty.json", b.Bytes())
 	b.Reset()
+	require.NoError(t, report.Write(&b, "sarif", &lint.Result{}, rules, report.Options{BaseDir: "/work/mud", Version: "v1.2.3"}))
+	golden(t, "empty.sarif", b.Bytes())
+	b.Reset()
 	require.NoError(t, report.Write(&b, "", &lint.Result{}, rules, report.Options{}))
 	assert.Empty(t, b.String(), "the default format is human, and silent when there is nothing")
 }

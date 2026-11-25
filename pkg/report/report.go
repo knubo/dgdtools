@@ -4,11 +4,14 @@
 package report
 
 import (
+	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/url"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -56,17 +59,26 @@ func (o Options) under(p string) (string, bool) {
 
 // Write renders res in the named format.
 func Write(w io.Writer, format string, res *lint.Result, rules []*lint.Rule, o Options) error {
+	var write func(io.Writer) error
 	switch format {
 	case "human", "":
-		return Human(w, res, o)
+		write = func(w io.Writer) error { return Human(w, res, o) }
 	case "json":
-		return JSON(w, res, rules, o)
+		write = func(w io.Writer) error { return JSON(w, res, rules, o) }
 	case "sarif":
-		return SARIF(w, res, rules, o)
+		write = func(w io.Writer) error { return SARIF(w, res, rules, o) }
 	case "github":
-		return GitHub(w, res, o)
+		write = func(w io.Writer) error { return GitHub(w, res, o) }
+	default:
+		return fmt.Errorf("unknown output format %q (want %s)", format, strings.Join(Formats, ", "))
 	}
-	return fmt.Errorf("unknown output format %q (want %s)", format, strings.Join(Formats, ", "))
+	// A finding is a line or a few: written as they come, they would be
+	// a system call each.
+	b := bufio.NewWriter(w)
+	if err := write(b); err != nil {
+		return err
+	}
+	return b.Flush()
 }
 
 // Human writes one line per finding in the classic compiler format, the
@@ -182,9 +194,9 @@ type jsonDiag struct {
 }
 
 type jsonOut struct {
-	Version     int        `json:"version"`
-	Tool        string     `json:"tool"`
-	Diagnostics []jsonDiag `json:"diagnostics"`
+	Version     int             `json:"version"`
+	Tool        string          `json:"tool"`
+	Diagnostics json.RawMessage `json:"diagnostics"` // written by encodeAround
 	// Rules describes the rules that have a diagnostic above, by name.
 	Rules   map[string]jsonRule `json:"rules,omitempty"`
 	Summary jsonSum             `json:"summary"`
@@ -227,7 +239,7 @@ func JSON(w io.Writer, res *lint.Result, rules []*lint.Rule, o Options) error {
 		byName[r.Name] = r
 	}
 	name := func(p string) string { return filepath.ToSlash(o.name(p)) }
-	out := jsonOut{Version: 1, Tool: "dgdtools " + o.Version, Diagnostics: []jsonDiag{}, Rules: map[string]jsonRule{}}
+	out := jsonOut{Version: 1, Tool: "dgdtools " + o.Version, Diagnostics: hole, Rules: map[string]jsonRule{}}
 	for _, n := range res.Notes {
 		out.Notes = append(out.Notes, jsonNote{n.Kind, n.Message, n.Path})
 	}
@@ -247,6 +259,9 @@ func JSON(w io.Writer, res *lint.Result, rules []*lint.Rule, o Options) error {
 		if r := byName[d.Rule]; r != nil {
 			out.Rules[d.Rule] = jsonRule{r.Code, r.Group, r.Doc, r.URL(o.Version)}
 		}
+	}
+	return encodeAround(w, out, len(res.Diagnostics), func(i int) any {
+		d := &res.Diagnostics[i]
 		jd := jsonDiag{
 			Rule: d.Rule, Code: d.Code, Severity: d.Severity.String(),
 			Path: name(d.Path), Line: d.Line, Col: d.Col, Message: d.Message,
@@ -266,12 +281,67 @@ func JSON(w io.Writer, res *lint.Result, rules []*lint.Rule, o Options) error {
 			}
 			jd.Fixes = append(jd.Fixes, jf)
 		}
-		out.Diagnostics = append(out.Diagnostics, jd)
-	}
-	enc := json.NewEncoder(w)
-	enc.SetIndent("", "  ")
+		return jd
+	})
+}
+
+// hole stands in a document for the array encodeAround writes there.
+var hole = json.RawMessage(`"\u0000array\u0000"`)
+
+// encodeAround writes doc as encoding/json writes it indented by two
+// spaces, with an array of n elements, elem(i) each, where doc has hole.
+// The elements are encoded one at a time: a whole lib's findings, as a
+// document in memory, would be many times their own size.
+func encodeAround(w io.Writer, doc any, n int, elem func(i int) any) error {
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
 	enc.SetEscapeHTML(false)
-	return enc.Encode(out)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(doc); err != nil {
+		return err
+	}
+	at := bytes.Index(buf.Bytes(), hole)
+	if at < 0 {
+		return fmt.Errorf("report: no place for the array in the document")
+	}
+	head, tail := slices.Clone(buf.Bytes()[:at]), slices.Clone(buf.Bytes()[at+len(hole):])
+	if _, err := w.Write(head); err != nil {
+		return err
+	}
+	if n == 0 {
+		_, err := io.WriteString(w, "[]")
+		if err == nil {
+			_, err = w.Write(tail)
+		}
+		return err
+	}
+	// The array's elements are one level deeper than the line it is on.
+	line := head[bytes.LastIndexByte(head, '\n')+1:]
+	indent := line[:len(line)-len(bytes.TrimLeft(line, " "))]
+	prefix := string(indent) + "  "
+	enc.SetIndent(prefix, "  ")
+	if _, err := io.WriteString(w, "[\n"); err != nil {
+		return err
+	}
+	for i := range n {
+		buf.Reset()
+		if i > 0 {
+			buf.WriteString(",\n")
+		}
+		buf.WriteString(prefix)
+		if err := enc.Encode(elem(i)); err != nil {
+			return err
+		}
+		buf.Truncate(buf.Len() - 1) // Encode's newline
+		if _, err := w.Write(buf.Bytes()); err != nil {
+			return err
+		}
+	}
+	if _, err := fmt.Fprintf(w, "\n%s]", indent); err != nil {
+		return err
+	}
+	_, err := w.Write(tail)
+	return err
 }
 
 // ---------------------------------------------------------------- GitHub
@@ -407,8 +477,26 @@ func SARIF(w io.Writer, res *lint.Result, rules []*lint.Rule, o Options) error {
 			Properties:    map[string]any{"code": r.Code, "group": r.Group},
 		})
 	}
-	results := []sarifResult{}
-	for _, d := range res.Diagnostics {
+	run := map[string]any{
+		"tool": map[string]any{"driver": map[string]any{
+			"name": "dgdtools", "version": o.Version,
+			"informationUri": "https://github.com/mmcdole/dgdtools",
+			"rules":          srules,
+		}},
+		"results": hole,
+	}
+	if o.BaseDir != "" {
+		run["originalUriBaseIds"] = map[string]any{
+			srcRoot: map[string]string{"uri": strings.TrimSuffix(fileURI(o.BaseDir), "/") + "/"},
+		}
+	}
+	doc := map[string]any{
+		"$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+		"version": "2.1.0",
+		"runs":    []any{run},
+	}
+	return encodeAround(w, doc, len(res.Diagnostics), func(i int) any {
+		d := &res.Diagnostics[i]
 		start, length := d.Start, d.End-d.Start
 		sr := sarifResult{
 			RuleID: d.Rule, Level: sarifLevel(d.Severity), Message: sarifMsg{d.Message},
@@ -429,28 +517,6 @@ func SARIF(w io.Writer, res *lint.Result, rules []*lint.Rule, o Options) error {
 				Message: &sarifMsg{r.Message},
 			})
 		}
-		results = append(results, sr)
-	}
-	run := map[string]any{
-		"tool": map[string]any{"driver": map[string]any{
-			"name": "dgdtools", "version": o.Version,
-			"informationUri": "https://github.com/mmcdole/dgdtools",
-			"rules":          srules,
-		}},
-		"results": results,
-	}
-	if o.BaseDir != "" {
-		run["originalUriBaseIds"] = map[string]any{
-			srcRoot: map[string]string{"uri": strings.TrimSuffix(fileURI(o.BaseDir), "/") + "/"},
-		}
-	}
-	doc := map[string]any{
-		"$schema": "https://json.schemastore.org/sarif-2.1.0.json",
-		"version": "2.1.0",
-		"runs":    []any{run},
-	}
-	enc := json.NewEncoder(w)
-	enc.SetIndent("", "  ")
-	enc.SetEscapeHTML(false)
-	return enc.Encode(doc)
+		return sr
+	})
 }
