@@ -206,6 +206,11 @@ func (r *Resolver) At(off uint32) *Ref {
 		}
 		return r.str(ti)
 	}
+	// Anywhere else in an inherit statement, its keywords and the ';'
+	// included: the object inherited.
+	if _, compiled := slices.BinarySearch(f.Tree.Sel.Sig, ti); compiled {
+		return r.inherit(syntax.PathAt(f.Tree, ti), ti)
+	}
 	return nil
 }
 
@@ -461,15 +466,15 @@ func (r *Resolver) str(ti int) *Ref {
 	return nil
 }
 
-// inherit resolves a token in the path of an inherit statement to the
-// object inherited. The whole expression names it, a macro in it
+// inherit resolves a token of an inherit statement but its label to the
+// object inherited. The whole statement names it, a macro in the path
 // included: `inherit ROOM;` is about the room, not about the #define.
 func (r *Resolver) inherit(path []syntax.Node, ti int) *Ref {
 	if len(path) < 2 {
 		return nil
 	}
 	d, ok := path[len(path)-2].(*syntax.InheritDecl)
-	if !ok || d.Path == nil || !has(d.Path, ti) {
+	if !ok || d.Path == nil || !has(d, ti) || d.Label != nil && has(d.Label, ti) {
 		return nil
 	}
 	off := r.Tree.Off(d.Path)

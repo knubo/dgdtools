@@ -173,6 +173,9 @@ func TestWholeLib(t *testing.T) {
 		"inherit ST|D;":       `object /std/base "STD" -> /lib/std/base.c`,
 		"inherit side \"/st|": `object /std/side "\"/std/side\"" -> /lib/std/side.c`,
 		"inherit si|de":       `label side "side" decl -> /lib/obj/a.c:4:9 "side"`,
+		"inh|erit STD;":       `object /std/base "STD" -> /lib/std/base.c`,
+		"inherit STD|;":       `object /std/base "STD" -> /lib/std/base.c`,
+		"|inherit side":       `object /std/side "\"/std/side\"" -> /lib/std/side.c`,
 		"si|de::setup":        `label side "side" -> /lib/obj/a.c:4:9 "side"`,
 
 		// Calls the compiler binds: the file's own function, the

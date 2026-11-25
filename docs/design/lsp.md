@@ -500,7 +500,7 @@ What resolves:
 | at the cursor | goes to |
 |---|---|
 | an `#include` line, anywhere on it | the file `Snapshot.ResolveInclude` finds: beside the file, in the include directories, in a profile's stubs |
-| the path of an `inherit` statement, any token of it | the object's file. `inherit ROOM;` is about the room: the macro's `#define` is not offered there (in the shared directories of the lib measured, 95% of the inherit statements are written with a macro) |
+| an `inherit` statement, any token of it but the label (the keywords, the path, the `;`) | the object's file. `inherit ROOM;` is about the room: the macro's `#define` is not offered there (in the shared directories of the lib measured, 95% of the inherit statements are written with a macro) |
 | an inherit label, in `label::fn()` or where it is given | the label in its inherit statement |
 | `fn(...)`, `&fn(...)` | the file's own function (one a header it includes as code declares, too), else the inherited one, else the auto object's; a definition before a prototype |
 | `::fn(...)`, `label::fn(...)` | the function of the inherited objects (of that label), and the auto object's for `::fn` when none has it. Two that are not each other's redefinition are both given: the call is ambiguous |
