@@ -39,6 +39,7 @@ import (
 	"github.com/mmcdole/dgdtools/pkg/fileset"
 	"github.com/mmcdole/dgdtools/pkg/format"
 	"github.com/mmcdole/dgdtools/pkg/index"
+	"github.com/mmcdole/dgdtools/pkg/kfun"
 	"github.com/mmcdole/dgdtools/pkg/pp"
 	"github.com/mmcdole/dgdtools/pkg/resolve"
 	"github.com/mmcdole/dgdtools/pkg/syntax"
@@ -355,6 +356,28 @@ func (d *Document) Resolve(off uint32) *resolve.Ref {
 	return d.resolver.At(off)
 }
 
+// Hover says what is known of what the token at byte offset off of the
+// document names: the declaration, where it is, the comment above it
+// (the document's resolve.Resolver's Hover). It is nil when that is
+// nothing.
+func (d *Document) Hover(off uint32) *resolve.Hover {
+	if d.resolver == nil {
+		return nil
+	}
+	return d.resolver.Hover(off)
+}
+
+// Signature says what the call takes whose argument list byte offset
+// off of the document is in (the document's resolve.Resolver's
+// Signature). It is nil when off is in none, or nothing is known of the
+// function called.
+func (d *Document) Signature(off uint32) *resolve.SignatureHelp {
+	if d.resolver == nil {
+		return nil
+	}
+	return d.resolver.Signature(off)
+}
+
 // Linter lints one project. It is safe for concurrent use.
 type Linter struct {
 	project *config.Project
@@ -368,6 +391,7 @@ type Linter struct {
 	scopes    sync.Map           // *config.Scope -> *scopeLayers
 	layerIDs  atomic.Int32
 	registry  *calls.Registry
+	kfuns     *kfun.Table
 	failOn    diag.Severity
 
 	baselines sync.Map // path -> *baselineFile
@@ -403,6 +427,9 @@ func New(prj *config.Project, fsys vfs.FS) (*Linter, error) {
 		l.overrides = append(l.overrides, lay)
 	}
 	l.registry = calls.NewRegistry(cfg.Conventions)
+	if l.kfuns, err = cfg.Kfuns(); err != nil {
+		return nil, fmt.Errorf("dialect.kfuns: %w", err)
+	}
 	l.index = index.Open(prj, fsys)
 	return l, nil
 }
@@ -665,7 +692,7 @@ func (l *Linter) lintFile(ctx context.Context, s *index.Snapshot, file string, s
 		File: parsed.Tok, Tree: parsed.Tree, Env: parsed.Env, Unit: u,
 	}
 	doc.resolver = resolve.New(resolve.File{
-		Tok: parsed.Tok, Tree: parsed.Tree, Env: parsed.Env, Unit: u, Snapshot: s, Registry: l.registry,
+		Tok: parsed.Tok, Tree: parsed.Tree, Env: parsed.Env, Unit: u, Snapshot: s, Registry: l.registry, Kfuns: l.kfuns,
 	})
 	rel, _ := l.project.Tree().Rel(file) // the file's lib-relative name
 	rules, err := sel.rules(file, rel, set)

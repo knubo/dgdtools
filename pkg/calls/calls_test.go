@@ -131,3 +131,18 @@ func TestNoLibPath(t *testing.T) {
 	assert.Equal(t, calls.TargetSelf, facts.Named[1].Target)
 	assert.Len(t, facts.Direct, 1, "this_object()")
 }
+
+// The forms a registry has of a function: the driver's, the project's,
+// and none of any other.
+func TestForms(t *testing.T) {
+	zero, two := 0, 2
+	reg := calls.NewRegistry(profile.Conventions{CallRegistry: map[string]profile.CallForms{
+		"add_action": {{Function: 0}},
+		"call_out":   {{Function: 1, Args: &two}},
+	}})
+	assert.Equal(t, profile.CallForms{{Object: &zero, Function: 1, Args: &two}}, reg.Forms("call_other"))
+	assert.Equal(t, profile.CallForms{{Function: 1, Args: &two}}, reg.Forms("call_out"), "the project's word of the driver's function")
+	assert.Equal(t, profile.CallForms{{Function: 0}}, reg.Forms("add_action"))
+	assert.Empty(t, reg.Forms("clone_object"))
+	assert.Empty(t, reg.Forms("nothing"))
+}

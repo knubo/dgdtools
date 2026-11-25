@@ -49,18 +49,37 @@ type VarInfo struct {
 // Params returns the parameters of a function declaration as written
 // ("string what", "mixed extra..."), for signature help.
 func Params(decl string) []string {
+	var out []string
+	for _, s := range ParamSpans(decl) {
+		out = append(out, decl[s[0]:s[1]])
+	}
+	return out
+}
+
+// ParamSpans returns where the parameters of a function declaration
+// stand in it: the bytes [start, end) of each, without the space around
+// it. A kfun's prototype is read the same way.
+func ParamSpans(decl string) [][2]int {
 	open := strings.IndexByte(decl, '(')
 	close := strings.LastIndexByte(decl, ')')
 	if open < 0 || close <= open {
 		return nil
 	}
-	inner := strings.TrimSpace(decl[open+1 : close])
-	if inner == "" || inner == "void" {
+	if inner := strings.TrimSpace(decl[open+1 : close]); inner == "" || inner == "void" {
 		return nil
 	}
-	var out []string
-	for _, p := range strings.Split(inner, ",") {
-		out = append(out, strings.TrimSpace(p))
+	var out [][2]int
+	for start := open + 1; start <= close; {
+		end := start + strings.IndexByte(decl[start:close]+",", ',')
+		s, e := start, end
+		for s < e && (decl[s] == ' ' || decl[s] == '\t') {
+			s++
+		}
+		for e > s && (decl[e-1] == ' ' || decl[e-1] == '\t') {
+			e--
+		}
+		out = append(out, [2]int{s, e})
+		start = end + 1
 	}
 	return out
 }

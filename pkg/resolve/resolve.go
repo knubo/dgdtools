@@ -24,6 +24,7 @@ import (
 
 	"github.com/mmcdole/dgdtools/pkg/calls"
 	"github.com/mmcdole/dgdtools/pkg/index"
+	"github.com/mmcdole/dgdtools/pkg/kfun"
 	"github.com/mmcdole/dgdtools/pkg/lexer"
 	"github.com/mmcdole/dgdtools/pkg/pp"
 	"github.com/mmcdole/dgdtools/pkg/profile"
@@ -80,6 +81,9 @@ type File struct {
 	// Registry knows the lib's functions that take a function name or an
 	// object path; nil is the driver's own.
 	Registry *calls.Registry
+	// Kfuns are the kernel functions of the project's driver; nil is
+	// stock DGD's (kfun.DGD).
+	Kfuns *kfun.Table
 }
 
 // Ref is a place in a file that names something.
@@ -451,17 +455,24 @@ func (r *Resolver) labels(label string) []Def {
 // calls returns the file's call sites, extracted on first need.
 func (r *Resolver) calls() *calls.Facts {
 	r.once.Do(func() {
-		reg := r.Registry
-		if reg == nil {
-			reg = calls.NewRegistry(profile.Conventions{})
-		}
 		r.facts = calls.Extract(calls.File{
 			Tree: r.Tree, Env: r.Env, LibPath: r.u.LibPath,
 			ObjectPath: func(written string) string { return r.s.ObjectPath(written, r.u.LibPath) },
-		}, reg)
+		}, r.registry())
 	})
 	return r.facts
 }
+
+// registry returns the project's registry of the functions that take
+// the name of a function or the path of an object.
+func (r *Resolver) registry() *calls.Registry {
+	if r.Registry != nil {
+		return r.Registry
+	}
+	return driverRegistry()
+}
+
+var driverRegistry = sync.OnceValue(func() *calls.Registry { return calls.NewRegistry(profile.Conventions{}) })
 
 // late resolves the function name at tok in a call that is bound when it
 // runs: x->name(), or "name" handed to call_other, call_out or one of
@@ -566,8 +577,9 @@ func funcDef(name string, fn index.ChainFunc) Def {
 // unknown: an object it inherits that the index cannot see may have a
 // function of the name, which would be the one, as the lib's own objects
 // have for many of the auto object's. A nomask function is everybody's.
+// The auto object gives nothing to itself or to what it is made of.
 func (r *Resolver) auto(name, libPath string) []Def {
-	if r.u.LibPath == "" {
+	if r.u.LibPath == "" || r.s.AutoMember(libPath) {
 		return nil
 	}
 	fn, ok := r.s.AutoFunc(name)

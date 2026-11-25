@@ -105,6 +105,10 @@ func NewRegistry(conv profile.Conventions) *Registry {
 	return r
 }
 
+// Forms returns the forms in which the function called name takes the
+// name of a function to call, none when it is no such function.
+func (r *Registry) Forms(name string) profile.CallForms { return r.named[name] }
+
 // File is the file whose calls are extracted.
 type File struct {
 	Tree *syntax.File

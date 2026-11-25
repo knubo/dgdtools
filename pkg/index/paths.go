@@ -61,6 +61,17 @@ func (l *lib) LibPath(p string) string {
 	return fileset.LibPath(rel)
 }
 
+// LibFile maps a file's path to the file's name in the lib, with its
+// extension ("/std/room.c"), or "" when the file is not part of the lib.
+// A profile's stub has the name of the file it stands for.
+func (l *lib) LibFile(p string) string {
+	rel, ok := l.rel(p)
+	if !ok {
+		return ""
+	}
+	return "/" + strings.Trim(filepath.ToSlash(rel), "/")
+}
+
 // Covers reports whether the index knows everything under libPath's
 // location, so that "not found" there means "does not exist". With a whole
 // lib that is the lib's completeness; with a partial checkout it is the

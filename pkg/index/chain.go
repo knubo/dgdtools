@@ -123,6 +123,9 @@ func (s *Snapshot) storeChain(libPath string, ch *Chain) *Chain {
 // autoState is what the configured auto objects give every object.
 type autoState struct {
 	funcs map[string]ChainFunc
+	// unseen says an auto object, or an object of its chain, is not
+	// known: what it gives every object is not all in funcs.
+	unseen bool
 	// members are the lib paths of the auto objects, of the programs they
 	// inherit, and of the files those include as code.
 	members map[string]bool
@@ -133,6 +136,7 @@ func (s *Snapshot) autoState() *autoState {
 		a := &autoState{funcs: map[string]ChainFunc{}, members: map[string]bool{}}
 		for _, auto := range s.cfg.AutoObjects {
 			ch := s.Chain(NormalizeLibPath(auto, "/"))
+			a.unseen = a.unseen || ch.Unseen
 			for name, fn := range ch.Funcs {
 				fn.DefinedIn = "(auto object)"
 				a.funcs[name] = fn
@@ -157,6 +161,18 @@ func (s *Snapshot) AutoFunc(name string) (ChainFunc, bool) {
 	f, ok := s.autoState().funcs[name]
 	return f, ok
 }
+
+// AutoUnseen reports whether a configured auto object, or an object it
+// inherits, is not known at all (Chain.Unseen): it may give every object
+// functions that AutoFunc does not have, and a function of the driver's
+// that it redefines is then not known to be redefined.
+func (s *Snapshot) AutoUnseen() bool { return s.autoState().unseen }
+
+// AutoMember reports whether the object at libPath is part of what the
+// auto objects are made of: an auto object, a program one inherits, a
+// file one includes as code. Such a program does not inherit the auto
+// object: what AutoFunc gives every other object is not given to it.
+func (s *Snapshot) AutoMember(libPath string) bool { return s.autoState().members[libPath] }
 
 // usersOf returns the objects whose program includes libPath's: those
 // that inherit it, however indirectly, and those that #include it as

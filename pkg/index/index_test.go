@@ -1280,4 +1280,61 @@ func TestAutoFuncAndReadFile(t *testing.T) {
 	none := New(&config.Config{}, Layout{}, vfs.Mem{})
 	_, ok = none.Snapshot().AutoFunc("anything")
 	assert.False(t, ok)
+	assert.False(t, none.Snapshot().AutoUnseen())
+}
+
+// What the auto object is made of, and whether all of it is known.
+func TestAutoMembers(t *testing.T) {
+	l := newLib(t, map[string]string{
+		"sys/auto.c": "#include \"code.h\"\ninherit \"/sys/base\";\nvoid autof() { }\n",
+		"sys/code.h": "void from_header() { }\n",
+		"sys/base.c": "void basef() { }\n",
+		"obj/a.c":    "void f() { }\n",
+	})
+	s := l.ix.Snapshot()
+	assert.False(t, s.AutoUnseen())
+	for libPath, member := range map[string]bool{"/sys/auto": true, "/sys/base": true, "/sys/code.h": true, "/obj/a": false, "/sys/none": false} {
+		assert.Equal(t, member, s.AutoMember(libPath), libPath)
+	}
+	_, ok := s.AutoFunc("basef")
+	assert.True(t, ok)
+
+	// An object of the auto object's chain that is not there: what it
+	// gives is not all known.
+	l.set(t, "sys/auto.c", "inherit \"/sys/gone\";\nvoid autof() { }\n")
+	assert.True(t, l.ix.Snapshot().AutoUnseen())
+	// So with an auto object that is not there itself.
+	missing := newLib(t, nil, func(c *config.Config) { c.AutoObjects = []string{"/sys/nowhere"} })
+	assert.True(t, missing.ix.Snapshot().AutoUnseen())
+}
+
+// A file's name in the lib, and where the parameters of a declaration
+// stand in it.
+func TestLibFileAndParamSpans(t *testing.T) {
+	l := newLib(t, map[string]string{"obj/a.c": "void f() { }\n"})
+	s := l.ix.Snapshot()
+	assert.Equal(t, "/obj/a.c", s.LibFile("/lib/obj/a.c"))
+	assert.Equal(t, "/include/std.h", s.LibFile("/lib/include/std.h"))
+	assert.Equal(t, "", s.LibFile("/elsewhere/a.c"))
+
+	for decl, want := range map[string][]string{
+		"static varargs int query(string what, mixed extra...)": {"string what", "mixed extra..."},
+		"void f()":                             nil,
+		"void f(void)":                         nil,
+		"void f( )":                            nil,
+		"f(a,b)":                               {"a", "b"},
+		"int *g(  int a ,varargs string *b  )": {"int a", "varargs string *b"},
+		"mixed call_other(mixed, string, mixed...)": {"mixed", "string", "mixed..."},
+		"SQUARE(x)":      {"x"},
+		"no parentheses": nil,
+		")(":             nil,
+	} {
+		var got []string
+		for _, span := range ParamSpans(decl) {
+			got = append(got, decl[span[0]:span[1]])
+		}
+		assert.Equal(t, want, got, decl)
+		assert.Equal(t, want, Params(decl), decl)
+	}
+	assert.Equal(t, [][2]int{{7, 12}, {14, 22}}, ParamSpans("void f(int a, string b)"))
 }
