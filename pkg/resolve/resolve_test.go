@@ -96,7 +96,7 @@ func wholeLib() vfs.Mem {
 		"/lib/include/auto.h": "#define AUTO 1\n",
 		"/lib/include/std.h": "#define STD \"/std/base\"\n#define ROOM_D \"/sys/roomd\"\n" +
 			"#  define /* squares */ SQUARE(x) ((x)*(x))\n#define ME this_object()\n#define status int\n",
-		"/lib/sys/auto.c": "void autof() {}\nstatic void write(string s) {}\nvoid create() {}\n",
+		"/lib/sys/auto.c": "void autof() {}\nstatic void write(string s) {}\nvoid create() {}\nnomask int sealed() { return 1; }\n",
 		"/lib/std/base.c": "int base_var;\nprivate int secret;\nvoid create() {}\nint foo(int a) { return a; }\n" +
 			"static void sfn() {}\nprivate void pfn() {}\nstring query_name();\n",
 		"/lib/std/mid.c":   "inherit \"/std/base\";\nvoid create() { ::create(); }\nvoid bar() {}\n",
@@ -315,8 +315,9 @@ func TestInherited(t *testing.T) {
 	fs["/lib/std/priv.c"] = "private inherit \"/std/base\";\nvoid f() { foo(1); base_var; }\n"
 	fs["/lib/obj/f.c"] = "inherit \"/std/priv\";\nvoid g() { foo(1); base_var; f(); \"/std/priv\"->foo(1); }\n"
 	// An inherit that does not resolve: what is known stands, the rest
-	// is silent.
-	fs["/lib/obj/g.c"] = "inherit NOWHERE;\ninherit \"/std/gone\";\ninherit \"/std/side\";\nvoid g() { setup(); autof(); nope(); }\n"
+	// is silent. What the object nobody can see has may be a function of
+	// the auto object's name, unless that one is nomask.
+	fs["/lib/obj/g.c"] = "inherit NOWHERE;\ninherit \"/std/gone\";\ninherit \"/std/side\";\nvoid g() { setup(); autof(); nope(); sealed(); ::autof(); ::sealed(); \"/obj/g\"->autof(); \"/obj/g\"->sealed(); }\n"
 	w := newWorld(t, fs, "/lib")
 
 	const mid, base = `-> /lib/std/mid.c:2:6 "create"`, `-> /lib/std/base.c:3:6 "create"`
@@ -358,8 +359,13 @@ func TestInherited(t *testing.T) {
 		"inherit NOW|HERE":    `nothing`,
 		"inherit \"/std/go|n": `object /std/gone "\"/std/gone\""`,
 		"set|up()":            `function setup "setup" -> /lib/std/side.c:1:6 "setup"`,
-		"auto|f()":            `function autof "autof" -> /lib/sys/auto.c:1:6 "autof"`,
+		" auto|f()":           `function autof "autof"`,
 		"no|pe()":             `function nope "nope"`,
+		" seal|ed()":          `function sealed "sealed" -> /lib/sys/auto.c:4:12 "sealed"`,
+		"::auto|f()":          `function autof "autof"`,
+		"::seal|ed()":         `function sealed "sealed" -> /lib/sys/auto.c:4:12 "sealed"`,
+		"\"->auto|f()":        `function autof "autof"`,
+		"\"->seal|ed()":       `function sealed "sealed" -> /lib/sys/auto.c:4:12 "sealed"`,
 	} {
 		assert.Equal(t, want, w.at("/lib/obj/g.c", at), "at %q", at)
 	}
@@ -463,12 +469,31 @@ func TestNoLib(t *testing.T) {
 
 // A document that is not there to ask.
 func TestNothingToAsk(t *testing.T) {
-	assert.Nil(t, resolve.At(resolve.File{}, 0))
+	assert.Nil(t, resolve.New(resolve.File{}).At(0))
 	w := newWorld(t, wholeLib(), "/lib")
 	ref, doc := w.ref("/lib/obj/b.c", "inherit \"/std/mi|d\"")
 	require.NotNil(t, ref)
 	// Offsets at and past the end of the text.
 	for off := uint32(len(doc.File.Src)) - 1; off < uint32(len(doc.File.Src))+3; off++ {
 		assert.Nil(t, doc.Resolve(off))
+	}
+}
+
+// A lib whose driver has function pointers: &fn(...) names a function as
+// a call does.
+func TestFunctionPointer(t *testing.T) {
+	fs := vfs.Mem{
+		"/lib/dgdtools.yml": "dialect: {closures: true}\nauto_objects: [/sys/auto]\n",
+		"/lib/sys/auto.c":   "void autof() {}\n",
+		"/lib/obj/a.c":      "int twice(int a) { return a * 2; }\nvoid f() { function g; g = &twice(); g = &autof(); g = &nope(); (*g)(1); }\n",
+	}
+	w := newWorld(t, fs, "/lib")
+	for at, want := range map[string]string{
+		"&twi|ce()": `function twice "twice" -> /lib/obj/a.c:1:5 "twice"`,
+		"&aut|of()": `function autof "autof" -> /lib/sys/auto.c:1:6 "autof"`,
+		"&no|pe()":  `function nope "nope"`,
+		"(*|g)(1)":  `nothing`,
+	} {
+		assert.Equal(t, want, w.at("/lib/obj/a.c", at), "at %q", at)
 	}
 }

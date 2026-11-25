@@ -341,16 +341,18 @@ type Document struct {
 	Errors []*FileError
 
 	stats    fileStats
-	registry *calls.Registry
+	resolver *resolve.Resolver
 }
 
 // Resolve says what the token at byte offset off of the document refers
-// to, in the lib as the document's diagnostics saw it: resolve.At, of
-// the document. It is nil when that is nothing the tools can name.
+// to, in the lib as the document's diagnostics saw it (the document's
+// resolve.Resolver's At): what is named there, and where that is
+// declared. It is nil when that is nothing the tools can name.
 func (d *Document) Resolve(off uint32) *resolve.Ref {
-	return resolve.At(resolve.File{
-		Tok: d.File, Tree: d.Tree, Env: d.Env, Unit: d.Unit, Snapshot: d.Snapshot, Registry: d.registry,
-	}, off)
+	if d.resolver == nil {
+		return nil
+	}
+	return d.resolver.At(off)
 }
 
 // Linter lints one project. It is safe for concurrent use.
@@ -609,7 +611,7 @@ func (l *Linter) Run(ctx context.Context, req Request) (*Result, error) {
 
 // release drops what a run over many files must not keep in memory.
 func (d *Document) release() *Document {
-	d.Snapshot, d.File, d.Tree, d.Env = nil, nil, nil, nil
+	d.Snapshot, d.File, d.Tree, d.Env, d.resolver = nil, nil, nil, nil, nil
 	return d
 }
 
@@ -661,8 +663,10 @@ func (l *Linter) lintFile(ctx context.Context, s *index.Snapshot, file string, s
 	doc = &Document{
 		Path: file, Snapshot: s, Generation: s.Generation(),
 		File: parsed.Tok, Tree: parsed.Tree, Env: parsed.Env, Unit: u,
-		registry: l.registry,
 	}
+	doc.resolver = resolve.New(resolve.File{
+		Tok: parsed.Tok, Tree: parsed.Tree, Env: parsed.Env, Unit: u, Snapshot: s, Registry: l.registry,
+	})
 	rel, _ := l.project.Tree().Rel(file) // the file's lib-relative name
 	rules, err := sel.rules(file, rel, set)
 	if err != nil {

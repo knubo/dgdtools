@@ -4,9 +4,9 @@
 // macro, the declaration of a global variable.
 //
 // It is the one answer behind an editor's "go to definition", and what
-// hover, references and rename start from: At classifies the token at an
-// offset (a Ref) and lists the declarations it resolves to (its Defs),
-// each with the facts the index has of it.
+// hover, references and rename start from: a Resolver's At classifies
+// the token at an offset (a Ref) and lists the declarations it resolves
+// to (its Defs), each with the facts the index has of it.
 //
 // The rule is the linter's: prove it or stay silent. A name resolves
 // only through what the index knows (the file's own declarations, its
@@ -20,6 +20,7 @@ package resolve
 import (
 	"bytes"
 	"slices"
+	"sync"
 
 	"github.com/mmcdole/dgdtools/pkg/calls"
 	"github.com/mmcdole/dgdtools/pkg/index"
@@ -65,8 +66,8 @@ func (k Kind) String() string {
 	return "unknown"
 }
 
-// File is the file a question is asked of, as a lint has it
-// (lint.Document.Resolve fills one in).
+// File is the file questions are asked of, as a lint has it
+// (lint.Document.Resolve asks for a document).
 type File struct {
 	Tok  *token.File
 	Tree *syntax.File
@@ -130,16 +131,31 @@ type Def struct {
 	Macro *pp.Macro
 }
 
+// Resolver answers the questions about one file. It is safe for
+// concurrent use, and reads the file's call sites once for all the
+// questions that need them.
+type Resolver struct {
+	File
+	s *index.Snapshot
+	u *index.Unit
+
+	once  sync.Once
+	facts *calls.Facts
+}
+
+// New returns the resolver of a file.
+func New(f File) *Resolver { return &Resolver{File: f, s: f.Snapshot, u: f.Unit} }
+
 // At returns what the token at byte offset off of the file refers to, or
 // nil when that is nothing the tools can name: no name, a local
 // variable, a name in code that is not compiled or could not be read. An
 // offset just after a name is on it, as an editor's cursor at the end of
 // a word is.
-func At(f File, off uint32) *Ref {
+func (r *Resolver) At(off uint32) *Ref {
+	f := &r.File
 	if f.Tok == nil || f.Tree == nil || f.Tree.Sel == nil || f.Unit == nil || f.Snapshot == nil {
 		return nil
 	}
-	r := &resolver{File: f, s: f.Snapshot, u: f.Unit}
 	toks := f.Tok.Tokens
 	ti := f.Tok.TokenAt(off)
 	if !named(toks[ti].Kind) && ti > 0 && toks[ti].Off == off && named(toks[ti-1].Kind) {
@@ -167,13 +183,6 @@ func named(k token.Kind) bool {
 	return k == token.Ident || k == token.StringLit || k == token.Directive
 }
 
-type resolver struct {
-	File
-	s     *index.Snapshot
-	u     *index.Unit
-	facts *calls.Facts
-}
-
 func has(n syntax.Node, tok int) bool {
 	first, last := n.Span()
 	return first <= tok && tok <= last
@@ -183,7 +192,7 @@ func has(n syntax.Node, tok int) bool {
 
 // directive resolves a place in an active directive: the target of an
 // #include, anywhere on its line, and a macro's name in the others.
-func (r *resolver) directive(ti int, off uint32) *Ref {
+func (r *Resolver) directive(ti int, off uint32) *Ref {
 	if r.Env == nil || r.Env.Own() == nil || !r.read(ti) {
 		return nil
 	}
@@ -250,7 +259,7 @@ func (r *resolver) directive(ti int, off uint32) *Ref {
 
 // read reports whether the preprocessor reads the directive at token
 // ti: it is not in a branch of a conditional that is skipped.
-func (r *resolver) read(ti int) bool {
+func (r *Resolver) read(ti int) bool {
 	for _, c := range r.Tree.Sel.Conds {
 		if len(c.Arms) == 0 || ti <= c.Arms[0].Dir || ti >= c.End {
 			continue
@@ -271,7 +280,7 @@ func (r *resolver) read(ti int) bool {
 
 // macro returns the reference of the name at start to a macro, nil when
 // the name is none in this file.
-func (r *resolver) macro(name string, start uint32) *Ref {
+func (r *Resolver) macro(name string, start uint32) *Ref {
 	def := r.Env.Definition(name)
 	if def == nil && r.Env.Lookup(name) == nil {
 		return nil
@@ -289,7 +298,7 @@ func (r *resolver) macro(name string, start uint32) *Ref {
 // ---------------------------------------------------------------- names
 
 // ident resolves an identifier of the compiled code.
-func (r *resolver) ident(ti int) *Ref {
+func (r *Resolver) ident(ti int) *Ref {
 	t := r.Tree
 	tok := r.Tok.Tokens[ti]
 	name := string(r.Tok.Text(tok))
@@ -326,7 +335,7 @@ func (r *resolver) ident(ti int) *Ref {
 			// when no inherited object has one.
 			ref.Kind, ref.Defs = Function, r.defs(name, r.inherited(name, ""))
 			if len(ref.Defs) == 0 {
-				ref.Defs = r.auto(name)
+				ref.Defs = r.auto(name, r.u.LibPath)
 			}
 			return ref
 		}
@@ -347,12 +356,13 @@ func (r *resolver) ident(ti int) *Ref {
 			return ref
 		}
 	case *syntax.Ident:
-		if fp, ok := path[1].(*syntax.FuncPtrExpr); ok && fp.Fun == syntax.Expr(n) {
+		// &name(...) names a function; in (*f)(...) f is a variable.
+		if fp, ok := path[1].(*syntax.FuncPtrExpr); ok && fp.Fun == syntax.Expr(n) && r.after(fp.First, token.Amp) == ti {
 			ref.Kind, ref.Defs = Function, r.function(name)
 			return ref
 		}
-		if r.shadowed(path, name) {
-			return nil
+		if n.Name != name || r.shadowed(path, name) {
+			return nil // ::name without a call is no variable
 		}
 		if defs := r.variable(name); len(defs) > 0 {
 			ref.Kind, ref.Defs = Variable, defs
@@ -362,10 +372,25 @@ func (r *resolver) ident(ti int) *Ref {
 	return nil
 }
 
+// after returns the index of the token of the code that follows the
+// one at index tok, when that one is of kind k; -1 otherwise.
+func (r *Resolver) after(tok int, k token.Kind) int {
+	toks := r.Tok.Tokens
+	if toks[tok].Kind != k {
+		return -1
+	}
+	for i := tok + 1; i < len(toks); i++ {
+		if !toks[i].Kind.IsTrivia() {
+			return i
+		}
+	}
+	return -1
+}
+
 // str resolves a string constant of the compiled code: the path of an
 // inherit statement, the name of a function in a call that names one,
 // an object path handed to a function that takes one.
-func (r *resolver) str(ti int) *Ref {
+func (r *Resolver) str(ti int) *Ref {
 	if ref := r.inherit(syntax.PathAt(r.Tree, ti), ti); ref != nil {
 		return ref
 	}
@@ -384,7 +409,7 @@ func (r *resolver) str(ti int) *Ref {
 // inherit resolves a token in the path of an inherit statement to the
 // object inherited. The whole expression names it, a macro in it
 // included: `inherit ROOM;` is about the room, not about the #define.
-func (r *resolver) inherit(path []syntax.Node, ti int) *Ref {
+func (r *Resolver) inherit(path []syntax.Node, ti int) *Ref {
 	if len(path) < 2 {
 		return nil
 	}
@@ -402,7 +427,7 @@ func (r *resolver) inherit(path []syntax.Node, ti int) *Ref {
 }
 
 // object returns the file of the object at libPath, when it has one.
-func (r *resolver) object(libPath string) []Def {
+func (r *Resolver) object(libPath string) []Def {
 	if !r.s.ObjectExists(libPath) {
 		return nil
 	}
@@ -410,7 +435,7 @@ func (r *resolver) object(libPath string) []Def {
 }
 
 // labels returns the inherit statements of the file that have the label.
-func (r *resolver) labels(label string) []Def {
+func (r *Resolver) labels(label string) []Def {
 	var defs []Def
 	for _, d := range r.Tree.Decls {
 		if in, ok := d.(*syntax.InheritDecl); ok && in.Label != nil && in.Label.Name == label {
@@ -424,8 +449,8 @@ func (r *resolver) labels(label string) []Def {
 // ------------------------------------------------------------ functions
 
 // calls returns the file's call sites, extracted on first need.
-func (r *resolver) calls() *calls.Facts {
-	if r.facts == nil {
+func (r *Resolver) calls() *calls.Facts {
+	r.once.Do(func() {
 		reg := r.Registry
 		if reg == nil {
 			reg = calls.NewRegistry(profile.Conventions{})
@@ -434,14 +459,14 @@ func (r *resolver) calls() *calls.Facts {
 			Tree: r.Tree, Env: r.Env, LibPath: r.u.LibPath,
 			ObjectPath: func(written string) string { return r.s.ObjectPath(written, r.u.LibPath) },
 		}, reg)
-	}
+	})
 	return r.facts
 }
 
 // late resolves the function name at tok in a call that is bound when it
 // runs: x->name(), or "name" handed to call_other, call_out or one of
 // the lib's registrars. It is nil when tok is no such name.
-func (r *resolver) late(tok token.Token) *Ref {
+func (r *Resolver) late(tok token.Token) *Ref {
 	for i := range r.calls().Named {
 		c := &r.calls().Named[i]
 		if c.Start != tok.Off || c.End != tok.End {
@@ -476,7 +501,7 @@ type candidate struct {
 // statements provide, those with the given label only when one is given.
 // A function that is private where it is inherited from is not among
 // them; neither is one that another of them redefines.
-func (r *resolver) inherited(name, label string) []candidate {
+func (r *Resolver) inherited(name, label string) []candidate {
 	var cs []candidate
 	for _, in := range r.u.Inherits {
 		if !in.Resolved || (label != "" && in.Label != label) {
@@ -521,7 +546,7 @@ func (r *resolver) inherited(name, label string) []candidate {
 	return out
 }
 
-func (r *resolver) defs(name string, cs []candidate) []Def {
+func (r *Resolver) defs(name string, cs []candidate) []Def {
 	var defs []Def
 	for _, c := range cs {
 		defs = append(defs, funcDef(name, c.fn))
@@ -535,13 +560,18 @@ func funcDef(name string, fn index.ChainFunc) Def {
 		Object: fn.DefinedIn, Func: &fi}
 }
 
-// auto returns the function the auto object gives the file's object.
-func (r *resolver) auto(name string) []Def {
+// auto returns the function called name that the auto object gives the
+// object at libPath, which has none of that name in what is known of
+// its chain. It is that object's only when no part of the chain is
+// unknown: an object it inherits that the index cannot see may have a
+// function of the name, which would be the one, as the lib's own objects
+// have for many of the auto object's. A nomask function is everybody's.
+func (r *Resolver) auto(name, libPath string) []Def {
 	if r.u.LibPath == "" {
 		return nil
 	}
 	fn, ok := r.s.AutoFunc(name)
-	if !ok {
+	if !ok || (!fn.Nomask && r.s.Chain(libPath).Unseen) {
 		return nil
 	}
 	d := funcDef(name, fn)
@@ -553,7 +583,7 @@ func (r *resolver) auto(name string) []Def {
 // code: the file's function, else the inherited one, else the auto
 // object's; and of those a definition before a prototype. Nothing is
 // left for a function of the driver's.
-func (r *resolver) function(name string) []Def {
+func (r *Resolver) function(name string) []Def {
 	var groups [][]Def
 	if own, ok := r.u.Funcs[name]; ok {
 		groups = append(groups, []Def{funcDef(name, index.ChainFunc{FuncInfo: own, DefinedIn: r.u.LibPath})})
@@ -561,7 +591,7 @@ func (r *resolver) function(name string) []Def {
 	if in := r.defs(name, r.inherited(name, "")); len(in) > 0 {
 		groups = append(groups, in)
 	}
-	if auto := r.auto(name); len(auto) > 0 {
+	if auto := r.auto(name, r.u.LibPath); len(auto) > 0 {
 		groups = append(groups, auto)
 	}
 	for _, g := range groups {
@@ -579,7 +609,7 @@ func (r *resolver) function(name string) []Def {
 // a call from outside names it: from the object's chain, else the auto
 // object's. Nothing is said of an object that is not there. A function that is private in an object the target inherits
 // is not the target's, and may hide one that is: nothing is said then.
-func (r *resolver) callable(target, name string) []Def {
+func (r *Resolver) callable(target, name string) []Def {
 	if r.s.Unit(target) == nil {
 		return nil
 	}
@@ -589,7 +619,7 @@ func (r *resolver) callable(target, name string) []Def {
 		}
 		return []Def{funcDef(name, fn)}
 	}
-	return r.auto(name)
+	return r.auto(name, target)
 }
 
 // ------------------------------------------------------------ variables
@@ -597,7 +627,7 @@ func (r *resolver) callable(target, name string) []Def {
 // variable returns the global variable called name as the file's code
 // sees it: its own, else the one an inherited object declares and does
 // not keep private.
-func (r *resolver) variable(name string) []Def {
+func (r *Resolver) variable(name string) []Def {
 	def := func(v index.VarInfo, object string) Def {
 		return Def{Kind: Variable, Name: name, Path: v.Path, Start: v.Off, End: v.Off + uint32(len(name)),
 			Object: object, Var: &v}
@@ -625,7 +655,7 @@ func (r *resolver) variable(name string) []Def {
 // a parameter or a local variable of the function it is in: the function
 // declares one of that name anywhere, or has a statement the parser
 // could not read that mentions the name.
-func (r *resolver) shadowed(path []syntax.Node, name string) bool {
+func (r *Resolver) shadowed(path []syntax.Node, name string) bool {
 	var fn *syntax.FuncDecl
 	for _, n := range path {
 		if f, ok := n.(*syntax.FuncDecl); ok {

@@ -19,6 +19,9 @@ type Loc struct {
 // FuncInfo describes one function of an object.
 type FuncInfo struct {
 	Static, Private bool
+	// Nomask says no object that inherits this one can have a function
+	// of the name: what the name means there is this function.
+	Nomask bool
 	// PrototypeOnly marks a declared-but-never-defined function: DGD
 	// compiles these fine and raises "Undefined function" at call time.
 	PrototypeOnly bool
@@ -135,7 +138,7 @@ func collectDecls(u *Unit, tree *syntax.File) {
 		}
 		minA, maxA := ParamRange(fn)
 		fi := FuncInfo{
-			Static: fn.Has(token.KwStatic), Private: fn.Has(token.KwPrivate),
+			Static: fn.Has(token.KwStatic), Private: fn.Has(token.KwPrivate), Nomask: fn.Has(token.KwNomask),
 			PrototypeOnly: fn.Body == nil,
 			MinArgs:       minA, MaxArgs: maxA,
 			Loc:  loc(fn.Name),

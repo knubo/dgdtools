@@ -403,10 +403,14 @@ func TestChain(t *testing.T) {
 		"obj/lost.c": "inherit \"/std/missing\";\n",
 		"obj/cyc1.c": "inherit \"/obj/cyc2\";\nvoid one() { }\n",
 		"obj/cyc2.c": "inherit \"/obj/cyc1\";\nvoid two() { }\n",
+		"std/torn.c": "inherit \"/std/top\";\nnomask void sealed() { }\nint f( { }\n",
+		"obj/over.c": "inherit \"/std/torn\";\n",
+		"obj/deep.c": "inherit \"/obj/lost\";\n",
 	})
 	s := l.ix.Snapshot()
 	ch := s.Chain("/obj/leaf")
 	assert.False(t, ch.Partial)
+	assert.False(t, ch.Unseen)
 	assert.Equal(t, []string{"/std/top", "/std/mid", "/std/side", "/obj/leaf"}, ch.Objects)
 
 	assert.Equal(t, "/std/mid", ch.Funcs["shared"].DefinedIn, "the nearer definition wins")
@@ -433,6 +437,18 @@ func TestChain(t *testing.T) {
 	cyc := s.Chain("/obj/cyc1")
 	assert.True(t, cyc.Partial, "a cycle cannot be flattened")
 	assert.Contains(t, cyc.Funcs, "one")
+
+	// An object that is not known at all is more than an entry that may
+	// be missing: it may redefine anything.
+	for obj, unseen := range map[string]bool{
+		"/obj/bad": true, "/obj/lost": true, "/std/missing": true, "/obj/cyc1": true, "/obj/deep": true,
+		"/obj/over": false, "/std/torn": false,
+	} {
+		assert.True(t, s.Chain(obj).Partial, obj)
+		assert.Equal(t, unseen, s.Chain(obj).Unseen, obj)
+	}
+	assert.True(t, s.Chain("/obj/over").Funcs["sealed"].Nomask)
+	assert.False(t, ch.Funcs["shared"].Nomask)
 
 	assert.Contains(t, s.autoState().funcs, "object_name")
 	assert.Equal(t, "(auto object)", s.autoState().funcs["object_name"].DefinedIn)

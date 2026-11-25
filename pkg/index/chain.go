@@ -13,6 +13,11 @@ type Chain struct {
 	// program in the chain has an incomplete symbol table. A name absent
 	// from a partial chain is Unknown, not Missing.
 	Partial bool
+	// Unseen: some object of the chain is not known at all: an inherit
+	// that could not be resolved or loaded. It is the part of Partial
+	// that says a whole program may be missing, with whatever it
+	// redefines, rather than an entry of a program that was read.
+	Unseen  bool
 	Objects []string // lib paths in the chain, leaf last
 }
 
@@ -42,12 +47,12 @@ func (s *Snapshot) chain(libPath string, visiting map[string]bool) (*Chain, bool
 	}
 	ch := &Chain{Funcs: map[string]ChainFunc{}, Vars: map[string]ChainVar{}}
 	if visiting[libPath] {
-		ch.Partial = true // inheritance cycle; the driver rejects it
+		ch.Partial, ch.Unseen = true, true // inheritance cycle; the driver rejects it
 		return ch, true
 	}
 	u := s.Unit(libPath)
 	if u == nil {
-		ch.Partial = true
+		ch.Partial, ch.Unseen = true, true
 		return s.storeChain(libPath, ch), false
 	}
 	cyc := false
@@ -57,13 +62,16 @@ func (s *Snapshot) chain(libPath string, visiting map[string]bool) (*Chain, bool
 	visiting[libPath] = true
 	for _, ref := range u.Inherits {
 		if !ref.Resolved {
-			ch.Partial = true
+			ch.Partial, ch.Unseen = true, true
 			continue
 		}
 		sub, c := s.chain(ref.Path, visiting)
 		cyc = cyc || c
 		if sub.Partial {
 			ch.Partial = true
+		}
+		if sub.Unseen {
+			ch.Unseen = true
 		}
 		// Private functions stay in the chain flagged Private so rules
 		// can explain why a call fails. Everything below a `private
