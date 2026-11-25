@@ -18,7 +18,8 @@ var ruleSyntaxError = &Rule{
 	Doc: "the file does not parse; DGD will refuse to compile it",
 	Explain: "Reported by the linter's own error-tolerant parser, which implements the " +
 		"DGD 1.7 grammar on unpreprocessed source. A missing ';' is reported where " +
-		"the ';' belongs (DGD reports the token after it). Errors that could be an " +
+		"the ';' belongs (DGD reports the token after it), with a fix that inserts it " +
+		"when the parser went on as if it were there. Errors that could be an " +
 		"artifact of a macro the linter cannot see through are not reported: a " +
 		"statement that uses a fragment macro, or, when some #include could not be " +
 		"resolved, an error next to an unknown identifier. After an error that " +
@@ -48,12 +49,33 @@ var ruleSyntaxError = &Rule{
 				start, end = t.End, t.End
 			}
 			d := p.Report(start, end, "%s", e.Msg)
+			if e.Insert != "" && e.AtPrevEnd && !directiveAfter(toks, e.Tok) {
+				// What the parser assumed, where it assumed it: the
+				// file then parses as it did.
+				d.Fixes = append(d.Fixes, diag.Fix{Title: "insert '" + e.Insert + "'", Applicability: diag.Safe,
+					Edits: []diag.TextEdit{{Start: t.End, End: t.End, NewText: e.Insert}}})
+			}
 			if e.Related >= 0 && e.RelatedMsg != "" {
 				rt := toks[e.Related]
 				d.Related = append(d.Related, p.Related(rt.Off, rt.End, e.RelatedMsg))
 			}
 		}
 	},
+}
+
+// directiveAfter reports whether a preprocessor directive stands between
+// the token at index i and the next significant one: an insertion there
+// would be in every branch of a conditional, which the parser read one of.
+func directiveAfter(toks []token.Token, i int) bool {
+	for _, t := range toks[i+1:] {
+		switch {
+		case t.Kind == token.Directive:
+			return true
+		case !t.Kind.IsTrivia():
+			return false
+		}
+	}
+	return false
 }
 
 var ruleAdjacentStrings = &Rule{

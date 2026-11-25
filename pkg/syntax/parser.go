@@ -875,7 +875,7 @@ func (p *parser) missingSemi(start int) {
 	if p.kind() == token.RBrace || p.kind() == token.EOF ||
 		(canStartStmt(p.kind()) && p.newlineBetween(prev, cur)) {
 		p.errs = append(p.errs, &Error{
-			Msg: "missing ';' before " + p.describe(cur), Tok: prev, AtPrevEnd: true,
+			Msg: "missing ';' before " + p.describe(cur), Tok: prev, AtPrevEnd: true, Insert: ";",
 			Related: -1, RegionFirst: p.tokAt(start), RegionLast: prev,
 		})
 		return

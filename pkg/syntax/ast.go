@@ -76,6 +76,10 @@ type Error struct {
 	// (where the missing token belongs) and Tok is that previous token.
 	Tok       int
 	AtPrevEnd bool
+	// Insert is the text the parser assumed at the error's place to go
+	// on, when it assumed some (the ';' of a statement whose next one
+	// begins a line): the file parses as it was parsed with it inserted.
+	Insert string
 	// Related optionally points at another token (the unclosed bracket,
 	// the enclosing function).
 	Related    int // -1 when absent

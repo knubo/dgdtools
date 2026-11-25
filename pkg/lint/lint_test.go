@@ -388,6 +388,34 @@ func TestSyntaxRules(t *testing.T) {
 		}
 		assert.Contains(t, string(src), `write("a" + "b" + "c");`)
 	})
+	t.Run("missing semicolon fix", func(t *testing.T) {
+		fixed := func(src string) (string, bool) {
+			prj, m := memProject(map[string]string{"obj/t.c": src})
+			res := run(t, prj, m, lint.Request{Paths: []string{"/lib/obj/t.c"}})
+			require.Len(t, res.Diagnostics, 1, "%q", src)
+			d := res.Diagnostics[0]
+			if len(d.Fixes) == 0 {
+				return "", false
+			}
+			require.Len(t, d.Fixes, 1)
+			assert.Equal(t, diag.Safe, d.Fixes[0].Applicability)
+			e := d.Fixes[0].Edits[0]
+			return src[:e.Start] + e.NewText + src[e.End:], true
+		}
+		// Where the parser assumed the ';': the fixed file has no error.
+		for _, src := range []string{fn(" a = 1\n b = 2;"), fn(" a = 1 /* c */\n b = 2;"), "int f() {\n return 1\n}\n", "int a\nint b;\n"} {
+			out, ok := fixed(src)
+			require.True(t, ok, "%q", src)
+			assert.Empty(t, lintMem(t, out, lint.Request{}, nil), "%q", out)
+		}
+		// Not where a directive stands between: the ';' would be in
+		// every branch.
+		_, ok := fixed(fn(" a = 1\n#ifdef X\n b = 2;\n#endif"))
+		assert.False(t, ok)
+		// Not where the parser gave up on the statement.
+		_, ok = fixed(fn(" a = 1 b = 2;"))
+		assert.False(t, ok)
+	})
 	t.Run("declaration after statement", func(t *testing.T) {
 		got := lintMem(t, fn("int a;\n a = 1;\n int b;\n { int ok; ok = 1; }\n ;\n if (a) { int fine; fine = 2; }"), lint.Request{}, nil)
 		require.Len(t, got, 1, "%v", got)

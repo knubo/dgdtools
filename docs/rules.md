@@ -26,7 +26,7 @@ The driver refuses to compile it: an object with one of these does not load.
 
 The file does not parse; DGD will refuse to compile it.
 
-Reported by the linter's own error-tolerant parser, which implements the DGD 1.7 grammar on unpreprocessed source. A missing ';' is reported where the ';' belongs (DGD reports the token after it). Errors that could be an artifact of a macro the linter cannot see through are not reported: a statement that uses a fragment macro, or, when some #include could not be resolved, an error next to an unknown identifier. After an error that leaves the file's structure in doubt (unbalanced braces) later errors in the file are dropped as likely consequences.
+Reported by the linter's own error-tolerant parser, which implements the DGD 1.7 grammar on unpreprocessed source. A missing ';' is reported where the ';' belongs (DGD reports the token after it), with a fix that inserts it when the parser went on as if it were there. Errors that could be an artifact of a macro the linter cannot see through are not reported: a statement that uses a fragment macro, or, when some #include could not be resolved, an error next to an unknown identifier. After an error that leaves the file's structure in doubt (unbalanced braces) later errors in the file are dropped as likely consequences.
 
 ### adjacent-strings
 
