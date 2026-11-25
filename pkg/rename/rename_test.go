@@ -72,7 +72,7 @@ func (w *world) prepare(path, at string) string {
 func (w *world) rename(path, at, name string) string {
 	w.t.Helper()
 	doc, off := w.place(path, at)
-	plan, err := doc.Rename(context.Background(), off, name)
+	plan, err := doc.Rename(context.Background(), off, name, false)
 	var no *rename.Refusal
 	if errors.As(err, &no) {
 		return "refused: " + no.Reason
@@ -230,16 +230,16 @@ func TestPrepare(t *testing.T) {
 		"j += hel|per(i)":       `function helper "helper"`,
 		"private int coun|ter;": `variable counter "counter"`,
 		"#define LIM|IT":        `macro LIMIT "LIMIT"`,
-		"base::inh|erited_fn":   "refused: 'inherited_fn' is inherited from /std/base: rename across files comes in a later version",
+		"base::inh|erited_fn":   `function inherited_fn "inherited_fn"`,
 		"inherit ba|se":         `label base "base"`,
 		"|base::":               `label base "base"`,
 
-		"int pu|b;":                "refused: 'pub' is a global variable that objects inheriting this one can use: rename across files comes in a later version",
-		"static void sfu|nc":       "refused: 'sfunc' is a static function: objects that inherit this one or call it may name it; rename across files comes in a later version",
-		"void cre|ate":             "refused: 'create' is a public function: objects that inherit this one or call it may name it; rename across files comes in a later version",
-		"wri|te(err)":              "refused: 'write' is a function of the auto object, which every object has: rename across files comes in a later version",
-		"pub = base_v|ar":          "refused: 'base_var' is inherited from /std/base: rename across files comes in a later version",
-		"|ME->":                    "refused: 'ME' is defined in /include/std.h: renaming a header's macro comes in a later version",
+		"int pu|b;":                `variable pub "pub"`,
+		"static void sfu|nc":       `function sfunc "sfunc"`,
+		"void cre|ate":             "refused: 'create' is the function the driver calls by name to initialize every object (create in the configuration)",
+		"wri|te(err)":              `function write "write"`,
+		"pub = base_v|ar":          `variable base_var "base_var"`,
+		"|ME->":                    `macro ME "ME"`,
 		"#include <st|d.h>":        "refused: 'std.h' names a file: renaming files comes in a later version",
 		"inherit base \"/std/b|as": "refused: '/std/base' names a file: renaming files comes in a later version",
 		"call_out(\"hel|per":       "refused: DGD does not call a private function by name (call_out()): this is not a call of 'helper'; rename it where it is declared or called",
@@ -282,14 +282,14 @@ func TestRefusals(t *testing.T) {
 	for _, c := range []struct{ path, at, want string }{
 		{"/lib/obj/saver.c", "private int go|ld", "refused: 'gold' is written by save_object to the save files under its name (this file names save_object at line 2): renamed, restore_object no longer finds the saved value"},
 		{"/lib/obj/parent.c", "private int tal|ly", "refused: 'tally' is written by save_object to the save files under its name (/obj/heir names set_auto_save): renamed, restore_object no longer finds the saved value"},
-		{"/lib/obj/inc.c", "private void inc|fn", "refused: this file is included by /obj/user.c, which has what it declares too: rename across files comes in a later version"},
+		{"/lib/obj/inc.c", "private void inc|fn", `function incfn "incfn"`},
 		{"/lib/obj/dead.c", "    x = |2;", "nothing"},
 		{"/lib/obj/dead.c", "    |x = 1;", "refused: 'x' is in code that is not compiled here (a branch of #if that is not taken): what it names cannot be told"},
 		{"/lib/obj/bad.c", "    |y = = 2;", "refused: 'y' is in code that does not parse: what it names cannot be told"},
 		{"/lib/obj/calls.c", "    z|z = 1;", "refused: 'zz' names nothing the tools know of here"},
 		{"/lib/obj/calls.c", "ob->fo|o()", "refused: 'foo' is called in an object that cannot be told: what it names is not known"},
 		{"/lib/obj/calls.c", "    la|ter();", "refused: no file the tools see declares a function 'later'"},
-		{"/lib/obj/mac.c", "#define MI|NE", "refused: 'MINE' is used in /include/flag.h, which this file includes: rename across files comes in a later version"},
+		{"/lib/obj/mac.c", "#define MI|NE", "refused: 'MINE' is used in /include/flag.h, which this file includes, where it is no macro of this file's"},
 	} {
 		assert.Equal(t, c.want, w.prepare(c.path, c.at), c.path+": "+c.at)
 	}

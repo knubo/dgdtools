@@ -796,6 +796,15 @@ local ok, err = pcall(function()
   cursor('private void help', 14)
   vim.lsp.buf.rename('assist')
   wait('the rename of helper', function() return text() ~= before end)
+  before = text()
+  cursor('void greet', 7)
+  vim.lsp.buf.rename('welcome')
+  wait('the rename of greet', function() return text() ~= before end)
+  local other = vim.fn.bufnr(dir .. '/lib/obj/b.c')
+  wait('the edit of the other file', function()
+    return other ~= -1 and table.concat(vim.api.nvim_buf_get_lines(other, 0, -1, false), '\n'):find('welcome') ~= nil
+  end)
+  out.other = vim.api.nvim_buf_get_lines(other, 0, -1, false)
   cursor('void create', 6)
   vim.lsp.buf.rename('make')
   wait('the reason', function() return #out.said > 0 end)
@@ -807,13 +816,16 @@ vim.cmd('qall!')
 `
 
 // TestNeovimRename has the Neovim on PATH rename a local and a private
-// function, with characters of several bytes before the names, and be
-// told why a public function is not renamed.
+// function, with characters of several bytes before the names, and a
+// public function, which another file calls; and be told why the create
+// function is not renamed.
 func TestNeovimRename(t *testing.T) {
 	files := map[string]string{
 		"lib/dgdtools.yml": "include_dirs: [/include]\n",
 		"lib/obj/a.c": "private void helper(int n) {}\n" +
-			"void create() {\n    int count;\n    /* først \U0001F600 */ helper(1); count = 1; count++;\n    helper(count);\n}\n",
+			"void create() {\n    int count;\n    /* først \U0001F600 */ helper(1); count = 1; count++;\n    helper(count);\n}\n" +
+			"void greet() {}\n",
+		"lib/obj/b.c": "void f() {\n    /* þ */ \"/obj/a\"->greet();\n}\n",
 	}
 	_, data, log := nvimRun(t, files, nvimRename)
 	var got struct {
@@ -821,6 +833,7 @@ func TestNeovimRename(t *testing.T) {
 		Prepare bool
 		Said    []string
 		Text    []string
+		Other   []string
 	}
 	require.NoError(t, json.Unmarshal(data, &got), "%s", data)
 	require.Empty(t, got.Error, "the server's log:\n%s", log)
@@ -832,8 +845,10 @@ func TestNeovimRename(t *testing.T) {
 		"    /* først \U0001F600 */ assist(1); total = 1; total++;",
 		"    assist(total);",
 		"}",
+		"void welcome() {}",
 	}, got.Text)
+	assert.Equal(t, []string{"void f() {", "    /* þ */ \"/obj/a\"->welcome();", "}"}, got.Other)
 	require.Len(t, got.Said, 1)
-	assert.Contains(t, got.Said[0], "'create' is a public function: objects that inherit this one or call it may name it; rename across files comes in a later version")
+	assert.Contains(t, got.Said[0], "'create' is the function the driver calls by name to initialize every object (create in the configuration)")
 	assert.NotContains(t, log, "level=ERROR")
 }

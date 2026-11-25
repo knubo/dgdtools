@@ -2,25 +2,34 @@
 // and a new name, every occurrence of what is named there, the edits that
 // rename it, or the reason it must not be renamed as asked. Nothing in it
 // writes a file; an editor (textDocument/rename) and the command line
-// show or apply the plan.
+// (dgdtools rename) show or apply the plan.
 //
-// The rule is the linter's: prove it or refuse. Every place the old name
-// stands as an identifier is classified (Occurrence): Certain, the
-// symbol; Excluded, provably something else; Possible, code the tools
-// cannot read (a branch of #if that is not compiled, a statement that
-// does not parse), which might be the symbol. A plan with a Possible
-// occurrence is refused, and so is one where the new name would change
-// what another name means: a declaration it would hide or be hidden by,
-// a macro, a function it would take the place of.
+// The rule is the linter's: prove it or say so. Every place the old name
+// stands is classified (Occurrence): Certain, the symbol; Excluded,
+// provably something else; Possible, it may be and nobody can tell. The
+// Certain ones are the edits; the Possible ones are edits to confirm
+// (Plan.PossibleEdits). A new name that would change what another name
+// means (a declaration it would hide or be hidden by, a macro, a
+// function it would take the place of) is refused.
 //
-// What is renamed are the symbols that one file decides: a local
-// variable or a parameter (a catch variable among them), a private
-// function and a private global variable of the file's object, an
-// inherit label, and a macro the file defines for itself. Everything
-// else is named by other files too, and is refused with the reason: a
-// function or a global variable that is not private, what is inherited,
-// the auto object's, a kfun, a header's macro, a declaration in a
-// profile's stub.
+// What one file decides is renamed in the file: a local variable or a
+// parameter (a catch variable among them), a private function and a
+// private global variable of the file's object, an inherit label, a macro
+// the file defines for itself. There, code the tools cannot read (a
+// branch of #if that is not compiled, a statement that does not parse)
+// that has the old name makes the rename a refusal.
+//
+// Everything else is renamed in every file of the lib that names it,
+// from the reverse index of the whole-lib scan (across.go): a function
+// that is not private with its redefinitions in the objects that inherit
+// it and those it inherits, which are one function by the driver's
+// rules; a global variable that is not private, in its object and those
+// that inherit it; a header's macro, in every file that includes it; what
+// a file other files include declares. A call on an object nobody can
+// tell, a callback whose object is unknown, a name in a macro's body or
+// in code that cannot be read is Possible. A variable save_object writes
+// is refused unless File.Force; a declaration in a profile's stub is
+// refused.
 //
 // DGD does not call a private function by name: call_other, call_out
 // and every callback a lib's registrar makes look the name up in the
@@ -32,7 +41,9 @@
 package rename
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"maps"
 	"slices"
@@ -57,6 +68,13 @@ type File struct {
 	// AutosaveMarkers are the names whose mention says that an object
 	// saves itself with save_object (conventions.autosave_markers).
 	AutosaveMarkers []string
+	// Create is the function the driver calls by name to initialize an
+	// object (the configuration's create; "" is "create").
+	Create string
+	// Force overrules a refusal that a person may overrule
+	// (Refusal.Forcible: a variable save_object writes), which becomes a
+	// warning of the plan.
+	Force bool
 }
 
 // Symbol is what a rename is about: a declaration.
@@ -74,6 +92,11 @@ type Symbol struct {
 type Target struct {
 	Symbol
 	Start, End uint32
+	// Across says other files name the symbol too: the rename searches
+	// the whole lib.
+	Across bool
+
+	across *across
 }
 
 // Class says what an occurrence of the old name is.
@@ -104,7 +127,10 @@ func (c Class) String() string {
 type Occurrence struct {
 	Path       string
 	Start, End uint32
-	Class      Class
+	// Line and Col are where Start is, 1-based, Col counting bytes; 0
+	// when not known (the file's text says).
+	Line, Col uint32
+	Class     Class
 	// Decl says the place declares the symbol.
 	Decl bool
 	// Reason says why an occurrence is Possible or Excluded.
@@ -127,15 +153,43 @@ type Plan struct {
 	Occurrences []Occurrence
 	// Edits are those of the Certain occurrences, in the same order.
 	Edits []Edit
+	// PossibleEdits are those of the Possible occurrences, which are made
+	// only when the person renaming asks for them: a call on an object
+	// nobody can tell, a name in a macro's body, code that does not
+	// parse. A rename is complete when there are none.
+	PossibleEdits []Edit
 	// Warnings are what the person renaming should know that does not
 	// stop the rename.
 	Warnings []string
+	// Dynamic are the calls of the lib that name a function with a name
+	// made when they run, of a function's rename: those that may call
+	// the renamed function (Dynamic.Matches) first.
+	Dynamic []Dynamic
+	// Files is how many files were searched; Partial says the lib is a
+	// checkout of part of a mudlib, whose rest was not.
+	Files   int
+	Partial bool
+}
+
+// Count returns how many occurrences of the class the plan has.
+func (p *Plan) Count(c Class) int {
+	n := 0
+	for _, o := range p.Occurrences {
+		if o.Class == c {
+			n++
+		}
+	}
+	return n
 }
 
 // Refusal is the reason a name cannot be renamed, or not to the name
 // asked for.
 type Refusal struct {
 	Reason string
+	// Forcible says File.Force overrules it: the rename is safe as far as
+	// the code goes, and what it breaks is data (a variable save_object
+	// writes).
+	Forcible bool
 }
 
 func (r *Refusal) Error() string { return r.Reason }
@@ -175,27 +229,63 @@ func Rename(ctx context.Context, f File, off uint32, newName string) (*Plan, err
 	if t == nil {
 		return nil, refuse("nothing here can be renamed")
 	}
-	plan := &Plan{Symbol: t.Symbol, New: newName}
+	plan := &Plan{Symbol: t.Symbol, New: newName, Files: 1}
 	if newName == t.Name {
 		return plan, nil
 	}
-	if err := rn.valid(t.Symbol, newName); err != nil {
-		return nil, err
-	}
-	if t.Kind == resolve.Macro {
-		err = rn.planMacro(plan)
-	} else {
-		err = rn.planNames(plan)
+	switch {
+	case t.across != nil:
+		err = rn.planAcross(ctx, plan, t.across)
+	case t.Kind == resolve.Macro:
+		if err = rn.valid(t.Symbol, newName); err == nil {
+			err = rn.planMacro(plan)
+		}
+	default:
+		if err = rn.valid(t.Symbol, newName); err == nil {
+			err = rn.planNames(plan)
+		}
 	}
 	if err != nil {
 		return nil, err
 	}
+	rn.fillLines(plan)
 	for _, o := range plan.Occurrences {
-		if o.Class == Certain {
-			plan.Edits = append(plan.Edits, Edit{Path: o.Path, Start: o.Start, End: o.End, NewText: newName})
+		e := Edit{Path: o.Path, Start: o.Start, End: o.End, NewText: newName}
+		switch o.Class {
+		case Certain:
+			plan.Edits = append(plan.Edits, e)
+		case Possible:
+			plan.PossibleEdits = append(plan.PossibleEdits, e)
 		}
 	}
 	return plan, nil
+}
+
+// fillLines sets the lines and columns of the occurrences that have
+// none: from the file's tokens, or its text.
+func (rn *renamer) fillLines(plan *Plan) {
+	var src []byte
+	srcOf := ""
+	for i := range plan.Occurrences {
+		o := &plan.Occurrences[i]
+		if o.Line != 0 {
+			continue
+		}
+		if o.Path == rn.tok.Path {
+			pos := rn.tok.Pos(o.Start)
+			o.Line, o.Col = uint32(pos.Line), uint32(pos.Col)
+			continue
+		}
+		if srcOf != o.Path {
+			src, _ = rn.snap.ReadFile(o.Path)
+			srcOf = o.Path
+		}
+		if int(o.Start) <= len(src) {
+			before := src[:o.Start]
+			o.Line = uint32(1 + bytes.Count(before, []byte("\n")))
+			o.Col = uint32(int(o.Start) - (bytes.LastIndexByte(before, '\n') + 1) + 1)
+		}
+	}
 }
 
 // renamer is a rename in one file.
@@ -217,6 +307,8 @@ type renamer struct {
 	snap    *index.Snapshot
 	kfuns   *kfun.Table
 	markers []string
+	create  string
+	force   bool
 	scopes  []*syntax.Scope
 	// bad are the spans of the code that does not parse: what it names
 	// cannot be told.
@@ -229,7 +321,10 @@ func newRenamer(f File) *renamer {
 		return nil
 	}
 	rn := &renamer{r: r, tok: r.Tok, tree: r.Tree, env: r.Env, unit: r.Unit, snap: r.Snapshot,
-		kfuns: r.Kfuns, markers: f.AutosaveMarkers}
+		kfuns: r.Kfuns, markers: f.AutosaveMarkers, create: f.Create, force: f.Force}
+	if rn.create == "" {
+		rn.create = "create"
+	}
 	if rn.kfuns == nil {
 		rn.kfuns = kfun.DGD()
 	}
@@ -369,6 +464,8 @@ func (rn *renamer) prepare(ctx context.Context, off uint32) (*Target, error) {
 		return nil, refuse("'%s' names nothing the tools know of here", name)
 	}
 	t := &Target{Symbol: Symbol{Kind: ref.Kind, Name: ref.Name}, Start: ref.Start, End: ref.End}
+	acrossFiles := false
+	var err error
 	switch ref.Kind {
 	case resolve.Include, resolve.Object:
 		return nil, refuse("'%s' names a file: renaming files comes in a later version", ref.Name)
@@ -376,36 +473,61 @@ func (rn *renamer) prepare(ctx context.Context, off uint32) (*Target, error) {
 		t.Def = ref.Defs[0]
 		return t, nil
 	case resolve.Label:
-		// The file's own, unless another file includes it.
+		t.Def = ref.Defs[0]
+		by, err := rn.includedBy(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if by != "" {
+			return nil, refuse("this file is included by %s, which has its inherit statements too: an inherit label of such a file is not renamed", by)
+		}
+		return t, nil
 	case resolve.Function:
-		if err := rn.function(ref); err != nil {
-			return nil, err
-		}
+		acrossFiles, err = rn.function(ref)
 	case resolve.Variable:
-		if err := rn.variable(ref); err != nil {
-			return nil, err
-		}
+		acrossFiles, err = rn.variable(ref)
 	case resolve.Macro:
-		if err := rn.macro(ref); err != nil {
-			return nil, err
-		}
+		acrossFiles, err = rn.macro(ctx, ref)
 	default:
 		return nil, nil
 	}
-	t.Def = ref.Defs[0]
-	if err := rn.included(ctx); err != nil {
+	if err != nil {
 		return nil, err
 	}
-	if ref.Kind == resolve.Variable && !t.Def.Var.Static {
-		if err := rn.saved(ctx, ref.Name); err != nil {
+	t.Def = ref.Defs[0]
+	if !acrossFiles {
+		// What a file another includes declares is theirs too.
+		by, err := rn.includedBy(ctx)
+		if err != nil {
 			return nil, err
+		}
+		acrossFiles = by != ""
+	}
+	if acrossFiles {
+		a, err := rn.prepareAcross(ctx, t)
+		if err != nil {
+			return nil, err
+		}
+		t.Across, t.across = true, a
+		return t, nil
+	}
+	if ref.Kind == resolve.Variable && !t.Def.Var.Static {
+		if err := rn.savedIn(ctx, rn.unit.LibPath, ref.Name, true); err != nil {
+			var no *Refusal
+			if !rn.force || !errors.As(err, &no) || !no.Forcible {
+				return nil, err
+			}
+			// Planned as a rename across files, which warns of it.
+			a, err := rn.prepareAcross(ctx, t)
+			if err != nil {
+				return nil, err
+			}
+			a.forced = no.Reason
+			t.Across, t.across = true, a
 		}
 	}
 	return t, nil
 }
-
-// Later is what a refusal says of what this version does not rename.
-const Later = "rename across files comes in a later version"
 
 // stub reports whether a declaration is in a profile's stub.
 func stub(d resolve.Def) bool {
@@ -413,42 +535,38 @@ func stub(d resolve.Def) bool {
 	return ok
 }
 
-// function refuses a function that is not the file's own private one.
-func (rn *renamer) function(ref *resolve.Ref) error {
+// function refuses a function that cannot be renamed, and says whether
+// its rename reaches other files: all but a private function of the
+// file's own do.
+func (rn *renamer) function(ref *resolve.Ref) (bool, error) {
 	name := ref.Name
 	switch {
 	case len(ref.Defs) == 0 && ref.Call != nil && ref.Call.Target == calls.TargetUnknown:
-		return refuse("'%s' is called in an object that cannot be told: what it names is not known", name)
+		return false, refuse("'%s' is called in an object that cannot be told: what it names is not known", name)
 	case len(ref.Defs) == 0 && rn.kfuns.Lookup(name) != nil:
-		return refuse("'%s' is a kfun, a function of the driver", name)
+		return false, refuse("'%s' is a kfun, a function of the driver", name)
 	case len(ref.Defs) == 0:
-		return refuse("no file the tools see declares a function '%s'", name)
+		return false, refuse("no file the tools see declares a function '%s'", name)
 	case len(ref.Defs) > 1:
-		return refuse("'%s' is ambiguous here: more than one inherited object has it", name)
+		return false, refuse("'%s' is ambiguous here: more than one inherited object has it", name)
 	}
 	d := ref.Defs[0]
 	fi := d.Func
 	switch {
 	case stub(d):
-		return refuse("'%s' is defined in the mudlib profile, not in your checkout", name)
-	case d.Auto:
-		return refuse("'%s' is a function of the auto object, which every object has: %s", name, Later)
-	case d.Object != rn.unit.LibPath:
-		return refuse("'%s' is inherited from %s: %s", name, d.Object, Later)
-	case d.Path != rn.tok.Path:
-		return refuse("'%s' is declared in %s, which other files may include: %s", name, rn.libName(d.Path), Later)
+		return false, refuse("'%s' is defined in the mudlib profile, not in your checkout", name)
 	case fi == nil:
-		return refuse("nothing is known of the function '%s'", name)
-	case !fi.Private:
-		what := "public"
-		if fi.Static {
-			what = "static"
-		}
-		return refuse("'%s' is a %s function: objects that inherit this one or call it may name it; %s", name, what, Later)
-	case ref.Call != nil:
-		return refuse("DGD does not call a private function by name (%s): this is not a call of '%s'; rename it where it is declared or called", via(ref), name)
+		return false, refuse("nothing is known of the function '%s'", name)
+	case fi.Private && ref.Call != nil:
+		return false, refuse("DGD does not call a private function by name (%s): this is not a call of '%s'; rename it where it is declared or called", via(ref), name)
+	case fi.Private:
+		return d.Object != rn.unit.LibPath || d.Path != rn.tok.Path, nil
+	case name == rn.create:
+		return false, refuse("'%s' is the function the driver calls by name to initialize every object (create in the configuration)", name)
+	case rn.kfuns.Lookup(name) != nil:
+		return false, refuse("'%s' is a kfun too: the function takes the kfun's place in the objects that have it, and a call the rename cannot see would reach the driver's once renamed", name)
 	}
-	return nil
+	return true, nil
 }
 
 // via says how a late-bound call is made, for a message.
@@ -459,54 +577,56 @@ func via(ref *resolve.Ref) string {
 	return ref.Call.Via + "()"
 }
 
-// variable refuses a global variable that is not the file's own private
-// one.
-func (rn *renamer) variable(ref *resolve.Ref) error {
+// variable refuses a global variable that cannot be renamed, and says
+// whether its rename reaches other files: all but a private variable of
+// the file's own do.
+func (rn *renamer) variable(ref *resolve.Ref) (bool, error) {
 	name := ref.Name
 	switch {
 	case len(ref.Defs) == 0:
-		return refuse("no file the tools see declares a variable '%s'", name)
+		return false, refuse("no file the tools see declares a variable '%s'", name)
 	case len(ref.Defs) > 1:
-		return refuse("'%s' is ambiguous here: more than one inherited object has it", name)
+		return false, refuse("'%s' is ambiguous here: more than one inherited object has it", name)
 	}
 	d := ref.Defs[0]
 	switch {
 	case stub(d):
-		return refuse("'%s' is declared in the mudlib profile, not in your checkout", name)
-	case d.Object != rn.unit.LibPath:
-		return refuse("'%s' is inherited from %s: %s", name, d.Object, Later)
-	case d.Path != rn.tok.Path:
-		return refuse("'%s' is declared in %s, which other files may include: %s", name, rn.libName(d.Path), Later)
+		return false, refuse("'%s' is declared in the mudlib profile, not in your checkout", name)
 	case d.Var == nil:
-		return refuse("nothing is known of the variable '%s'", name)
-	case !d.Var.Private:
-		return refuse("'%s' is a global variable that objects inheriting this one can use: %s", name, Later)
+		return false, refuse("nothing is known of the variable '%s'", name)
 	}
-	return nil
+	return !d.Var.Private || d.Object != rn.unit.LibPath || d.Path != rn.tok.Path, nil
 }
 
-// macro refuses a macro that is not one the file defines for itself.
-func (rn *renamer) macro(ref *resolve.Ref) error {
+// macro refuses a macro that cannot be renamed, and says whether its
+// rename reaches other files: a header's does, and a macro of a file
+// another includes; a macro the file defines for itself is renamed in the
+// file, when nothing outside it knows the name.
+func (rn *renamer) macro(ctx context.Context, ref *resolve.Ref) (bool, error) {
 	name := ref.Name
 	if len(ref.Defs) == 0 {
-		return refuse("'%s' is defined by the driver or the project's configuration, not in a file", name)
+		return false, refuse("'%s' is defined by the driver or the project's configuration, not in a file", name)
 	}
 	d := ref.Defs[0]
 	switch {
 	case stub(d):
-		return refuse("'%s' is defined in the mudlib profile, not in your checkout", name)
+		return false, refuse("'%s' is defined in the mudlib profile, not in your checkout", name)
 	case d.Path != rn.tok.Path:
-		return refuse("'%s' is defined in %s: renaming a header's macro comes in a later version", name, rn.libName(d.Path))
-	case rn.env.Outside(name):
-		return refuse("'%s' is defined outside this file too (by a header it includes, the driver or the project's configuration)", name)
+		return true, nil
+	}
+	if by, err := rn.includedBy(ctx); err != nil || by != "" {
+		return by != "", err
+	}
+	if rn.env.Outside(name) {
+		return false, refuse("'%s' is defined outside this file too (by a header it includes, the driver or the project's configuration)", name)
 	}
 	if h := rn.mentionedInHeaders(name); h != "" {
-		return refuse("'%s' is used in %s, which this file includes: %s", name, h, Later)
+		return false, refuse("'%s' is used in %s, which this file includes, where it is no macro of this file's", name, h)
 	}
 	if what := rn.outsideName(name); what != "" {
 		// The name means something else where the macro is not defined.
 		if own := rn.env.Own(); own != nil && own.Undefs[name] {
-			return refuse("'%s' is #undef'd in this file, and is %s where it is not a macro", name, what)
+			return false, refuse("'%s' is #undef'd in this file, and is %s where it is not a macro", name, what)
 		}
 		first := ^uint32(0)
 		for _, m := range rn.ownDefines(name) {
@@ -514,11 +634,11 @@ func (rn *renamer) macro(ref *resolve.Ref) error {
 		}
 		for ti, tok := range rn.tok.Tokens {
 			if tok.Kind == token.Ident && tok.Off < first && rn.text(ti) == name {
-				return refuse("'%s' at line %d, before its #define, is %s", name, rn.line(tok.Off), what)
+				return false, refuse("'%s' at line %d, before its #define, is %s", name, rn.line(tok.Off), what)
 			}
 		}
 	}
-	return nil
+	return false, nil
 }
 
 // outsideName says what else name is in the file's object, for a
@@ -530,7 +650,7 @@ func (rn *renamer) outsideName(name string) string {
 		if fn, ok := rn.snap.ChainFunc(lp, name); ok && fn.DefinedIn != lp && !fn.Private {
 			return "a function inherited from " + fn.DefinedIn
 		}
-		if v, ok := rn.snap.Chain(lp).Vars[name]; ok && v.DefinedIn != lp && !v.Private {
+		if v, ok := rn.snap.ChainVar(lp, name); ok && v.DefinedIn != lp && !v.Private {
 			return "a global variable inherited from " + v.DefinedIn
 		}
 	}
@@ -554,17 +674,17 @@ func (rn *renamer) ownDefines(name string) []uint32 {
 	return out
 }
 
-// included refuses when another file of the lib includes this one: what
-// it declares is theirs too.
-func (rn *renamer) included(ctx context.Context) error {
+// includedBy returns the first file of the lib that includes this one,
+// "" when none does.
+func (rn *renamer) includedBy(ctx context.Context) (string, error) {
 	includers, ok := rn.snap.Includers(ctx, rn.tok.Path)
 	if !ok {
-		return rn.unknown("whether another file includes this one")
+		return "", rn.unknown("whether another file includes this one")
 	}
 	if len(includers) > 0 {
-		return refuse("this file is included by %s, which has what it declares too: %s", rn.libName(includers[0]), Later)
+		return rn.libName(includers[0]), nil
 	}
-	return nil
+	return "", nil
 }
 
 // unknown refuses for want of an answer from the whole lib: the scan is
@@ -576,19 +696,20 @@ func (rn *renamer) unknown(what string) error {
 	return refuse("the mudlib is not indexed in full yet, so it cannot be told %s: try again in a moment", what)
 }
 
-// saved refuses a global variable that save_object writes: one of an
-// object that saves itself, or of an object that inherits it, or is made
-// of programs one of which does. The object saves itself when one of
-// its programs names save_object, restore_object or one of the
-// conventions' autosave markers, or a macro of the file that expands to
-// one; the auto object is taken to wrap them, not to call them on its
-// own.
-func (rn *renamer) saved(ctx context.Context, name string) error {
+// savedIn refuses a global variable of the object at lp that save_object
+// writes: one of an object that saves itself, or of an object that
+// inherits it, or is made of programs one of which does. The object saves
+// itself when one of its programs names save_object, restore_object or
+// one of the conventions' autosave markers (with own, the file asked
+// about is read for those, and for a macro of the file that expands to
+// one); the auto object is taken to wrap them, not to call them on its
+// own. The refusal is Forcible.
+func (rn *renamer) savedIn(ctx context.Context, lp, name string, own bool) error {
 	names := map[string]bool{"save_object": true, "restore_object": true}
 	for _, m := range rn.markers {
 		names[m] = true
 	}
-	if rn.env != nil {
+	if own && rn.env != nil {
 		for _, m := range rn.env.Names() {
 			if names[m] {
 				continue
@@ -604,35 +725,34 @@ func (rn *renamer) saved(ctx context.Context, name string) error {
 		}
 	}
 	refuseSaved := func(who string) error {
-		return refuse("'%s' is written by save_object to the save files under its name (%s): renamed, restore_object no longer finds the saved value", name, who)
+		return &Refusal{Forcible: true, Reason: fmt.Sprintf("'%s' is written by save_object to the save files under its name (%s): renamed, restore_object no longer finds the saved value", name, who)}
 	}
-	for _, ti := range rn.tree.Sel.Sig {
-		if tok := rn.tok.Tokens[ti]; tok.Kind == token.Ident && names[rn.text(ti)] {
-			return refuseSaved(fmt.Sprintf("this file names %s at line %d", rn.text(ti), rn.line(tok.Off)))
+	if own {
+		for _, ti := range rn.tree.Sel.Sig {
+			if tok := rn.tok.Tokens[ti]; tok.Kind == token.Ident && names[rn.text(ti)] {
+				return refuseSaved(fmt.Sprintf("this file names %s at line %d", rn.text(ti), rn.line(tok.Off)))
+			}
 		}
 	}
-	lp := rn.unit.LibPath
 	if lp == "" {
 		return nil
 	}
-	if rn.snap.Partial() && rn.snap.Shared(rn.snap.LibFile(rn.tok.Path)) {
-		return refuse("'%s' may be written by save_object: objects of the mudlib outside this checkout inherit this file, and cannot be seen from here", name)
+	if rn.snap.Partial() && rn.snap.Shared(rn.snap.LibFile(rn.snap.ObjectFile(lp))) {
+		return &Refusal{Forcible: true, Reason: fmt.Sprintf("'%s' may be written by save_object: objects of the mudlib outside this checkout inherit %s, and cannot be seen from here", name, lp)}
 	}
 	users, ok := rn.snap.Users(ctx, lp)
 	if !ok {
 		return rn.unknown(fmt.Sprintf("whether an object that inherits this one saves '%s'", name))
 	}
-	programs := map[string]bool{}
-	for _, o := range rn.snap.Chain(lp).Objects {
-		programs[o] = true
-	}
+	programs := map[string]bool{lp: true}
+	rn.ancestors(lp, programs)
 	for _, u := range users {
 		programs[u] = true
-		for _, o := range rn.snap.Chain(u).Objects {
-			programs[o] = true
-		}
+		rn.ancestors(u, programs)
 	}
-	delete(programs, lp)
+	if own {
+		delete(programs, lp)
+	}
 	for _, p := range slices.Sorted(maps.Keys(programs)) {
 		if ctx.Err() != nil {
 			return refuse("cancelled before it could be told whether an object that inherits this one saves '%s'", name)
@@ -644,7 +764,7 @@ func (rn *renamer) saved(ctx context.Context, name string) error {
 		if u == nil {
 			continue
 		}
-		for n := range names {
+		for _, n := range slices.Sorted(maps.Keys(names)) {
 			if len(u.Uses(n)) > 0 {
 				return refuseSaved(fmt.Sprintf("%s names %s", p, n))
 			}

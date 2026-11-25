@@ -146,3 +146,36 @@ func TestForms(t *testing.T) {
 	assert.Empty(t, reg.Forms("clone_object"))
 	assert.Empty(t, reg.Forms("nothing"))
 }
+
+// A function's name made when the call runs is no named call: it is a
+// dynamic one, with the constant parts of the name.
+func TestDynamic(t *testing.T) {
+	src := body(`
+    call_other(ob, verb);
+    call_other(ob, "do_" + verb);
+    call_out(verb + "_cmd", 1);
+    call_out("a_" + verb + "_b", 1);
+    call_out(("x_" + verb), 1);
+    call_other(ob, "fixed");
+    call_out(0, 1);
+    add_action(fn, "look");
+    store(fn);`)
+	f := lexer.Lex("/lib/obj/t.c", []byte(src), lexer.Default)
+	env := pp.NewEnv(nil, nil)
+	env.Complete = true
+	tree := syntax.Parse(f, syntax.Options{Env: env, Sel: env.Scan(f, nil)})
+	reg := calls.NewRegistry(profile.Conventions{CallRegistry: map[string]profile.CallForms{"add_action": {{Function: 0}}}})
+	facts := calls.Extract(calls.File{Tree: tree, Env: env, LibPath: "/obj/t", ObjectPath: func(w string) string { return w }}, reg)
+	var got []string
+	for _, d := range facts.Dynamic {
+		got = append(got, fmt.Sprintf("%s %s %q %q", d.Via, src[d.Start:d.End], d.Prefix, d.Suffix))
+	}
+	assert.Equal(t, []string{
+		`call_other verb "" ""`,
+		`call_other "do_" + verb "do_" ""`,
+		`call_out verb + "_cmd" "" "_cmd"`,
+		`call_out "a_" + verb + "_b" "a_" "_b"`,
+		`call_out ("x_" + verb) "x_" ""`,
+		`add_action fn "" ""`,
+	}, got)
+}

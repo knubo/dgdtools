@@ -99,7 +99,10 @@ exit
 > prepare lib/obj/a.c 16:15
 < "jsonrpc2: code -32803 message: DGD does not call a private function by name (call_out()): this is not a call of 'tick'; rename it where it is declared or called"
 > prepare lib/obj/a.c 14:13
-< "jsonrpc2: code -32803 message: 'start' is a static function: objects that inherit this one or call it may name it; rename across files comes in a later version"
+< {
+<   "range": {"start": {"line": 14, "character": 12}, "end": {"line": 14, "character": 17}},
+<   "placeholder": "start"
+< }
 > prepare lib/obj/a.c 13:0
 < null
 > rename lib/obj/a.c 9:9 i
@@ -132,6 +135,7 @@ exit
 <     }
 <   ]
 < }
+~ lib/obj/a.c
 | #include <std.h>\n
 | inherit BASE;\n
 | \n
@@ -168,6 +172,7 @@ exit
 <     }
 <   ]
 < }
+~ lib/obj/a.c
 | #include <std.h>\n
 | inherit BASE;\n
 | \n
@@ -211,6 +216,7 @@ exit
 <     }
 <   ]
 < }
+~ lib/obj/a.c
 | #include <std.h>\n
 | inherit BASE;\n
 | \n
@@ -247,6 +253,7 @@ exit
 <     }
 <   ]
 < }
+~ lib/obj/a.c
 | #include <std.h>\n
 | inherit BASE;\n
 | \n
@@ -266,14 +273,45 @@ exit
 |     call_out(\"tick\", 1);\n
 | }\n
 > rename lib/obj/a.c 14:13 begin
-< "jsonrpc2: code -32803 message: 'start' is a static function: objects that inherit this one or call it may name it; rename across files comes in a later version"
+< {
+<   "documentChanges": [
+<     {
+<       "textDocument": {"uri": "file://$ROOT/lib/obj/a.c", "version": 5},
+<       "edits": [
+<         {
+<           "range": {"start": {"line": 14, "character": 12}, "end": {"line": 14, "character": 17}},
+<           "newText": "begin"
+<         }
+<       ]
+<     }
+<   ]
+< }
+~ lib/obj/a.c
+| #include <std.h>\n
+| inherit BASE;\n
+| \n
+| #define MAX 3\n
+| \n
+| private int total;\n
+| \n
+| private void step() {\n
+|     int i;\n
+|     for (i = 0; i < MAX; i++) {\n
+|         total += i;\n
+|     }\n
+| }\n
+| \n
+| static void begin() {\n
+|     step();\n
+|     call_out(\"tick\", 1);\n
+| }\n
 > rename lib/obj/a.c 9:9 2x
 < "jsonrpc2: code -32803 message: '2x' is not a name: a name is letters, digits and '_', and does not begin with a digit"
 > rename lib/obj/a.c 9:9 weight
 < {
 <   "documentChanges": [
 <     {
-<       "textDocument": {"uri": "file://$ROOT/lib/obj/a.c", "version": 5},
+<       "textDocument": {"uri": "file://$ROOT/lib/obj/a.c", "version": 6},
 <       "edits": [
 <         {
 <           "range": {"start": {"line": 8, "character": 8}, "end": {"line": 8, "character": 9}},
@@ -299,6 +337,7 @@ exit
 <     }
 <   ]
 < }
+~ lib/obj/a.c
 | #include <std.h>\n
 | inherit BASE;\n
 | \n
@@ -313,7 +352,7 @@ exit
 |     }\n
 | }\n
 | \n
-| static void start() {\n
+| static void begin() {\n
 |     step();\n
 |     call_out(\"tick\", 1);\n
 | }\n

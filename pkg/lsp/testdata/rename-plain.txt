@@ -73,6 +73,7 @@ exit
 <     ]
 <   }
 < }
+~ lib/obj/a.c
 | void create() {\n
 |     int count;\n
 |     count = 1;\n

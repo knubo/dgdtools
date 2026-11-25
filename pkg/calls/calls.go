@@ -68,11 +68,30 @@ type Direct struct {
 	In   *syntax.FuncDecl // the enclosing function; nil at top level
 }
 
+// Dynamic is a call site that hands a function's name to call_other,
+// call_out or a registrar of the lib as something other than a string
+// constant: call_other(ob, fn), call_out("do_" + verb, 1). Which function
+// it calls is decided when it runs, and nothing can be told of it but the
+// constant parts of the name.
+type Dynamic struct {
+	// Via is the function the name is handed to.
+	Via string
+	// Start and End are the bytes of the argument that gives the name.
+	Start, End uint32
+	// Prefix and Suffix are the string constants the name begins and
+	// ends with, when it is a sum of strings that does ("do_" + verb);
+	// "" when not known.
+	Prefix, Suffix string
+}
+
 // Facts are the calls of one file.
 type Facts struct {
 	Named  []Named
 	Paths  []PathRef
 	Direct []Direct
+	// Dynamic are the calls that name a function with a value made when
+	// they run.
+	Dynamic []Dynamic
 }
 
 // Registry knows which functions take a function name or an object path:
@@ -173,15 +192,22 @@ func Extract(f File, reg *Registry) *Facts {
 					}
 				}
 				// The first form the call fits says what it is.
+				var dynamic *Dynamic
+				named := false
 				for _, form := range reg.named[name] {
 					if form.Function >= len(n.Args) || (form.Object != nil && *form.Object >= len(n.Args)) {
 						continue
 					}
 					fnArg := n.Args[form.Function]
 					fname, ok := strLit(fnArg)
+					if !ok && dynamic == nil && !constant(fnArg) {
+						dynamic = &Dynamic{Via: name, Start: t.Off(fnArg), End: t.End(fnArg)}
+						dynamic.Prefix, dynamic.Suffix = affixes(fnArg, strLit)
+					}
 					if !ok || !token.IsIdent(fname) {
 						continue
 					}
+					named = true
 					c := Named{
 						Func: fname, Via: name, Kind: SelfCallback, Target: TargetSelf, NArgs: -1,
 						Start: t.Off(fnArg), End: t.End(fnArg),
@@ -196,11 +222,56 @@ func Extract(f File, reg *Registry) *Facts {
 					cf.Named = append(cf.Named, c)
 					break
 				}
+				if dynamic != nil && !named {
+					cf.Dynamic = append(cf.Dynamic, *dynamic)
+				}
 			}
 			return true
 		})
 	}
 	return cf
+}
+
+// constant reports whether a function's name given as e is a constant
+// all the same, or no name at all: a number, nil, a string the parser
+// read in parts, an array, a mapping.
+func constant(e syntax.Expr) bool {
+	switch x := syntax.Unparen(e).(type) {
+	case *syntax.BasicLit, *syntax.AdjacentStrings, *syntax.ArrayLit, *syntax.MappingLit:
+		return true
+	case *syntax.Ident:
+		return x.Name == "nil"
+	}
+	return false
+}
+
+// affixes returns the string constants a sum of strings begins and ends
+// with: "do_" of "do_" + verb, "_cmd" of verb + "_cmd".
+func affixes(e syntax.Expr, strLit func(syntax.Expr) (string, bool)) (prefix, suffix string) {
+	sum := func(e syntax.Expr) (*syntax.BinaryExpr, bool) {
+		b, ok := syntax.Unparen(e).(*syntax.BinaryExpr)
+		return b, ok && b.Op == token.Plus
+	}
+	if _, ok := sum(e); !ok {
+		return "", ""
+	}
+	for x := e; ; {
+		b, ok := sum(x)
+		if !ok {
+			prefix, _ = strLit(syntax.Unparen(x))
+			break
+		}
+		x = b.X
+	}
+	for x := e; ; {
+		b, ok := sum(x)
+		if !ok {
+			suffix, _ = strLit(syntax.Unparen(x))
+			break
+		}
+		x = b.Y
+	}
+	return prefix, suffix
 }
 
 // target decides what object a receiver expression denotes:

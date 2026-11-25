@@ -1,0 +1,205 @@
+Rename across files: a function with its redefinitions in the objects
+that inherit it and those it inherits, and every call of them in the
+lib; the same name in an object outside the hierarchy is left. A call on
+an object nobody can tell is a possible edit, under an annotation that
+needs confirmation, which the client leaves unticked; the user is told.
+An edit to a file the client has not open is for no version. A variable
+save_object writes is refused, and the reason says what overrules it.
+
+-- lib/dgdtools.yml --
+include_dirs: [/include]
+-- lib/include/std.h --
+#define LIVING "/std/living"
+-- lib/std/base.c --
+string name;
+
+string query_name() { return name; }
+-- lib/std/living.c --
+#include <std.h>
+inherit "/std/base";
+
+int hp;
+
+string query_name() { return "living " + ::query_name(); }
+-- lib/obj/monster.c --
+#include <std.h>
+inherit LIVING;
+
+string query_name() { return "monster"; }
+
+void f(object ob) {
+    write(query_name());
+    ob->query_name();
+    LIVING->query_name();
+    call_out("query_name", 1);
+}
+-- lib/obj/other.c --
+string query_name() { return "other"; }
+-- lib/obj/saver.c --
+inherit "/std/living";
+void save() { save_object("/data/x"); }
+-- script --
+initialize lib
+open lib/obj/monster.c
+prepare lib/obj/monster.c 3:9
+rename lib/obj/monster.c 3:9 f
+open lib/std/living.c
+prepare lib/std/living.c 3:5
+rename lib/obj/monster.c 3:9 query_short
+received window/showMessage
+shutdown
+exit
+-- transcript --
+> initialize lib
+< {
+<   "capabilities": {
+<     "positionEncoding": "utf-16",
+<     "textDocumentSync": {"openClose": true, "change": 2},
+<     "codeActionProvider": {"codeActionKinds": ["quickfix", "source.fixAll.dgdtools"]},
+<     "completionProvider": {"triggerCharacters": [">", ":", "\"", "/", "<"], "resolveProvider": true},
+<     "definitionProvider": true,
+<     "referencesProvider": true,
+<     "documentHighlightProvider": true,
+<     "hoverProvider": true,
+<     "signatureHelpProvider": {"triggerCharacters": ["(", ","], "retriggerCharacters": [")"]},
+<     "documentSymbolProvider": true,
+<     "workspaceSymbolProvider": true,
+<     "documentFormattingProvider": true,
+<     "documentRangeFormattingProvider": true,
+<     "semanticTokensProvider": {
+<       "legend": {
+<         "tokenTypes": [
+<           "namespace",
+<           "type",
+<           "parameter",
+<           "variable",
+<           "function",
+<           "method",
+<           "macro",
+<           "keyword",
+<           "modifier"
+<         ],
+<         "tokenModifiers": ["declaration", "definition", "static", "defaultLibrary", "inherited", "local", "macro"]
+<       },
+<       "range": true,
+<       "full": {"delta": true}
+<     },
+<     "renameProvider": {"prepareProvider": true},
+<     "workspace": {
+<       "workspaceFolders": {"supported": true, "changeNotifications": true},
+<       "textDocumentContent": {"schemes": ["dgdtools-profile"]}
+<     }
+<   },
+<   "serverInfo": {"name": "dgdtools", "version": "test"}
+< }
+> open lib/obj/monster.c
+> prepare lib/obj/monster.c 3:9
+< {
+<   "range": {"start": {"line": 3, "character": 7}, "end": {"line": 3, "character": 17}},
+<   "placeholder": "query_name"
+< }
+> rename lib/obj/monster.c 3:9 f
+< "jsonrpc2: code -32803 message: /obj/monster has a function 'f' already (/obj/monster.c:6)"
+> open lib/std/living.c
+> prepare lib/std/living.c 3:5
+< "jsonrpc2: code -32803 message: 'hp' is written by save_object to the save files under its name (/obj/saver names save_object): renamed, restore_object no longer finds the saved value (`dgdtools rename --force` renames it all the same)"
+> rename lib/obj/monster.c 3:9 query_short
+< {
+<   "documentChanges": [
+<     {
+<       "textDocument": {"uri": "file://$ROOT/lib/obj/monster.c", "version": 1},
+<       "edits": [
+<         {
+<           "range": {"start": {"line": 3, "character": 7}, "end": {"line": 3, "character": 17}},
+<           "newText": "query_short",
+<           "annotationId": "certain"
+<         },
+<         {
+<           "range": {"start": {"line": 6, "character": 10}, "end": {"line": 6, "character": 20}},
+<           "newText": "query_short",
+<           "annotationId": "certain"
+<         },
+<         {
+<           "range": {"start": {"line": 7, "character": 8}, "end": {"line": 7, "character": 18}},
+<           "newText": "query_short",
+<           "annotationId": "possible-1"
+<         },
+<         {
+<           "range": {"start": {"line": 8, "character": 12}, "end": {"line": 8, "character": 22}},
+<           "newText": "query_short",
+<           "annotationId": "certain"
+<         },
+<         {
+<           "range": {"start": {"line": 9, "character": 14}, "end": {"line": 9, "character": 24}},
+<           "newText": "query_short",
+<           "annotationId": "certain"
+<         }
+<       ]
+<     },
+<     {
+<       "textDocument": {"uri": "file://$ROOT/lib/std/base.c", "version": null},
+<       "edits": [
+<         {
+<           "range": {"start": {"line": 2, "character": 7}, "end": {"line": 2, "character": 17}},
+<           "newText": "query_short",
+<           "annotationId": "certain"
+<         }
+<       ]
+<     },
+<     {
+<       "textDocument": {"uri": "file://$ROOT/lib/std/living.c", "version": 1},
+<       "edits": [
+<         {
+<           "range": {"start": {"line": 5, "character": 7}, "end": {"line": 5, "character": 17}},
+<           "newText": "query_short",
+<           "annotationId": "certain"
+<         },
+<         {
+<           "range": {"start": {"line": 5, "character": 43}, "end": {"line": 5, "character": 53}},
+<           "newText": "query_short",
+<           "annotationId": "certain"
+<         }
+<       ]
+<     }
+<   ],
+<   "changeAnnotations": {
+<     "certain": {"label": "Certain: the renamed function"},
+<     "possible-1": {
+<       "label": "Possible: a call on an object nobody can tell, which may be one that has it",
+<       "needsConfirmation": true,
+<       "description": "may be the renamed function, and nobody can tell"
+<     }
+<   }
+< }
+~ lib/obj/monster.c
+| #include <std.h>\n
+| inherit LIVING;\n
+| \n
+| string query_short() { return \"monster\"; }\n
+| \n
+| void f(object ob) {\n
+|     write(query_short());\n
+|     ob->query_name();\n
+|     LIVING->query_short();\n
+|     call_out(\"query_short\", 1);\n
+| }\n
+~ lib/std/base.c
+| string name;\n
+| \n
+| string query_short() { return name; }\n
+~ lib/std/living.c
+| #include <std.h>\n
+| inherit \"/std/base\";\n
+| \n
+| int hp;\n
+| \n
+| string query_short() { return \"living \" + ::query_short(); }\n
+> received window/showMessage
+< {
+<   "message": "rename query_name to query_short: 1 other place may be the renamed function and nobody can tell: it is in the preview, not ticked; edits in base files: /std/base.c (3 objects inherit it), /std/living.c (2 objects inherit it); an object keeps the program it was compiled with, so the rename needs the scheduled reboot to take effect everywhere",
+<   "type": 2
+< }
+> shutdown
+< null
+> exit
+< "the server exited after shutdown"

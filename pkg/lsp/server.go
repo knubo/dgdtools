@@ -215,6 +215,7 @@ type capabilities struct {
 	configuration       bool // workspace/configuration
 	watch, relativeGlob bool // dynamic file watchers, and with a base
 	documentChanges     bool // edits that name a document's version
+	annotations         bool // edits to confirm (changeAnnotations), in documentChanges
 	related, tags, href bool // what a diagnostic may carry
 	progress            bool // window/workDoneProgress
 	links               bool // a definition as LocationLinks
@@ -587,6 +588,7 @@ func (s *server) initialize(params json.RawMessage) (any, error) {
 		watch:           c.Workspace.DidChangeWatchedFiles.DynamicRegistration,
 		relativeGlob:    c.Workspace.DidChangeWatchedFiles.RelativePatternSupport,
 		documentChanges: c.Workspace.WorkspaceEdit.DocumentChanges,
+		annotations:     c.Workspace.WorkspaceEdit.DocumentChanges && c.Workspace.WorkspaceEdit.ChangeAnnotationSupport != nil,
 		related:         c.TextDocument.PublishDiagnostics.RelatedInformation,
 		tags:            c.TextDocument.PublishDiagnostics.TagSupport != nil,
 		href:            c.TextDocument.PublishDiagnostics.CodeDescriptionSupport,

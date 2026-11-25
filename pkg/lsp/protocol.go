@@ -27,6 +27,9 @@ type Location struct {
 type TextEdit struct {
 	Range   Range  `json:"range"`
 	NewText string `json:"newText"`
+	// AnnotationID makes the edit an AnnotatedTextEdit: one of the
+	// WorkspaceEdit's changeAnnotations.
+	AnnotationID string `json:"annotationId,omitempty"`
 }
 
 type TextDocumentIdentifier struct {
@@ -36,6 +39,14 @@ type TextDocumentIdentifier struct {
 type VersionedTextDocumentIdentifier struct {
 	URI     string `json:"uri"`
 	Version int    `json:"version"`
+}
+
+// OptionalVersionedTextDocumentIdentifier names a document and the
+// version an edit is for: null for a file the client has not open, whose
+// text is the disk's.
+type OptionalVersionedTextDocumentIdentifier struct {
+	URI     string `json:"uri"`
+	Version *int   `json:"version"`
 }
 
 type TextDocumentItem struct {
@@ -67,7 +78,10 @@ type InitializeParams struct {
 				RelativePatternSupport bool `json:"relativePatternSupport"`
 			} `json:"didChangeWatchedFiles"`
 			WorkspaceEdit struct {
-				DocumentChanges bool `json:"documentChanges"`
+				DocumentChanges         bool `json:"documentChanges"`
+				ChangeAnnotationSupport *struct {
+					GroupsOnLabel bool `json:"groupsOnLabel"`
+				} `json:"changeAnnotationSupport"`
 			} `json:"workspaceEdit"`
 			SemanticTokens struct {
 				RefreshSupport bool `json:"refreshSupport"`
@@ -327,15 +341,25 @@ type CodeAction struct {
 
 // WorkspaceEdit has its edits in one of two forms: DocumentChanges, which
 // names the version of the document they are for, when the client reads
-// it, else Changes.
+// it, else Changes. ChangeAnnotations are what the AnnotatedTextEdits of
+// DocumentChanges refer to, by id.
 type WorkspaceEdit struct {
-	Changes         map[string][]TextEdit `json:"changes,omitempty"`
-	DocumentChanges []TextDocumentEdit    `json:"documentChanges,omitempty"`
+	Changes           map[string][]TextEdit       `json:"changes,omitempty"`
+	DocumentChanges   []TextDocumentEdit          `json:"documentChanges,omitempty"`
+	ChangeAnnotations map[string]ChangeAnnotation `json:"changeAnnotations,omitempty"`
 }
 
 type TextDocumentEdit struct {
-	TextDocument VersionedTextDocumentIdentifier `json:"textDocument"`
-	Edits        []TextEdit                      `json:"edits"`
+	TextDocument OptionalVersionedTextDocumentIdentifier `json:"textDocument"`
+	Edits        []TextEdit                              `json:"edits"`
+}
+
+// ChangeAnnotation says what a group of edits is; with NeedsConfirmation
+// the client shows them to be ticked before they are made.
+type ChangeAnnotation struct {
+	Label             string `json:"label"`
+	NeedsConfirmation bool   `json:"needsConfirmation,omitempty"`
+	Description       string `json:"description,omitempty"`
 }
 
 type RenameOptions struct {

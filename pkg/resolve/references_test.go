@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/mmcdole/dgdtools/pkg/index"
 	"github.com/mmcdole/dgdtools/pkg/lint"
 	"github.com/mmcdole/dgdtools/pkg/profile"
 	"github.com/mmcdole/dgdtools/pkg/resolve"
@@ -454,4 +455,26 @@ func TestReferencesAfterChange(t *testing.T) {
 	w.l.Invalidate("/lib/include/std.h")
 	require.True(t, w.l.Scan(ctx))
 	assert.Equal(t, "nothing", w.refs("/lib/obj/a.c", "SQU|ARE(2)", true))
+}
+
+// A call whose function's name is made when it runs is a Use of its own
+// kind, under a name no search for a name finds, with the constant parts
+// of the name as its pattern.
+func TestDynamicUses(t *testing.T) {
+	fs := vfs.Mem{
+		"/lib/dgdtools.yml": "include_dirs: [/include]\n",
+		"/lib/obj/a.c":      "void do_look() {}\nvoid f(object ob, string v) {\n    call_out(\"do_\" + v, 1);\n    call_other(ob, v);\n    call_other(ob, \"do_look\");\n}\n",
+	}
+	w := newWorld(t, fs, "/lib")
+	require.True(t, w.l.Scan(context.Background()))
+	doc, err := w.l.Lint(context.Background(), "/lib/obj/a.c", lint.Options{})
+	require.NoError(t, err)
+	var got []string
+	for _, u := range doc.Unit.Uses(index.DynamicName) {
+		require.Equal(t, index.UseDynamic, u.Kind)
+		got = append(got, fmt.Sprintf("%d:%d %s %s", u.Line, u.Col, doc.File.Src[u.Start:u.End], u.Aux))
+	}
+	assert.Equal(t, []string{`3:14 "do_" + v do_*`, `4:20 v *`}, got)
+	assert.Empty(t, doc.Unit.Uses("v"), "a parameter is no Use")
+	assert.Len(t, doc.Unit.Uses("do_look"), 2)
 }

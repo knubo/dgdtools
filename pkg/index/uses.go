@@ -29,7 +29,18 @@ const (
 	UseObject
 	// UseInclude is a file an #include names.
 	UseInclude
+	// UseDynamic is a call that hands a function's name made when it
+	// runs to call_other, call_out or a registrar (call_other(ob, fn)).
+	// Its Name is DynamicName, its place the argument that makes the
+	// name, and its Aux the pattern of the name, the constant parts
+	// around a '*' ("do_*"; "*" when nothing is constant). It names
+	// nothing; a rename lists it as a place no search can see into.
+	UseDynamic
 )
+
+// DynamicName is the Name of every Use of kind UseDynamic: no name of
+// the language, so that no search for a name finds one.
+const DynamicName = "(dynamic)"
 
 // UseForm says how a Use of a function names it, which is what decides
 // where the name is looked up.

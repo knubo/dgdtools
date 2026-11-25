@@ -219,7 +219,7 @@ func (c *Client) Initialize(caps Capabilities, folders ...string) json.RawMessag
 			"workspace": map[string]any{
 				"configuration":         rich,
 				"didChangeWatchedFiles": map[string]any{"dynamicRegistration": rich, "relativePatternSupport": rich},
-				"workspaceEdit":         map[string]any{"documentChanges": rich},
+				"workspaceEdit":         workspaceEdit(rich),
 			},
 			"textDocument": map[string]any{
 				"publishDiagnostics": map[string]any{"relatedInformation": rich, "codeDescriptionSupport": rich},
@@ -310,6 +310,9 @@ func URI(path string) string {
 	return (&url.URL{Scheme: "file", Path: p}).String()
 }
 
+// IsOpen reports whether the client has the document at path open.
+func (c *Client) IsOpen(path string) bool { return c.docs[URI(path)] != nil }
+
 // Doc returns the document the client has open for the file at path.
 func (c *Client) Doc(path string) *Document {
 	c.t.Helper()
@@ -375,25 +378,34 @@ func (c *Client) Replace(path, text string) {
 // They are positions in the text as it is; none may overlap another.
 func (c *Client) Apply(path string, edits []lsp.TextEdit) {
 	c.t.Helper()
-	d := c.Doc(path)
+	text, err := ApplyEdits(c.Doc(path).Text, edits, c.Encoding)
+	if err != nil {
+		c.t.Fatal(err)
+	}
+	c.Replace(path, text)
+}
+
+// ApplyEdits returns text with the edits made, positions counted in the
+// encoding; an error when they overlap.
+func ApplyEdits(text string, edits []lsp.TextEdit, encoding string) (string, error) {
 	type span struct {
 		start, end int
 		text       string
 	}
 	var spans []span
 	for _, e := range edits {
-		spans = append(spans, span{OffsetOf(d.Text, e.Range.Start, c.Encoding), OffsetOf(d.Text, e.Range.End, c.Encoding), e.NewText})
+		spans = append(spans, span{OffsetOf(text, e.Range.Start, encoding), OffsetOf(text, e.Range.End, encoding), e.NewText})
 	}
 	sort.SliceStable(spans, func(i, j int) bool { return spans[i].start < spans[j].start })
-	text, last := d.Text, len(d.Text)+1
+	last := len(text) + 1
 	for i := len(spans) - 1; i >= 0; i-- {
 		s := spans[i]
 		if s.end < s.start || s.end > last {
-			c.t.Fatalf("edits overlap or are out of order: %+v", edits)
+			return "", fmt.Errorf("edits overlap or are out of order: %+v", edits)
 		}
 		text, last = text[:s.start]+s.text+text[s.end:], s.start
 	}
-	c.Replace(path, text)
+	return text, nil
 }
 
 // WatchedFiles tells the server that the files or directories at the
@@ -594,4 +606,14 @@ func DecodeTokens(text string, data []uint32, encoding string) string {
 // them: one more than its line breaks.
 func Lines(text string) int {
 	return strings.Count(text, "\n") + strings.Count(text, "\r") - strings.Count(text, "\r\n") + 1
+}
+
+// workspaceEdit is what a client says it does with a WorkspaceEdit: a
+// rich one names versions and confirms edits that need it, as VS Code
+// does.
+func workspaceEdit(rich bool) map[string]any {
+	if !rich {
+		return map[string]any{"documentChanges": false}
+	}
+	return map[string]any{"documentChanges": true, "changeAnnotationSupport": map[string]any{"groupsOnLabel": true}}
 }

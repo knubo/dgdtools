@@ -20,6 +20,7 @@
 package lint
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -358,8 +359,10 @@ type Document struct {
 
 	stats    fileStats
 	resolver *resolve.Resolver
-	// markers are the project's autosave markers, for rename.
+	// markers are the project's autosave markers, and create the function
+	// the driver initializes an object by, for rename.
 	markers []string
+	create  string
 
 	tokensOnce sync.Once
 	tokens     []resolve.SemanticToken
@@ -443,17 +446,26 @@ func (d *Document) PrepareRename(ctx context.Context, off uint32) (*rename.Targe
 	if d.resolver == nil {
 		return nil, nil
 	}
-	return rename.Prepare(ctx, rename.File{Resolver: d.resolver, AutosaveMarkers: d.markers}, off)
+	return rename.Prepare(ctx, d.RenameFile(false), off)
 }
 
 // Rename plans the renaming of what is named at byte offset off of the
-// document to newName (rename.Rename): the occurrences and the edits, or
-// a *rename.Refusal.
-func (d *Document) Rename(ctx context.Context, off uint32, newName string) (*rename.Plan, error) {
+// document to newName (rename.Rename): the occurrences and the edits, in
+// the document and in every other file of the lib that names it, or a
+// *rename.Refusal. With force, a refusal that a person may overrule (a
+// variable save_object writes, rename.Refusal.Forcible) becomes a
+// warning of the plan.
+func (d *Document) Rename(ctx context.Context, off uint32, newName string, force bool) (*rename.Plan, error) {
 	if d.resolver == nil {
 		return nil, &rename.Refusal{Reason: "nothing here can be renamed"}
 	}
-	return rename.Rename(ctx, rename.File{Resolver: d.resolver, AutosaveMarkers: d.markers}, off, newName)
+	return rename.Rename(ctx, d.RenameFile(force), off, newName)
+}
+
+// RenameFile is the document as pkg/rename takes it (rename.File), with
+// force for File.Force.
+func (d *Document) RenameFile(force bool) rename.File {
+	return rename.File{Resolver: d.resolver, AutosaveMarkers: d.markers, Create: d.create, Force: force}
 }
 
 // Symbols lists the declarations of the document, for an outline of it
@@ -804,6 +816,7 @@ func (l *Linter) lintFile(ctx context.Context, s *index.Snapshot, file string, s
 		Tok: parsed.Tok, Tree: parsed.Tree, Env: parsed.Env, Unit: u, Snapshot: s, Registry: l.registry, Kfuns: l.kfuns,
 	})
 	doc.markers = l.project.Config.Conventions.AutosaveMarkers
+	doc.create = cmp.Or(l.project.Config.Create, defaultCreate)
 	rel, _ := l.project.Tree().Rel(file) // the file's lib-relative name
 	rules, err := sel.rules(file, rel, set)
 	if err != nil {

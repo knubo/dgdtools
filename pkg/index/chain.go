@@ -170,6 +170,39 @@ func (s *Snapshot) ChainFunc(libPath, name string) (ChainFunc, bool) {
 	return out, found
 }
 
+// ChainVar returns the global variable called name of the chain of the
+// object at libPath: what Chain(libPath).Vars[name] is, found as
+// ChainFunc finds a function, without flattening the object's chain.
+func (s *Snapshot) ChainVar(libPath, name string) (ChainVar, bool) {
+	if ch, ok := s.chains.get(libPath); ok {
+		if v, ok := ch.Vars[name]; ok {
+			return *v, true
+		}
+		return ChainVar{}, false
+	}
+	u := s.Unit(libPath)
+	if u == nil {
+		return ChainVar{}, false
+	}
+	var out ChainVar
+	found := false
+	for _, ref := range u.Inherits {
+		if !ref.Resolved {
+			continue
+		}
+		if v, ok := s.Chain(ref.Path).Vars[name]; ok {
+			out, found = *v, true
+			if ref.Private {
+				out.Private = true
+			}
+		}
+	}
+	if vi, ok := u.Var(name); ok {
+		out, found = ChainVar{VarInfo: vi, DefinedIn: libPath}, true
+	}
+	return out, found
+}
+
 // ChainUnseen reports whether the chain of the object at libPath has an
 // object that is not known at all: what Chain(libPath).Unseen is, found
 // as ChainFunc finds a function.

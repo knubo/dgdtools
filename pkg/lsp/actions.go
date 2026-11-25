@@ -79,7 +79,7 @@ func (s *server) codeAction(ctx context.Context, p *CodeActionParams) ([]CodeAct
 		}
 		if s.caps.documentChanges {
 			return &WorkspaceEdit{DocumentChanges: []TextDocumentEdit{{
-				TextDocument: VersionedTextDocumentIdentifier{URI: uri, Version: version}, Edits: out}}}
+				TextDocument: OptionalVersionedTextDocumentIdentifier{URI: uri, Version: &version}, Edits: out}}}
 		}
 		return &WorkspaceEdit{Changes: map[string][]TextEdit{uri: out}}
 	}

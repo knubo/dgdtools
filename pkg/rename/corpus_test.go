@@ -30,7 +30,9 @@ import (
 )
 
 // TestCorpusRename renames symbols of a real lib ($DGDTOOLS_CONFIG, with
-// an absolute root) and lints the result: in a sample of its .c files
+// an absolute root) that one file decides, and lints the result (the
+// symbols other files name too are TestCorpusRenameAcross's): in a
+// sample of its .c files
 // ($LPC_SAMPLE of them, 400 when not set), every symbol a name of the
 // file's compiled code names is asked for (Prepare), and up to five of
 // those that can be renamed in each file, of every kind there is, are
@@ -127,6 +129,9 @@ func TestCorpusRename(t *testing.T) {
 				refused[reasonClass(no.Reason)]++
 			case err != nil:
 				t.Fatalf("%s: %v", path, err)
+			case tg != nil && tg.Across:
+				// TestCorpusRenameAcross renames those.
+				refused["(across files: TestCorpusRenameAcross)"]++
 			case tg != nil:
 				cands = append(cands, cand{tok.Off, tg})
 			}
@@ -151,7 +156,7 @@ func TestCorpusRename(t *testing.T) {
 			doc, err := l.Lint(ctx, path, lint.Options{})
 			require.NoError(t, err)
 			began := time.Now()
-			plan, err := doc.Rename(ctx, c.off, fresh)
+			plan, err := doc.Rename(ctx, c.off, fresh, false)
 			planTime += time.Since(began)
 			planned++
 			var no *rename.Refusal

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -52,7 +53,10 @@ var update = flag.Bool("update", false, "rewrite the transcripts in testdata")
 //	                             from the last tokens of the file (or
 //	                             those of ID), the edits made to them
 //	prepare FILE L:C             textDocument/prepareRename
-//	rename FILE L:C NAME         textDocument/rename, and make the edits
+//	rename FILE L:C NAME         textDocument/rename, and make the edits:
+//	                             in each file, open or not, those that
+//	                             need no confirmation, each file's text
+//	                             after its name
 //	symbols FILE                 textDocument/documentSymbol
 //	find QUERY                   workspace/symbol
 //	text FILE                    the editor's text
@@ -83,7 +87,7 @@ func TestTranscripts(t *testing.T) {
 					lib[s.name] = s.body
 				}
 			}
-			got := (&player{t: t, root: tree(t, lib), c: start(t), seen: map[string]int{}}).play(script)
+			got := (&player{t: t, root: tree(t, lib), lib: lib, c: start(t), seen: map[string]int{}}).play(script)
 			if *update {
 				var b strings.Builder
 				b.WriteString(head)
@@ -131,8 +135,10 @@ type sent struct {
 type player struct {
 	t    *testing.T
 	root string
-	c    *lsptest.Client
-	out  strings.Builder
+	// lib are the lib's files, by their names in the archive.
+	lib map[string]string
+	c   *lsptest.Client
+	out strings.Builder
 	// actions are those last returned, of the file named; seen how many
 	// of the server's messages of each method were shown.
 	actions    []lsp.CodeAction
@@ -194,6 +200,58 @@ func (p *player) showText(text string) {
 			p.out.WriteString("| " + strings.TrimSuffix(strconv.Quote(line), "\"")[1:] + "\n")
 		}
 	}
+}
+
+// applyEdit makes the edits of a rename that a client makes without
+// asking (those of no annotation that needs confirmation): in an open
+// document, the client's text; in another file, its text on disk, which
+// is not written. Each file's text is shown after "~ FILE".
+func (p *player) applyEdit(edit *lsp.WorkspaceEdit) {
+	t, c := p.t, p.c
+	byFile := map[string][]lsp.TextEdit{}
+	versions := map[string]*int{}
+	for uri, e := range edit.Changes {
+		byFile[uri] = append(byFile[uri], e...)
+	}
+	for _, dc := range edit.DocumentChanges {
+		versions[dc.TextDocument.URI] = dc.TextDocument.Version
+		for _, e := range dc.Edits {
+			if a, ok := edit.ChangeAnnotations[e.AnnotationID]; ok && a.NeedsConfirmation {
+				continue
+			}
+			byFile[dc.TextDocument.URI] = append(byFile[dc.TextDocument.URI], e)
+		}
+	}
+	rels := slices.Sorted(maps.Keys(p.lib))
+	for _, rel := range rels {
+		path := p.path(rel)
+		uri := lsptest.URI(path)
+		edits, ok := byFile[uri]
+		if !ok {
+			continue
+		}
+		delete(byFile, uri)
+		p.out.WriteString("~ " + rel + "\n")
+		if c.IsOpen(path) {
+			d := c.Doc(path)
+			if v, ok := versions[uri]; ok {
+				require.NotNil(t, v, "an open document's edits name its version")
+				require.Equal(t, d.Version, *v, "an edit is for the version it was asked for")
+			}
+			c.Apply(path, edits)
+			p.showText(c.Doc(path).Text)
+			continue
+		}
+		if v, ok := versions[uri]; ok {
+			require.Nil(t, v, "a file not open has no version")
+		}
+		data, err := os.ReadFile(path)
+		require.NoError(t, err)
+		text, err := lsptest.ApplyEdits(string(data), edits, c.Encoding)
+		require.NoError(t, err)
+		p.showText(text)
+	}
+	require.Empty(t, byFile, "edits of files not in the lib")
 }
 
 // span reads "L:C-L:C".
@@ -303,7 +361,8 @@ func (p *player) play(script string) string {
 				edits = append(edits, e...)
 			}
 			for _, dc := range p.actions[n].Edit.DocumentChanges {
-				require.Equal(t, c.Doc(p.path(p.actionFile)).Version, dc.TextDocument.Version, "an edit is for the version it was asked for")
+				require.NotNil(t, dc.TextDocument.Version)
+				require.Equal(t, c.Doc(p.path(p.actionFile)).Version, *dc.TextDocument.Version, "an edit is for the version it was asked for")
 				edits = append(edits, dc.Edits...)
 			}
 			c.Apply(p.path(p.actionFile), edits)
@@ -457,16 +516,7 @@ func (p *player) play(script string) string {
 				break
 			}
 			p.show(edit)
-			var edits []lsp.TextEdit
-			for _, e := range edit.Changes {
-				edits = append(edits, e...)
-			}
-			for _, dc := range edit.DocumentChanges {
-				require.Equal(t, c.Doc(p.path(arg[0])).Version, dc.TextDocument.Version, "an edit is for the version it was asked for")
-				edits = append(edits, dc.Edits...)
-			}
-			c.Apply(p.path(arg[0]), edits)
-			p.showText(c.Doc(p.path(arg[0])).Text)
+			p.applyEdit(edit)
 		case "symbols", "find":
 			method, params := "workspace/symbol", any(lsp.WorkspaceSymbolParams{Query: rest})
 			if cmd == "symbols" {

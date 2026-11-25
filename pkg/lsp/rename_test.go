@@ -1,10 +1,12 @@
 package lsp_test
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
 	"path/filepath"
+	"slices"
 	"testing"
 	"unicode/utf8"
 
@@ -34,6 +36,15 @@ func renameLib() map[string]string {
 
 const failed = "jsonrpc2: code -32803 message: "
 
+// reason is what the server says of a refusal: its reason, and of one
+// the command line can overrule, how.
+func reason(no *rename.Refusal) string {
+	if no.Forcible {
+		return no.Reason + " (`dgdtools rename --force` renames it all the same)"
+	}
+	return no.Reason
+}
+
 // The server's renames are the library's: for every place of every file
 // of a lib, in both encodings, what textDocument/prepareRename answers is
 // lint.Document.PrepareRename's target or refusal, and what
@@ -53,7 +64,7 @@ func TestRenameIsTheLibrarys(t *testing.T) {
 	for _, enc := range [][]string{nil, {lsp.UTF16, lsp.UTF8}} {
 		c := start(t)
 		c.Initialize(lsptest.Capabilities{Encodings: enc}, dir)
-		places, targets, refused := 0, 0, 0
+		places, targets, refused, across, possible := 0, 0, 0, 0, 0
 		for rel, text := range files {
 			if !utf8.ValidString(text) || filepath.Ext(rel) == ".yml" {
 				continue
@@ -82,7 +93,7 @@ func TestRenameIsTheLibrarys(t *testing.T) {
 				switch {
 				case errors.As(err, &no):
 					refused++
-					require.EqualError(t, gotErr, failed+no.Reason, where())
+					require.EqualError(t, gotErr, failed+reason(no), where())
 				case target == nil:
 					require.NoError(t, gotErr, where())
 					require.Equal(t, "null", string(got), where())
@@ -95,25 +106,70 @@ func TestRenameIsTheLibrarys(t *testing.T) {
 
 				var edit *lsp.WorkspaceEdit
 				gotErr = c.Call("textDocument/rename", lsp.RenameParams{TextDocument: at, Position: pos, NewName: "renamed"}, &edit)
-				plan, err := doc.Rename(ctx, uint32(off), "renamed")
+				plan, err := doc.Rename(ctx, uint32(off), "renamed", false)
 				if errors.As(err, &no) {
-					require.EqualError(t, gotErr, failed+no.Reason, where())
+					require.EqualError(t, gotErr, failed+reason(no), where())
 					continue
 				}
 				require.NoError(t, gotErr, where())
-				want := []lsp.TextEdit{}
-				for _, e := range plan.Edits {
-					want = append(want, lsp.TextEdit{Range: rng(e.Start, e.End), NewText: e.NewText})
+				// The plan's edits, each in its file's text; the possible
+				// ones to confirm.
+				type place struct {
+					uri string
+					e   lsp.TextEdit
 				}
-				require.Len(t, edit.DocumentChanges, 1, where())
-				assert.Equal(t, c.Doc(path).Version, edit.DocumentChanges[0].TextDocument.Version)
-				require.Equal(t, want, edit.DocumentChanges[0].Edits, where())
+				var want, gotEdits []place
+				add := func(e rename.Edit) {
+					rel, err := filepath.Rel(dir, e.Path)
+					require.NoError(t, err)
+					ft := files[filepath.ToSlash(rel)]
+					r := lsp.Range{Start: lsptest.PositionOf(ft, int(e.Start), c.Encoding), End: lsptest.PositionOf(ft, int(e.End), c.Encoding)}
+					want = append(want, place{lsptest.URI(e.Path), lsp.TextEdit{Range: r, NewText: e.NewText}})
+				}
+				for _, e := range plan.Edits {
+					add(e)
+				}
+				for _, e := range plan.PossibleEdits {
+					add(e)
+				}
+				for _, dc := range edit.DocumentChanges {
+					if dc.TextDocument.URI == uri {
+						require.NotNil(t, dc.TextDocument.Version, where())
+						assert.Equal(t, c.Doc(path).Version, *dc.TextDocument.Version)
+					} else {
+						assert.Nil(t, dc.TextDocument.Version, where())
+					}
+					for _, e := range dc.Edits {
+						if len(plan.PossibleEdits) > 0 {
+							require.Contains(t, edit.ChangeAnnotations, e.AnnotationID, where())
+						}
+						e.AnnotationID = ""
+						gotEdits = append(gotEdits, place{dc.TextDocument.URI, e})
+					}
+				}
+				sortPlaces := func(ps []place) {
+					slices.SortFunc(ps, func(a, b place) int {
+						return cmp.Or(cmp.Compare(a.uri, b.uri), cmp.Compare(a.e.Range.Start.Line, b.e.Range.Start.Line),
+							cmp.Compare(a.e.Range.Start.Character, b.e.Range.Start.Character))
+					})
+				}
+				sortPlaces(want)
+				sortPlaces(gotEdits)
+				require.Equal(t, want, gotEdits, where())
+				if len(plan.Edits) > 0 && plan.Edits[0].Path != path {
+					across++
+				}
+				if len(plan.PossibleEdits) > 0 {
+					possible++
+				}
 			}
 			c.Close(path)
 		}
 		require.NoError(t, c.Shutdown())
 		assert.Greater(t, targets, 80)
 		assert.Greater(t, refused, 100)
-		t.Logf("%s: %d places, %d to rename, %d refused", c.Encoding, places, targets, refused)
+		assert.Greater(t, across, 0)
+		t.Logf("%s: %d places, %d to rename, %d refused, %d plans that edit other files, %d with possible edits",
+			c.Encoding, places, targets, refused, across, possible)
 	}
 }

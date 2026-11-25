@@ -75,6 +75,14 @@ func (r *Resolver) uses() []index.Use {
 			add(r.macro(string(f.Tok.Text(tok)), tok.Off))
 		}
 	})
+	// The calls whose function's name is made when they run, which a
+	// rename lists.
+	for _, d := range r.calls().Dynamic {
+		u := index.Use{Name: index.DynamicName, Start: d.Start, End: d.End, Kind: index.UseDynamic,
+			Aux: d.Prefix + "*" + d.Suffix}
+		r.place(&u)
+		out = append(out, u)
+	}
 	for ti, tok := range toks {
 		if tok.Kind != token.Directive {
 			continue

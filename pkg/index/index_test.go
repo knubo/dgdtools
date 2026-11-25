@@ -499,6 +499,7 @@ func TestChainFuncIsChain(t *testing.T) {
 		"std/mid.c":  "inherit \"/std/top\";\nstring mid_var;\nvoid shared() { }\nvoid later() { }\n",
 		"std/side.c": "void side() { }\nvoid later();\nvoid shared();\n",
 		"obj/leaf.c": "inherit \"/std/mid\";\nprivate inherit \"/std/side\";\nint leaf_var;\nvoid leaf() { }\nvoid only_top();\n",
+		"obj/hide.c": "private inherit \"/std/mid\";\n",
 		"obj/twin.c": "inherit \"/std/side\";\ninherit \"/std/mid\";\nvoid later();\n",
 		"obj/bad.c":  "inherit UNKNOWN;\nvoid f() { }\n",
 		"obj/lost.c": "inherit \"/std/missing\";\n",
@@ -508,9 +509,9 @@ func TestChainFuncIsChain(t *testing.T) {
 		"obj/over.c": "inherit \"/std/torn\";\n",
 		"obj/deep.c": "inherit \"/obj/lost\";\n",
 	}
-	objects := []string{"/std/top", "/std/mid", "/std/side", "/obj/leaf", "/obj/twin", "/obj/bad", "/obj/lost",
+	objects := []string{"/std/top", "/std/mid", "/std/side", "/obj/leaf", "/obj/hide", "/obj/twin", "/obj/bad", "/obj/lost",
 		"/obj/cyc1", "/obj/cyc2", "/std/torn", "/obj/over", "/obj/deep", "/std/missing"}
-	names := []string{"top_var", "shared", "only_top", "secret", "later", "side", "leaf", "f", "one", "two", "sealed", "none"}
+	names := []string{"top_var", "mid_var", "leaf_var", "shared", "only_top", "secret", "later", "side", "leaf", "f", "one", "two", "sealed", "none"}
 	flat := newLib(t, files).ix.Snapshot()
 	for _, obj := range objects {
 		s := newLib(t, files).ix.Snapshot() // nothing flattened
@@ -521,6 +522,12 @@ func TestChainFuncIsChain(t *testing.T) {
 			assert.Equal(t, wantOK, ok, "%s %s", obj, name)
 			if wantOK {
 				assert.Equal(t, *want, got, "%s %s", obj, name)
+			}
+			wantVar, wantOK := flat.Chain(obj).Vars[name]
+			gotVar, ok := s.ChainVar(obj, name)
+			assert.Equal(t, wantOK, ok, "%s %s", obj, name)
+			if wantOK {
+				assert.Equal(t, *wantVar, gotVar, "%s %s", obj, name)
 			}
 		}
 	}
