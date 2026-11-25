@@ -196,7 +196,8 @@ type Capabilities struct {
 	// Plain is a client that has nothing beyond the protocol's core: no
 	// settings to ask for, no file watchers, no related information,
 	// tags or rule links on diagnostics, edits without versions,
-	// definitions as locations and not as links.
+	// definitions as locations and not as links, hovers and signatures
+	// as plain text, a signature's parameters by their text.
 	Plain bool
 	// Options are the initializationOptions.
 	Options any
@@ -226,8 +227,14 @@ func (c *Client) Initialize(caps Capabilities, folders ...string) json.RawMessag
 		},
 	}
 	if rich {
-		params["capabilities"].(map[string]any)["textDocument"].(map[string]any)["publishDiagnostics"].(map[string]any)["tagSupport"] =
-			map[string]any{"valueSet": []int{1, 2}}
+		td := params["capabilities"].(map[string]any)["textDocument"].(map[string]any)
+		td["publishDiagnostics"].(map[string]any)["tagSupport"] = map[string]any{"valueSet": []int{1, 2}}
+		td["hover"] = map[string]any{"contentFormat": []string{lsp.Markdown, lsp.PlainText}}
+		td["signatureHelp"] = map[string]any{"contextSupport": true, "signatureInformation": map[string]any{
+			"documentationFormat":    []string{lsp.Markdown, lsp.PlainText},
+			"parameterInformation":   map[string]any{"labelOffsetSupport": true},
+			"activeParameterSupport": true,
+		}}
 	}
 	var ws []lsp.WorkspaceFolder
 	for _, f := range folders {

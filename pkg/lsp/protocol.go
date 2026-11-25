@@ -82,6 +82,18 @@ type InitializeParams struct {
 			Definition struct {
 				LinkSupport bool `json:"linkSupport"`
 			} `json:"definition"`
+			Hover struct {
+				ContentFormat []string `json:"contentFormat"`
+			} `json:"hover"`
+			SignatureHelp struct {
+				SignatureInformation struct {
+					DocumentationFormat  []string `json:"documentationFormat"`
+					ParameterInformation struct {
+						LabelOffsetSupport bool `json:"labelOffsetSupport"`
+					} `json:"parameterInformation"`
+					ActiveParameterSupport bool `json:"activeParameterSupport"`
+				} `json:"signatureInformation"`
+			} `json:"signatureHelp"`
 		} `json:"textDocument"`
 		Window struct {
 			WorkDoneProgress bool `json:"workDoneProgress"`
@@ -109,6 +121,8 @@ type ServerCapabilities struct {
 	TextDocumentSync                TextDocumentSyncOptions `json:"textDocumentSync"`
 	CodeActionProvider              *CodeActionOptions      `json:"codeActionProvider,omitempty"`
 	DefinitionProvider              bool                    `json:"definitionProvider"`
+	HoverProvider                   bool                    `json:"hoverProvider"`
+	SignatureHelpProvider           *SignatureHelpOptions   `json:"signatureHelpProvider,omitempty"`
 	DocumentFormattingProvider      bool                    `json:"documentFormattingProvider"`
 	DocumentRangeFormattingProvider bool                    `json:"documentRangeFormattingProvider"`
 	Workspace                       struct {
@@ -313,6 +327,69 @@ type LocationLink struct {
 	TargetURI            string `json:"targetUri"`
 	TargetRange          Range  `json:"targetRange"`
 	TargetSelectionRange Range  `json:"targetSelectionRange"`
+}
+
+// The kinds of a MarkupContent.
+const (
+	PlainText = "plaintext"
+	Markdown  = "markdown"
+)
+
+// MarkupContent is text for a reader, in the kind the client said it
+// shows.
+type MarkupContent struct {
+	Kind  string `json:"kind"`
+	Value string `json:"value"`
+}
+
+type HoverParams = DefinitionParams
+
+// Hover is what is told about a place; Range is the text it is about.
+type Hover struct {
+	Contents MarkupContent `json:"contents"`
+	Range    *Range        `json:"range,omitempty"`
+}
+
+// SignatureHelpOptions names the characters that, typed, make a client
+// ask for signature help, and those that make it ask again while it is
+// showing some.
+type SignatureHelpOptions struct {
+	TriggerCharacters   []string `json:"triggerCharacters"`
+	RetriggerCharacters []string `json:"retriggerCharacters"`
+}
+
+type SignatureHelpParams struct {
+	TextDocument TextDocumentIdentifier `json:"textDocument"`
+	Position     Position               `json:"position"`
+	Context      *struct {
+		IsRetrigger         bool           `json:"isRetrigger"`
+		ActiveSignatureHelp *SignatureHelp `json:"activeSignatureHelp"`
+	} `json:"context"`
+}
+
+// SignatureHelp is the declarations a call may be of. ActiveSignature
+// is the one shown first, and ActiveParameter the parameter of it that
+// the cursor's argument is for; a value past the parameters says none.
+type SignatureHelp struct {
+	Signatures      []SignatureInformation `json:"signatures"`
+	ActiveSignature int                    `json:"activeSignature"`
+	ActiveParameter int                    `json:"activeParameter"`
+}
+
+type SignatureInformation struct {
+	Label         string                 `json:"label"`
+	Documentation any                    `json:"documentation,omitempty"` // a string, or a MarkupContent
+	Parameters    []ParameterInformation `json:"parameters"`
+	// ActiveParameter is the signature's own, for a client that reads it
+	// (activeParameterSupport).
+	ActiveParameter *int `json:"activeParameter,omitempty"`
+}
+
+// ParameterInformation says where in the signature's label a parameter
+// stands: as its [start, end) in UTF-16 code units for a client that
+// reads offsets (labelOffsetSupport), else as its text.
+type ParameterInformation struct {
+	Label any `json:"label"`
 }
 
 type DocumentFormattingParams struct {

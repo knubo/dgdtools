@@ -225,3 +225,146 @@ func TestNeovimDefinition(t *testing.T) {
 	}, got.Went)
 	assert.NotContains(t, log, "level=ERROR")
 }
+
+// nvimHovers is Neovim asking about places as a user does: with the
+// cursor on a name it asks for the hover (vim.lsp.buf.hover, what K
+// does), and inside the arguments of a call for the signature
+// (vim.lsp.buf.signature_help, CTRL-S in insert mode), and writes down
+// what the window that opens says, and the parameter it marks.
+const nvimHovers = `
+local dir, out = vim.env.DGDLPC_DIR, { shown = {} }
+local ok, err = pcall(function()
+  vim.opt.runtimepath:prepend(vim.env.DGDLPC_NVIM)
+  vim.opt.runtimepath:prepend(vim.env.DGDLPC_VIM)
+  vim.cmd('filetype plugin indent on')
+  vim.lsp.config('dgdtools', { cmd = { vim.env.DGDLPC_BIN, 'lsp', '--log', dir .. '/lsp.log' } })
+  vim.lsp.enable('dgdtools')
+  vim.cmd('edit ' .. vim.fn.fnameescape(dir .. '/lib/obj/a.c'))
+  local function wait(what, cond)
+    assert(vim.wait(20000, cond, 20), 'waited in vain for ' .. what)
+  end
+  wait('the server', function()
+    local c = vim.lsp.get_clients({ bufnr = 0 })[1]
+    return c ~= nil and c.initialized
+  end)
+  local caps = vim.lsp.get_clients({ bufnr = 0 })[1].server_capabilities
+  out.hover, out.triggers = caps.hoverProvider, caps.signatureHelpProvider.triggerCharacters
+
+  -- The window that floats over the text, if there is one.
+  local function float()
+    for _, win in ipairs(vim.api.nvim_list_wins()) do
+      if vim.api.nvim_win_get_config(win).relative ~= '' then return win end
+    end
+  end
+  local function close()
+    local win = float()
+    while win do
+      vim.api.nvim_win_close(win, true)
+      win = float()
+    end
+  end
+
+  -- At the first place in the file that has the text, with the cursor so
+  -- many bytes into it: what the hover or the signature shows, and the
+  -- text marked as the parameter being written.
+  for _, at in ipairs(vim.json.decode(vim.env.DGDLPC_PLACES)) do
+    local what, text, into, nothing = at[1], at[2], at[3], at[4]
+    local row, col
+    for i, line in ipairs(vim.api.nvim_buf_get_lines(0, 0, -1, false)) do
+      local found = line:find(text, 1, true)
+      if found then row, col = i, found - 1 + into break end
+    end
+    assert(row, 'no ' .. text)
+    vim.api.nvim_win_set_cursor(0, { row, col })
+    if what == 'hover' then vim.lsp.buf.hover() else vim.lsp.buf.signature_help() end
+    vim.wait(nothing and 500 or 20000, function() return float() ~= nil end, 20)
+    local shown = { what = what, at = text }
+    local win = float()
+    if win then
+      local buf = vim.api.nvim_win_get_buf(win)
+      shown.lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
+      for _, mark in ipairs(vim.api.nvim_buf_get_extmarks(buf, -1, 0, -1, { details = true })) do
+        local d = mark[4]
+        if d.hl_group == 'LspSignatureActiveParameter' and d.end_col then
+          shown.active = vim.api.nvim_buf_get_text(buf, mark[2], mark[3], d.end_row or mark[2], d.end_col, {})[1]
+        end
+      end
+    end
+    table.insert(out.shown, shown)
+    close()
+  end
+end)
+if not ok then out.error = tostring(err) end
+vim.fn.writefile({ vim.json.encode(out) }, dir .. '/result.json')
+vim.cmd('qall!')
+`
+
+// TestNeovimHover has the Neovim on PATH show hovers and signatures
+// from the language server: a function of another file with the comment
+// above it, a kfun, a macro, a call whose receiver nobody knows, and the
+// arguments of calls, with characters of several bytes before the names.
+func TestNeovimHover(t *testing.T) {
+	files := map[string]string{
+		"lib/dgdtools.yml":  "include_dirs: [/include]\n",
+		"lib/include/std.h": "/* blåbær \U0001F600 */ #define BASE \"/std/base\"\n",
+		"lib/std/base.c":    "int weight;\n/* Sets the weight,\n   in grams. */\nvarargs void set_weight(int grams, string why...) {}\nvoid create() {}\n",
+		"lib/obj/a.c": "#include <std.h>\ninherit BASE;\n" +
+			"void create() {\n    /* først \U0001F600 */ ::create(); set_weight(1, \"a\", \"b\"); weight = strlen(\"x\"); ob->set_weight(2); nope(3);\n}\n",
+	}
+	// What is asked, the text to find, how far into it the cursor is,
+	// and whether nothing is to show.
+	t.Setenv("DGDLPC_PLACES", `[["hover", "set_weight(1", 3], ["hover", "strlen", 2], ["hover", "inherit BASE", 9], ["hover", "weight =", 1],
+		["hover", "ob->set_weight", 6], ["hover", "nope", 1, true],
+		["signature", "set_weight(1", 11], ["signature", "\"b\"", 1], ["signature", "strlen(", 7],
+		["signature", "ob->set_weight(2", 15, true], ["signature", "nope(3", 5, true]]`)
+	_, data, log := nvimRun(t, files, nvimHovers)
+	var got struct {
+		Error    string
+		Hover    bool
+		Triggers []string
+		Shown    []struct {
+			What, At, Active string
+			Lines            []string
+		}
+	}
+	require.NoError(t, json.Unmarshal(data, &got), "%s", data)
+	require.Empty(t, got.Error, "the server's log:\n%s", log)
+	assert.True(t, got.Hover)
+	assert.Equal(t, []string{"(", ","}, got.Triggers)
+	// What each window says, its lines joined; Neovim shows the Markdown
+	// as it reads it, and what it does with the marks is its own.
+	var shown []string
+	for _, s := range got.Shown {
+		line := s.What + " " + s.At + ":"
+		for _, want := range []string{
+			"varargs void set_weight(int grams, string why...)", "Sets the weight,", "in grams.", "/std/base.c:4",
+			"int strlen(string)", "return the length of a string", "kfun, DGD 1.7.9",
+			"/std/base", "int weight", "/std/base.c:1", "the receiver is not known",
+		} {
+			if strings.Contains(strings.Join(s.Lines, "\n"), want) {
+				line += " <" + want + ">"
+			}
+		}
+		if s.Active != "" {
+			line += " [" + s.Active + "]"
+		}
+		if s.Lines == nil {
+			line += " nothing"
+		}
+		shown = append(shown, line)
+	}
+	assert.Equal(t, []string{
+		"hover set_weight(1: <varargs void set_weight(int grams, string why...)> <Sets the weight,> <in grams.> </std/base.c:4> </std/base>",
+		"hover strlen: <int strlen(string)> <return the length of a string> <kfun, DGD 1.7.9>",
+		"hover inherit BASE: </std/base>",
+		"hover weight =: </std/base> <int weight> </std/base.c:1>",
+		"hover ob->set_weight: <the receiver is not known>",
+		"hover nope: nothing",
+		"signature set_weight(1: <varargs void set_weight(int grams, string why...)> <Sets the weight,> <in grams.> </std/base.c:4> </std/base> [int grams]",
+		"signature \"b\": <varargs void set_weight(int grams, string why...)> <Sets the weight,> <in grams.> </std/base.c:4> </std/base> [string why...]",
+		"signature strlen(: <int strlen(string)> <return the length of a string> <kfun, DGD 1.7.9> [string]",
+		"signature ob->set_weight(2: nothing",
+		"signature nope(3: nothing",
+	}, shown)
+	assert.NotContains(t, log, "level=ERROR")
+}

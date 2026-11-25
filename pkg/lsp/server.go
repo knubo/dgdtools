@@ -28,6 +28,7 @@ import (
 	"io"
 	"log/slog"
 	"runtime/debug"
+	"slices"
 	"sync"
 	"time"
 
@@ -212,6 +213,10 @@ type capabilities struct {
 	related, tags, href bool // what a diagnostic may carry
 	progress            bool // window/workDoneProgress
 	links               bool // a definition as LocationLinks
+	hoverMarkdown       bool // a hover as Markdown
+	// What a signature may carry: its documentation as Markdown, its
+	// parameters as offsets in the label, its own active parameter.
+	signatureMarkdown, labelOffsets, signatureActive bool
 }
 
 // encoding names the position encoding in use.
@@ -367,6 +372,18 @@ func (s *server) request(ctx context.Context, method string, params json.RawMess
 			return nil, err
 		}
 		result, err = s.definition(ctx, &p)
+	case "textDocument/hover":
+		var p HoverParams
+		if err := unmarshal(params, &p); err != nil {
+			return nil, err
+		}
+		result, err = s.hover(ctx, &p)
+	case "textDocument/signatureHelp":
+		var p SignatureHelpParams
+		if err := unmarshal(params, &p); err != nil {
+			return nil, err
+		}
+		result, err = s.signatureHelp(ctx, &p)
 	case "textDocument/formatting":
 		var p DocumentFormattingParams
 		if err := unmarshal(params, &p); err != nil {
@@ -494,7 +511,12 @@ func (s *server) initialize(params json.RawMessage) (any, error) {
 		href:            c.TextDocument.PublishDiagnostics.CodeDescriptionSupport,
 		progress:        c.Window.WorkDoneProgress,
 		links:           c.TextDocument.Definition.LinkSupport,
+		hoverMarkdown:   slices.Contains(c.TextDocument.Hover.ContentFormat, Markdown),
 	}
+	si := &c.TextDocument.SignatureHelp.SignatureInformation
+	s.caps.signatureMarkdown = slices.Contains(si.DocumentationFormat, Markdown)
+	s.caps.labelOffsets = si.ParameterInformation.LabelOffsetSupport
+	s.caps.signatureActive = si.ActiveParameterSupport
 	// A column is a byte offset wherever the client can count that way;
 	// UTF-16 is what every client can.
 	for _, e := range c.General.PositionEncodings {
@@ -527,6 +549,11 @@ func (s *server) initialize(params json.RawMessage) (any, error) {
 	res.Capabilities.PositionEncoding = s.caps.encoding()
 	res.Capabilities.TextDocumentSync = TextDocumentSyncOptions{OpenClose: true, Change: SyncIncremental}
 	res.Capabilities.DefinitionProvider = true
+	res.Capabilities.HoverProvider = true
+	// Asked for when a call is opened and at each argument; asked again
+	// when one is closed, which may leave the cursor in another's.
+	res.Capabilities.SignatureHelpProvider = &SignatureHelpOptions{
+		TriggerCharacters: []string{"(", ","}, RetriggerCharacters: []string{")"}}
 	res.Capabilities.DocumentFormattingProvider = true
 	res.Capabilities.DocumentRangeFormattingProvider = true
 	if c.TextDocument.CodeAction.CodeActionLiteralSupport != nil {

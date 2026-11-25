@@ -34,3 +34,6 @@ var SafeFixes = safeFixes
 
 // ProgressDelay is how long a scan runs before the client is shown it.
 var ProgressDelay = &progressDelay
+
+// MarkdownText writes a plain text as Markdown that shows as the text.
+var MarkdownText = markdownText

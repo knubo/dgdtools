@@ -2,7 +2,6 @@ package lsp
 
 import (
 	"context"
-	"errors"
 
 	"github.com/mmcdole/dgdtools/pkg/lint"
 )
@@ -19,14 +18,8 @@ import (
 // (dgdtools-profile://NAME/std/room.c), whose text the client asks for
 // with workspace/textDocumentContent.
 func (s *server) definition(ctx context.Context, p *DefinitionParams) (any, error) {
-	uri := p.TextDocument.URI
-	d, _, _, err := s.linted(ctx, uri)
+	d, err := s.asked(ctx, p.TextDocument.URI, "definition")
 	if d == nil || err != nil {
-		var modified *rpcError
-		if err != nil && !errors.As(err, &modified) {
-			s.log.Warn("no definition", "uri", uri, "err", err)
-			err = nil // the lint of the document says why, where it is seen
-		}
 		return nil, err
 	}
 	texts := &texts{doc: d, encoding: s.caps.encoding(), mappers: map[string]*PositionMapper{}}

@@ -86,6 +86,8 @@ exit
 <     "textDocumentSync": {"openClose": true, "change": 2},
 <     "codeActionProvider": {"codeActionKinds": ["quickfix", "source.fixAll.dgdtools"]},
 <     "definitionProvider": true,
+<     "hoverProvider": true,
+<     "signatureHelpProvider": {"triggerCharacters": ["(", ","], "retriggerCharacters": [")"]},
 <     "documentFormattingProvider": true,
 <     "documentRangeFormattingProvider": true,
 <     "workspace": {

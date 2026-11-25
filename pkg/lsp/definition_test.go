@@ -20,6 +20,22 @@ import (
 	"github.com/mmcdole/dgdtools/pkg/vfs"
 )
 
+// resolveLib is a lib with something of everything a place can name,
+// with characters that are more than a byte and more than a UTF-16 unit
+// before the names, and a file that is Latin-1 on disk.
+func resolveLib() map[string]string {
+	files := lib()
+	files["dgdtools.yml"] += "conventions:\n  call_registry:\n    add_action: { function: 0 }\n"
+	files["include/std.h"] = "/* blåbær 🫐 */ #define STD \"/std/base\"\n#define TWICE(x) ((x)+(x))\n"
+	files["std/base.c"] = "/* grøt */ int weight; /* 🥣 */ void create() {}\nint foo(int a) { return a; }\nstatic void sfn() {}\n"
+	files["std/latin.c"] = "/* gr\xf8t \xe5 */ void old() {}\nint \xe6; int age;\n"
+	files["obj/a.c"] = "#include <std.h>\ninherit STD;\ninherit l \"/std/latin\";\n" +
+		"void create() { /* først 🫐 */ ::create(); l::old(); \"/obj/b\"->bar(); this_object()->foo(1,2); call_out(\"cb\", 1);\n" +
+		"  autof(); weight = TWICE(age) + AUTO; add_action(\"sfn\", \"🥣\"); \"/obj/b\"->nofn(); x->y(); sizeof(({})); }\n" +
+		"void cb() { int weight; weight = 1; }\n"
+	return files
+}
+
 // definition asks the server where what is at the byte offset off of the
 // open document at path is declared.
 func definition(t testing.TB, c *lsptest.Client, path string, off int) []lsp.LocationLink {
@@ -39,15 +55,7 @@ func definition(t testing.TB, c *lsptest.Client, path string, off int) []lsp.Loc
 // are more than a byte and more than a UTF-16 unit before the names, and
 // a file that is Latin-1 on disk.
 func TestDefinitionIsResolve(t *testing.T) {
-	files := lib()
-	files["dgdtools.yml"] += "conventions:\n  call_registry:\n    add_action: { function: 0 }\n"
-	files["include/std.h"] = "/* blåbær 🫐 */ #define STD \"/std/base\"\n#define TWICE(x) ((x)+(x))\n"
-	files["std/base.c"] = "/* grøt */ int weight; /* 🥣 */ void create() {}\nint foo(int a) { return a; }\nstatic void sfn() {}\n"
-	files["std/latin.c"] = "/* gr\xf8t \xe5 */ void old() {}\nint \xe6; int age;\n"
-	files["obj/a.c"] = "#include <std.h>\ninherit STD;\ninherit l \"/std/latin\";\n" +
-		"void create() { /* først 🫐 */ ::create(); l::old(); \"/obj/b\"->bar(); this_object()->foo(1,2); call_out(\"cb\", 1);\n" +
-		"  autof(); weight = TWICE(age) + AUTO; add_action(\"sfn\", \"🥣\"); \"/obj/b\"->nofn(); x->y(); sizeof(({})); }\n" +
-		"void cb() { int weight; weight = 1; }\n"
+	files := resolveLib()
 	dir := tree(t, files)
 
 	fsys := vfs.OS{}

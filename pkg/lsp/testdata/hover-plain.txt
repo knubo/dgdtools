@@ -1,0 +1,132 @@
+Hover and signature help, for a client that shows plain text, counts in
+UTF-8 and reads a parameter as its text: the same answers without the
+marks.
+
+-- lib/dgdtools.yml --
+include_dirs: [/include]
+-- lib/include/std.h --
+/* Grundläggande */ #define BASE "/std/base"
+-- lib/std/base.c --
+/*
+ * Sets the weight.
+ *   1. *Not* below zero.
+ */
+varargs void set_weight(int grams, string why...) {}
+/* blåbær */ void create() {}
+-- lib/obj/a.c --
+#include <std.h>
+inherit BASE;
+void create() { /* først */ ::create(); set_weight(1, "å", "b"); ob->set_weight(2); sizeof(({ })); }
+-- script --
+initialize plain utf-8 lib
+open lib/obj/a.c
+hover lib/obj/a.c 2:33
+hover lib/obj/a.c 2:45
+hover lib/obj/a.c 1:10
+hover lib/obj/a.c 2:75
+hover lib/obj/a.c 2:88
+hover lib/obj/a.c 2:0
+signature lib/obj/a.c 2:52
+signature lib/obj/a.c 2:64
+signature lib/obj/a.c 2:95
+signature lib/obj/a.c 2:82
+shutdown
+exit
+-- transcript --
+> initialize plain utf-8 lib
+< {
+<   "capabilities": {
+<     "positionEncoding": "utf-8",
+<     "textDocumentSync": {"openClose": true, "change": 2},
+<     "codeActionProvider": {"codeActionKinds": ["quickfix", "source.fixAll.dgdtools"]},
+<     "definitionProvider": true,
+<     "hoverProvider": true,
+<     "signatureHelpProvider": {"triggerCharacters": ["(", ","], "retriggerCharacters": [")"]},
+<     "documentFormattingProvider": true,
+<     "documentRangeFormattingProvider": true,
+<     "workspace": {
+<       "workspaceFolders": {"supported": true, "changeNotifications": true},
+<       "textDocumentContent": {"schemes": ["dgdtools-profile"]}
+<     }
+<   },
+<   "serverInfo": {"name": "dgdtools", "version": "test"}
+< }
+> open lib/obj/a.c
+> hover lib/obj/a.c 2:33
+< {
+<   "contents": {"kind": "plaintext", "value": "void create()\n\nblåbær\n\n/std/base.c:6"},
+<   "range": {"start": {"line": 2, "character": 31}, "end": {"line": 2, "character": 37}}
+< }
+> hover lib/obj/a.c 2:45
+< {
+<   "contents": {
+<     "kind": "plaintext",
+<     "value": "varargs void set_weight(int grams, string why...)\n\nSets the weight.\n  1. *Not* below zero.\n\n/std/base.c:5"
+<   },
+<   "range": {"start": {"line": 2, "character": 41}, "end": {"line": 2, "character": 51}}
+< }
+> hover lib/obj/a.c 1:10
+< {
+<   "contents": {"kind": "plaintext", "value": "object /std/base\n\n/std/base.c"},
+<   "range": {"start": {"line": 1, "character": 8}, "end": {"line": 1, "character": 12}}
+< }
+> hover lib/obj/a.c 2:75
+< {
+<   "contents": {
+<     "kind": "plaintext",
+<     "value": "function set_weight\n\nthe receiver is not known: which object's function this calls cannot be told"
+<   },
+<   "range": {"start": {"line": 2, "character": 71}, "end": {"line": 2, "character": 81}}
+< }
+> hover lib/obj/a.c 2:88
+< {
+<   "contents": {
+<     "kind": "plaintext",
+<     "value": "int sizeof(mixed *)\n\nreturn the size of an array\n\nkfun, DGD 1.7.9"
+<   },
+<   "range": {"start": {"line": 2, "character": 86}, "end": {"line": 2, "character": 92}}
+< }
+> hover lib/obj/a.c 2:0
+< null
+> signature lib/obj/a.c 2:52
+< {
+<   "signatures": [
+<     {
+<       "label": "varargs void set_weight(int grams, string why...)",
+<       "documentation": "Sets the weight.\n  1. *Not* below zero.\n\n/std/base.c:5",
+<       "parameters": [{"label": "int grams"}, {"label": "string why..."}]
+<     }
+<   ],
+<   "activeSignature": 0,
+<   "activeParameter": 0
+< }
+> signature lib/obj/a.c 2:64
+< {
+<   "signatures": [
+<     {
+<       "label": "varargs void set_weight(int grams, string why...)",
+<       "documentation": "Sets the weight.\n  1. *Not* below zero.\n\n/std/base.c:5",
+<       "parameters": [{"label": "int grams"}, {"label": "string why..."}]
+<     }
+<   ],
+<   "activeSignature": 0,
+<   "activeParameter": 1
+< }
+> signature lib/obj/a.c 2:95
+< {
+<   "signatures": [
+<     {
+<       "label": "int sizeof(mixed *)",
+<       "documentation": "return the size of an array\n\nkfun, DGD 1.7.9",
+<       "parameters": [{"label": "mixed *"}]
+<     }
+<   ],
+<   "activeSignature": 0,
+<   "activeParameter": 0
+< }
+> signature lib/obj/a.c 2:82
+< null
+> shutdown
+< null
+> exit
+< "the server exited after shutdown"

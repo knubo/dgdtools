@@ -40,6 +40,8 @@ var update = flag.Bool("update", false, "rewrite the transcripts in testdata")
 //	apply N                      make the edit of the Nth action of those
 //	format FILE [L:C-L:C]        (range) formatting, and make the edits
 //	definition FILE L:C          textDocument/definition
+//	hover FILE L:C               textDocument/hover
+//	signature FILE L:C           textDocument/signatureHelp
 //	text FILE                    the editor's text
 //	write FILE "TEXT" | remove FILE         on disk
 //	watched created|changed|deleted FILE ...
@@ -301,13 +303,14 @@ func (p *player) play(script string) string {
 				c.Apply(p.path(arg[0]), edits)
 				p.showText(c.Doc(p.path(arg[0])).Text)
 			}
-		case "definition":
+		case "definition", "hover", "signature":
 			var pos lsp.Position
 			_, err := fmt.Sscanf(arg[1], "%d:%d", &pos.Line, &pos.Character)
 			require.NoError(t, err, line)
 			params := lsp.DefinitionParams{TextDocument: lsp.TextDocumentIdentifier{URI: lsptest.URI(p.path(arg[0]))}, Position: pos}
 			var result json.RawMessage
-			if err := c.Call("textDocument/definition", params, &result); err != nil {
+			method := map[string]string{"definition": "textDocument/definition", "hover": "textDocument/hover", "signature": "textDocument/signatureHelp"}[cmd]
+			if err := c.Call(method, params, &result); err != nil {
 				p.show(err.Error())
 				break
 			}
