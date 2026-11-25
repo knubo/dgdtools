@@ -109,6 +109,13 @@ type Table struct {
 // Predefined are the macros the DGD preprocessor defines itself.
 var Predefined = []string{"__DGD__", "__FILE__", "__LINE__", "__DATE__", "__TIME__"}
 
+// Directives are the names the DGD preprocessor knows after '#'. Any
+// other is its "undefined control" error.
+var Directives = []string{
+	"define", "elif", "else", "endif", "error", "if", "ifdef", "ifndef",
+	"include", "line", "pragma", "undef",
+}
+
 // SplitDirective returns a directive's name ("define", "include", ...) and
 // the rest of its logical line with comments removed and continuations
 // joined.

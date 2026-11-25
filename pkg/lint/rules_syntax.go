@@ -170,10 +170,13 @@ var ruleIncludeNotFound = &Rule{
 	},
 }
 
-var knownDirectives = map[string]bool{
-	"if": true, "ifdef": true, "ifndef": true, "elif": true, "else": true, "endif": true,
-	"define": true, "undef": true, "include": true, "line": true, "pragma": true, "error": true,
-}
+var knownDirectives = func() map[string]bool {
+	m := make(map[string]bool, len(pp.Directives))
+	for _, name := range pp.Directives {
+		m[name] = true
+	}
+	return m
+}()
 
 var ruleBadDirective = &Rule{
 	Code: "E007", Name: "bad-directive", Group: GroupSyntax,
