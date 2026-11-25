@@ -517,10 +517,28 @@ type Linter struct {
 	baselines sync.Map // path -> *baselineFile
 }
 
+// LinterOption is an option of New.
+type LinterOption func(*linterOptions)
+
+type linterOptions struct{ lintOnly bool }
+
+// LintOnly makes a linter for linting only: its index keeps no Uses, the
+// places each file names other files' functions, variables, macros and
+// objects at, which a search for references (Document.References) and a
+// rename across files read; those find nothing in other files. No rule
+// needs them, and reading them is a third of what a run over a whole lib
+// allocates (on the VikingMUD lib some 140 MB kept, 4 GB allocated and a
+// fifth of the time). The command line's lint is such a run.
+func LintOnly() LinterOption { return func(o *linterOptions) { o.lintOnly = true } }
+
 // New creates a linter for the project. It fails on a configuration that
 // is not valid: what Config.Validate reports, and rule settings that name
 // unknown rules or options.
-func New(prj *config.Project, fsys vfs.FS) (*Linter, error) {
+func New(prj *config.Project, fsys vfs.FS, opts ...LinterOption) (*Linter, error) {
+	var o linterOptions
+	for _, opt := range opts {
+		opt(&o)
+	}
 	l := &Linter{project: prj, fs: fsys, rules: Rules(), byKey: map[string][]*Rule{}, failOn: diag.Error}
 	for _, r := range l.rules {
 		l.byKey[r.Name] = []*Rule{r}
@@ -550,9 +568,14 @@ func New(prj *config.Project, fsys vfs.FS) (*Linter, error) {
 	if l.kfuns, err = cfg.Kfuns(); err != nil {
 		return nil, fmt.Errorf("dialect.kfuns: %w", err)
 	}
-	// Every unit keeps the places its file names other files' functions,
-	// variables, macros and objects at, for a search for references.
-	l.index = index.Open(prj, fsys, index.WithUses(resolve.Extractor(l.registry)))
+	// Unless LintOnly, every unit keeps the places its file names other
+	// files' functions, variables, macros and objects at, for a search for
+	// references.
+	var uses []index.Option
+	if !o.lintOnly {
+		uses = append(uses, index.WithUses(resolve.Extractor(l.registry)))
+	}
+	l.index = index.Open(prj, fsys, uses...)
 	return l, nil
 }
 
@@ -682,7 +705,11 @@ func (l *Linter) Run(ctx context.Context, req Request) (*Result, error) {
 	// the first pass declines those questions instead of starting the
 	// scan, and only the files that had one are linted again once the
 	// scan is complete: each file is parsed once, a few of them twice.
-	docs := make([]*Document, len(files))
+	//
+	// What a file comes to is kept until the run is over, as its findings
+	// and counts only: the files that wait for the scan are anywhere in
+	// the lib, and the results are in the order of the files.
+	results := make([]fileResult, len(files))
 	order := make([]int, len(files))
 	for i := range order {
 		order[i] = i
@@ -690,26 +717,25 @@ func (l *Linter) Run(ctx context.Context, req Request) (*Result, error) {
 	// A file that cannot be linted is the file's error, and the run goes
 	// on. A nested configuration file that is not valid fails the run:
 	// its files would otherwise be linted by settings nobody chose.
-	errs := make([]*FileError, len(files))
 	var failed atomic.Pointer[error]
 	lintInto := func(i int, opt *Options) {
 		d, err := l.lintFile(ctx, s, files[i], sel, opt)
 		var fe *FileError
 		switch {
 		case errors.As(err, &fe):
-			docs[i], errs[i] = nil, fe
+			results[i] = fileResult{err: fe}
 		case err != nil:
 			failed.CompareAndSwap(nil, &err)
 		default:
-			docs[i], errs[i] = d.release(), nil
+			results[i] = fileResult{linted: true, diags: d.Diagnostics, errs: d.Errors, stats: d.stats, needsScan: d.NeedsScan}
 		}
 	}
 	first := req.Options
 	first.NoScan = true
 	par.Each(ctx, order, func(i int) { lintInto(i, &first) })
 	var again []int
-	for i, d := range docs {
-		if d != nil && d.NeedsScan {
+	for i, r := range results {
+		if r.needsScan {
 			again = append(again, i)
 		}
 	}
@@ -722,17 +748,24 @@ func (l *Linter) Run(ctx context.Context, req Request) (*Result, error) {
 	}
 	res.NeedsScan = len(again) > 0
 
+	n := 0
+	for _, r := range results {
+		n += len(r.diags)
+	}
 	reported := map[string]bool{}
-	for i, d := range docs {
-		if e := errs[i]; e != nil {
-			res.Errors = append(res.Errors, e)
-			reported[e.Path] = true
+	res.Diagnostics = make([]diag.Diagnostic, 0, n)
+	for i := range results {
+		r := &results[i]
+		if r.err != nil {
+			res.Errors = append(res.Errors, r.err)
+			reported[r.err.Path] = true
 		}
-		if d != nil {
-			res.Diagnostics = append(res.Diagnostics, d.Diagnostics...)
-			res.Stats.add(d.stats)
-			res.Errors = append(res.Errors, d.Errors...)
+		if r.linted {
+			res.Diagnostics = append(res.Diagnostics, r.diags...)
+			res.Stats.add(r.stats)
+			res.Errors = append(res.Errors, r.errs...)
 		}
+		*r = fileResult{} // in res now
 	}
 	// A file that crashed while it was read on another's behalf (a
 	// parent, a call target) made that other's answers unknown.
@@ -758,10 +791,16 @@ func (l *Linter) Run(ctx context.Context, req Request) (*Result, error) {
 	return res, ctx.Err()
 }
 
-// release drops what a run over many files must not keep in memory.
-func (d *Document) release() *Document {
-	d.Snapshot, d.File, d.Tree, d.Env, d.resolver = nil, nil, nil, nil, nil
-	return d
+// fileResult is what a run keeps of one file: the file's error when it
+// was not linted, else its findings, the rules that crashed on it and its
+// counts.
+type fileResult struct {
+	err       *FileError
+	linted    bool
+	needsScan bool
+	diags     []diag.Diagnostic
+	errs      []*FileError
+	stats     fileStats
 }
 
 // Lint lints the file at path (absolute) against the current generation

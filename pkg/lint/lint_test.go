@@ -128,6 +128,25 @@ func TestMinilibSeededBugs(t *testing.T) {
 	assert.Greater(t, res.Stats.UnresolvedInherits, 0)
 }
 
+// A linter that only lints keeps no Uses, and finds what any other
+// does: with every rule on the minilib, the same findings in the same
+// order.
+func TestLintOnly(t *testing.T) {
+	prj := minilibProject(t)
+	req := lint.Request{Options: lint.Options{Select: []string{"all"}}}
+	want := run(t, prj, vfs.OS{}, req)
+	l, err := lint.New(prj, vfs.OS{}, lint.LintOnly())
+	require.NoError(t, err)
+	got, err := l.Run(context.Background(), req)
+	require.NoError(t, err)
+	require.NotEmpty(t, got.Diagnostics)
+	assert.Equal(t, want.Diagnostics, got.Diagnostics)
+	assert.Equal(t, want.Stats, got.Stats)
+	u := l.Index().Snapshot().Unit("/obj/user")
+	require.NotNil(t, u)
+	assert.False(t, u.HasUses())
+}
+
 func TestOptInRulesAndSuppression(t *testing.T) {
 	res := run(t, minilibProject(t), vfs.OS{}, lint.Request{Options: lint.Options{Enable: []string{"missing-visibility", "raw-inherit-path", "unresolved-inherit", "C006"}}})
 	got := keys(res.Diagnostics)

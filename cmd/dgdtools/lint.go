@@ -99,7 +99,7 @@ func lintCmd(ctx context.Context, args []string, stdin io.Reader, stdout, stderr
 			paths[i] = p.abs(path)
 		}
 	}
-	l, err := newLinter(p, &project, paths)
+	l, err := newLinter(p, &project, paths, lint.LintOnly())
 	if err != nil {
 		return fail(err)
 	}
@@ -212,12 +212,12 @@ func exitCode(res *lint.Result, threshold diag.Severity, exitZero bool) int {
 }
 
 // newLinter discovers the one project of the paths and makes its linter.
-func newLinter(p process, project *projectFlags, paths []string) (*lint.Linter, error) {
+func newLinter(p process, project *projectFlags, paths []string, opts ...lint.LinterOption) (*lint.Linter, error) {
 	prj, err := config.Discover(p.fsys, paths, project.discover(p))
 	if err != nil {
 		return nil, err
 	}
-	return lint.New(prj, p.fsys)
+	return lint.New(prj, p.fsys, opts...)
 }
 
 func split(s string) []string {
