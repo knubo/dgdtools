@@ -169,6 +169,10 @@ const (
 	// NoteUnplacedCheckout: a partial checkout whose place in the lib is
 	// not known; references between its own files are not checked.
 	NoteUnplacedCheckout NoteKind = "unplaced-checkout"
+	// NoteUnread: a file the project is configured by (a profile, the
+	// driver's configuration) could not be read, and a caller that needs
+	// the settings only went without it.
+	NoteUnread NoteKind = "unread"
 	// NoteNestedProject: a directory below the project has a root config
 	// of its own and is another project; its files were passed over.
 	NoteNestedProject NoteKind = "nested-project"

@@ -5,12 +5,18 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
+	"path/filepath"
+	"slices"
 	"strings"
+
+	"github.com/pmezard/go-difflib/difflib"
 
 	"github.com/mmcdole/dgdtools/pkg/config"
 	"github.com/mmcdole/dgdtools/pkg/diag"
 	"github.com/mmcdole/dgdtools/pkg/lint"
+	"github.com/mmcdole/dgdtools/pkg/rename"
 	"github.com/mmcdole/dgdtools/pkg/report"
 	"github.com/mmcdole/dgdtools/pkg/vfs"
 )
@@ -20,9 +26,10 @@ const lintUsage = `usage: dgdtools lint [flags] [path ...]
 
 Lints the named files and the .c files under the named directories: the
 objects, with the headers they include read as part of them. A header
-named by itself is linted on its own. With no path, the whole project:
-the mudlib root of the nearest dgdtools.yml at or above the working
-directory. Without a dgdtools.yml only file-local rules run. A wizard
+named by itself is linted on its own. With no path, the working
+directory. Either way the project is the nearest dgdtools.yml at or
+above the paths, and the files are checked against its whole mudlib.
+Without a dgdtools.yml only file-local rules run. A wizard
 with only their own folder puts "profile: NAME" in a dgdtools.yml there
 (or passes --profile).
 
@@ -30,6 +37,12 @@ with only their own folder puts "profile: NAME" in a dgdtools.yml there
 file, in that file's project, in place of what is on disk (an editor's
 unsaved buffer); without, it has no place in a mudlib and file-local rules
 run.
+
+--fix applies the safe fixes (those that keep what the code means, as an
+editor's "fix all" does), linting again until none is left, writes the
+files and reports what is left; --fix --diff prints the fixes as diffs
+and writes nothing (exit 1 when there are some). With "-", --fix prints
+the text fixed and reports on standard error.
 
 Exit codes: 0 no findings at or above the fail-on severity, 1 findings,
 2 usage or configuration error, or an internal error on some file. A file
@@ -46,15 +59,16 @@ func lintCmd(ctx context.Context, args []string, stdin io.Reader, stdout, stderr
 		failOn, baseline           string
 		writeBaseline, noBaseline  bool
 		local, stats, quiet, exit0 bool
+		fix, diff                  bool
 		maxPerFile                 int
 	)
 	fs := newFlags("lint", lintUsage, stderr)
 	project.register(fs)
-	fs.StringVar(&format, "output-format", "human", "how findings are written: "+strings.Join(report.Formats, ", ")+" (a `format`)")
+	fs.StringVar(&format, "output-format", "human", "write findings in this `format`: "+strings.Join(report.Formats, ", "))
 	fs.StringVar(&output, "output", "", "write findings to `file` instead of standard output")
 	fs.StringVar(&output, "o", "", "short for --output")
 	fs.StringVar(&stdinName, "stdin-filename", "", "lint standard input as the file `path` (which need not exist): its project, its settings, its name in the output")
-	fs.StringVar(&sel, "select", "", "run only these `rules` (names, codes or groups, comma-separated)")
+	fs.StringVar(&sel, "select", "", "run only these `rules` (names, codes, groups or a group's letter, comma-separated)")
 	fs.StringVar(&enable, "enable", "", "also run these `rules`")
 	fs.StringVar(&ignore, "ignore", "", "do not run these `rules`")
 	fs.StringVar(&failOn, "fail-on", "", "exit 1 at this `severity` or above: info, warning, error (default error)")
@@ -67,6 +81,8 @@ func lintCmd(ctx context.Context, args []string, stdin io.Reader, stdout, stderr
 	fs.BoolVar(&quiet, "quiet", false, "no summary on standard error")
 	fs.BoolVar(&quiet, "q", false, "short for --quiet")
 	fs.BoolVar(&exit0, "exit-zero", false, "exit 0 even when there are findings")
+	fs.BoolVar(&fix, "fix", false, "apply the safe fixes, and report what is left")
+	fs.BoolVar(&diff, "diff", false, "with --fix: print the fixes as unified diffs and write nothing")
 	paths, code, done := parse(fs, args)
 	if done {
 		return code
@@ -81,6 +97,10 @@ func lintCmd(ctx context.Context, args []string, stdin io.Reader, stdout, stderr
 	switch {
 	case err != nil:
 		return fail(err)
+	case diff && !fix:
+		return fail(errors.New("--diff shows what --fix would do: give both"))
+	case fix && writeBaseline:
+		return fail(errors.New("--fix and --write-baseline cannot be combined"))
 	case fromStdin && writeBaseline:
 		return fail(errors.New("--write-baseline records the findings of files, not of standard input"))
 	case fromStdin:
@@ -94,10 +114,22 @@ func lintCmd(ctx context.Context, args []string, stdin io.Reader, stdout, stderr
 		buffer := vfs.NewOverlay(p.fsys)
 		buffer.Set(stdinPath, src)
 		p.fsys, paths = buffer, []string{stdinPath}
+	case len(paths) == 0:
+		// The working directory, as ruff and biome have it; the project
+		// is still found upward, and its whole lib read for what files
+		// say of each other.
+		paths = []string{p.wd}
 	default:
 		for i, path := range paths {
 			paths[i] = p.abs(path)
 		}
+	}
+	// Fixes are made in an overlay, which each pass lints again; the
+	// files are written, or their diffs printed, at the end.
+	var fixed *vfs.Overlay
+	if fix {
+		fixed = vfs.NewOverlay(p.fsys)
+		p.fsys = fixed
 	}
 	l, err := newLinter(p, &project, paths, lint.LintOnly())
 	if err != nil {
@@ -118,7 +150,7 @@ func lintCmd(ctx context.Context, args []string, stdin io.Reader, stdout, stderr
 	if writeBaseline {
 		maxPerFile = -1 // a baseline holds every finding
 	}
-	res, err := l.Run(ctx, lint.Request{Paths: paths, Options: lint.Options{
+	req := lint.Request{Paths: paths, Options: lint.Options{
 		Select:     split(sel),
 		Enable:     split(enable),
 		Disable:    split(ignore),
@@ -126,9 +158,21 @@ func lintCmd(ctx context.Context, args []string, stdin io.Reader, stdout, stderr
 		Baseline:   baseline,
 		NoBaseline: noBaseline || writeBaseline,
 		MaxPerFile: maxPerFile,
-	}})
+	}}
+	res, err := l.Run(ctx, req)
 	if err != nil {
 		return fail(err)
+	}
+	var fixes fixRun
+	if fix {
+		if fixes, res, err = fixAll(ctx, l, fixed, req, res); err != nil {
+			return fail(err)
+		}
+	}
+	if fromStdin && stdinName == "" {
+		// The note below says it of standard input, and how to say where
+		// it belongs.
+		res.Notes = slices.DeleteFunc(res.Notes, func(n diag.Note) bool { return n.Kind == diag.NoteOutsideLib })
 	}
 
 	if writeBaseline {
@@ -150,11 +194,32 @@ func lintCmd(ctx context.Context, args []string, stdin io.Reader, stdout, stderr
 			return fail(err)
 		}
 		if !quiet {
-			fmt.Fprintf(stderr, "wrote %d finding(s) to %s\n", len(res.Diagnostics), path)
+			fmt.Fprintf(stderr, "wrote %s to %s\n", rename.Plural(len(res.Diagnostics), "finding"), path)
 		}
 		return 0
 	}
 
+	if fix && (diff || fromStdin) {
+		// The fixes are the output: the diffs, or the text fixed.
+		if err := fixes.show(stdout, fixed, p, diff, stdinPath); err != nil {
+			return fail(err)
+		}
+		if diff {
+			if !quiet {
+				fmt.Fprintf(stderr, "%s would be made in %s (--fix without --diff makes them)\n",
+					fixCount(fixes.n), rename.Plural(len(fixes.changed), "file"))
+			}
+			if len(fixes.changed) > 0 && !exit0 {
+				return 1
+			}
+			return 0
+		}
+		stdout = stderr // what is left of standard input's findings
+	} else if fix {
+		if err := fixes.write(fixed); err != nil {
+			return fail(err)
+		}
+	}
 	out := stdout
 	if output != "" {
 		f, err := os.Create(output)
@@ -175,6 +240,9 @@ func lintCmd(ctx context.Context, args []string, stdin io.Reader, stdout, stderr
 			fmt.Fprintln(stderr, "note: standard input has no place in the mudlib: file-local rules only (--stdin-filename says where it belongs)")
 		}
 		report.Summary(stderr, res, ropt, stats)
+		if fix && !diff && fixes.n > 0 {
+			fmt.Fprintf(stderr, "%s made in %s\n", fixCount(fixes.n), rename.Plural(len(fixes.changed), "file"))
+		}
 	}
 	if crash := internalError(res); crash != nil && quiet {
 		fail(crash) // the summary would have said it
@@ -225,4 +293,106 @@ func split(s string) []string {
 		return nil
 	}
 	return strings.Split(s, ",")
+}
+
+// fixRun is what --fix made: how many fixes, and the files they changed
+// with their texts before.
+type fixRun struct {
+	n       int
+	changed map[string][]byte
+}
+
+// fixAll applies the safe fixes of a run's findings in the overlay and
+// lints the files again, until no safe fix is left (a fix that would
+// change what another changes waits for the next pass) or ten passes are
+// made. It returns what was fixed and the last run.
+func fixAll(ctx context.Context, l *lint.Linter, fs *vfs.Overlay, req lint.Request, res *lint.Result) (fixRun, *lint.Result, error) {
+	run := fixRun{changed: map[string][]byte{}}
+	for pass := 0; pass < 10; pass++ {
+		byPath := map[string][]diag.Diagnostic{}
+		for _, d := range res.Diagnostics {
+			byPath[d.Path] = append(byPath[d.Path], d)
+		}
+		var touched []string
+		for _, path := range slices.Sorted(maps.Keys(byPath)) {
+			edits, n := diag.SafeEdits(byPath[path])
+			if n == 0 {
+				continue
+			}
+			src, err := fs.ReadFile(path)
+			if err != nil {
+				return run, nil, err
+			}
+			out, ok := diag.Apply(src, edits)
+			if !ok {
+				return run, nil, fmt.Errorf("%s: the fixes overlap (please report)", path)
+			}
+			if _, ok := run.changed[path]; !ok {
+				run.changed[path] = src
+			}
+			fs.Set(path, out)
+			touched = append(touched, path)
+			run.n += n
+		}
+		if len(touched) == 0 {
+			break
+		}
+		l.Invalidate(touched...)
+		var err error
+		if res, err = l.Run(ctx, req); err != nil {
+			return run, nil, err
+		}
+	}
+	return run, res, nil
+}
+
+// write writes the files the fixes changed.
+func (r fixRun) write(fs *vfs.Overlay) error {
+	for _, path := range slices.Sorted(maps.Keys(r.changed)) {
+		out, err := fs.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		if err := writeFile(path, out); err != nil {
+			return fmt.Errorf("%s: %w", path, err)
+		}
+	}
+	return nil
+}
+
+// show prints the fixes: as unified diffs of the files they change, or,
+// without diff, the text of standard input (stdin), fixed.
+func (r fixRun) show(w io.Writer, fs *vfs.Overlay, p process, diff bool, stdin string) error {
+	if !diff {
+		out, err := fs.ReadFile(stdin)
+		if err == nil {
+			_, err = w.Write(out)
+		}
+		return err
+	}
+	for _, path := range slices.Sorted(maps.Keys(r.changed)) {
+		out, err := fs.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		name := path
+		if rel, err := filepath.Rel(p.wd, path); err == nil && !strings.HasPrefix(rel, "..") {
+			name = filepath.ToSlash(rel)
+		}
+		text, err := difflib.GetUnifiedDiffString(difflib.UnifiedDiff{
+			A: diffLines(r.changed[path]), FromFile: name, B: diffLines(out), ToFile: name, Context: 3})
+		if err != nil {
+			return err
+		}
+		io.WriteString(w, text)
+	}
+	return nil
+}
+
+// fixCount says how many fixes there are: "1 fix", "2 fixes".
+func fixCount(n int) string {
+	if n == 1 {
+		return "1 fix"
+	}
+	return fmt.Sprintf("%d fixes", n)
 }

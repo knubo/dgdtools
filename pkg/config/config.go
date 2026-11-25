@@ -14,17 +14,22 @@ package config
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"maps"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"slices"
 	"strings"
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/mmcdole/dgdtools/internal/fuzzy"
+
 	"github.com/mmcdole/dgdtools/pkg/diag"
+	"github.com/mmcdole/dgdtools/pkg/fileset"
 	"github.com/mmcdole/dgdtools/pkg/kfun"
 	"github.com/mmcdole/dgdtools/pkg/pp"
 	"github.com/mmcdole/dgdtools/pkg/profile"
@@ -326,7 +331,7 @@ func readHeader(fs vfs.FS, path string) (*header, []byte, error) {
 	}
 	h := &header{}
 	if err := yaml.Unmarshal(data, h); err != nil {
-		return nil, nil, fmt.Errorf("%s: %w", path, err)
+		return nil, nil, fmt.Errorf("%s: %w", path, yamlError(err))
 	}
 	return h, data, nil
 }
@@ -368,7 +373,7 @@ func loadInto(fs vfs.FS, path string, c *Config, seen map[string]bool) error {
 	dec := yaml.NewDecoder(bytes.NewReader(data))
 	dec.KnownFields(true)
 	if err := dec.Decode(c); err != nil && err != io.EOF {
-		return fmt.Errorf("%s: %w", path, err)
+		return fmt.Errorf("%s: %w", path, yamlError(err))
 	}
 	// What this file says about being a scope is what counts, whatever
 	// the files it extends are.
@@ -414,6 +419,11 @@ func (c *Config) Validate() error {
 		if len(o.Paths) == 0 {
 			return fmt.Errorf("%s: no paths: an override says which files it is for", where)
 		}
+		for _, p := range o.Paths {
+			if err := fileset.CheckGlob(p); err != nil {
+				return fmt.Errorf("%s.paths: %w", where, err)
+			}
+		}
 		if err := checkRules(where+".rules", o.Rules); err != nil {
 			return err
 		}
@@ -422,6 +432,21 @@ func (c *Config) Validate() error {
 		return c.validateScope()
 	}
 
+	for _, p := range c.Exclude {
+		if err := fileset.CheckGlob(p); err != nil {
+			return fmt.Errorf("exclude: %w", err)
+		}
+	}
+	for _, key := range []struct {
+		name  string
+		globs []string
+	}{{"profile_build.share", c.ProfileBuild.Share}, {"profile_build.omit", c.ProfileBuild.Omit}, {"conventions.virtual_paths", c.Conventions.VirtualPaths}} {
+		for _, p := range key.globs {
+			if err := fileset.CheckGlob(p); err != nil {
+				return fmt.Errorf("%s: %w", key.name, err)
+			}
+		}
+	}
 	if v := c.Lint.FailOn; v != "" {
 		if _, ok := diag.ParseSeverity(v); !ok {
 			return fmt.Errorf("lint.fail_on: unknown severity %q (want info, warning or error)", v)
@@ -648,3 +673,85 @@ func (c *Config) MacroClasses() map[string]pp.Class {
 	}
 	return m
 }
+
+// yamlError says what is wrong with a configuration file in its own words,
+// not in the decoder's: a key that is not one ("field fromat not found in
+// type config.Config") with the key it was likely meant for, a value of
+// the wrong kind ("cannot unmarshal !!seq into string").
+func yamlError(err error) error {
+	var te *yaml.TypeError
+	if !errors.As(err, &te) {
+		return errors.New(strings.TrimPrefix(err.Error(), "yaml: "))
+	}
+	msgs := make([]string, len(te.Errors))
+	for i, m := range te.Errors {
+		msgs[i] = yamlMessage(m)
+	}
+	return errors.New(strings.Join(msgs, "; "))
+}
+
+var (
+	unknownField = regexp.MustCompile(`^(line \d+: )?field (\S+) not found in type (\S+)$`)
+	wrongKind    = regexp.MustCompile("^(line \\d+: )?cannot unmarshal (!!\\w+)(?: `([^`]*)`)? into (\\S+)$")
+)
+
+// yamlMessage rewords one of the decoder's messages.
+func yamlMessage(m string) string {
+	if p := unknownField.FindStringSubmatch(m); p != nil {
+		msg := fmt.Sprintf("%sunknown key %q", p[1], p[2])
+		if near := fuzzy.Nearest(p[2], yamlKeys[p[3]]); near != "" {
+			msg += fmt.Sprintf(" (did you mean %q?)", near)
+		}
+		return msg
+	}
+	if p := wrongKind.FindStringSubmatch(m); p != nil {
+		got := map[string]string{"!!seq": "a list", "!!map": "a mapping", "!!str": "a string", "!!int": "a number",
+			"!!float": "a number", "!!bool": "true or false", "!!null": "nothing"}[p[2]]
+		if got == "" {
+			got = p[2]
+		}
+		if p[3] != "" {
+			got += " (" + p[3] + ")"
+		}
+		want := "a mapping"
+		switch t := p[4]; {
+		case t == "string":
+			want = "a string"
+		case strings.HasPrefix(t, "int") || strings.HasPrefix(t, "uint") || t == "float64":
+			want = "a number"
+		case t == "bool":
+			want = "true or false"
+		case strings.HasPrefix(t, "[]"):
+			want = "a list"
+		}
+		return fmt.Sprintf("%swant %s here, not %s", p[1], want, got)
+	}
+	return m
+}
+
+// yamlKeys are the keys of each type a configuration file is decoded
+// into, by the type's name as the decoder gives it.
+var yamlKeys = func() map[string][]string {
+	m := map[string][]string{}
+	var add func(t reflect.Type)
+	add = func(t reflect.Type) {
+		for t.Kind() == reflect.Pointer || t.Kind() == reflect.Slice || t.Kind() == reflect.Map {
+			t = t.Elem()
+		}
+		if t.Kind() != reflect.Struct || m[t.String()] != nil {
+			return
+		}
+		m[t.String()] = []string{}
+		for i := range t.NumField() {
+			f := t.Field(i)
+			name, _, _ := strings.Cut(f.Tag.Get("yaml"), ",")
+			if name == "" || name == "-" {
+				continue
+			}
+			m[t.String()] = append(m[t.String()], name)
+			add(f.Type)
+		}
+	}
+	add(reflect.TypeOf(Config{}))
+	return m
+}()

@@ -117,42 +117,11 @@ func (s *server) codeAction(ctx context.Context, p *CodeActionParams) ([]CodeAct
 		}
 	}
 	if wants(p.Context.Only, KindFixAll) {
-		if all := safeFixes(d.Diagnostics); len(all) > 0 {
+		if all, _ := diag.SafeEdits(d.Diagnostics); len(all) > 0 {
 			actions = append(actions, CodeAction{Title: "Fix all safely fixable problems", Kind: KindFixAll, Edit: edit(all)})
 		}
 	}
 	return actions, nil
-}
-
-// safeFixes returns the edits of every safe fix of ds, in the order of
-// the text. Of two fixes that would change the same text the first is
-// taken; the other is there again when the document is next linted.
-func safeFixes(ds []diag.Diagnostic) []diag.TextEdit {
-	var fixes []diag.Fix
-	for _, d := range ds {
-		for _, fix := range d.Fixes {
-			if fix.Applicability == diag.Safe && len(fix.Edits) > 0 {
-				fixes = append(fixes, fix)
-			}
-		}
-	}
-	first := func(f diag.Fix) uint32 {
-		return slices.MinFunc(f.Edits, func(a, b diag.TextEdit) int { return int(a.Start) - int(b.Start) }).Start
-	}
-	slices.SortStableFunc(fixes, func(a, b diag.Fix) int { return int(first(a)) - int(first(b)) })
-	var all []diag.TextEdit
-	for _, fix := range fixes {
-		clash := slices.ContainsFunc(fix.Edits, func(e diag.TextEdit) bool {
-			return slices.ContainsFunc(all, func(have diag.TextEdit) bool {
-				return e.Start < have.End && have.Start < e.End || e.Start == have.Start
-			})
-		})
-		if !clash {
-			all = append(all, fix.Edits...)
-		}
-	}
-	slices.SortStableFunc(all, func(a, b diag.TextEdit) int { return int(a.Start) - int(b.Start) })
-	return all
 }
 
 // formatting answers textDocument/formatting and, with a range,

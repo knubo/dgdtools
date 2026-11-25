@@ -22,8 +22,7 @@ func rulesCmd(_ context.Context, args []string, _ io.Reader, stdout, stderr io.W
 		return code
 	}
 	if len(pos) > 0 {
-		fs.Usage()
-		return 2
+		return usageError(fs, "takes no arguments")
 	}
 	group := ""
 	for _, r := range lint.Rules() {
@@ -52,8 +51,7 @@ func explainCmd(_ context.Context, args []string, _ io.Reader, stdout, stderr io
 		return code
 	}
 	if len(pos) != 1 {
-		fs.Usage()
-		return 2
+		return usageError(fs, "want one RULE")
 	}
 	r := lint.RuleByName(pos[0])
 	if r == nil {
@@ -107,8 +105,7 @@ func configCmd(ctx context.Context, args []string, _ io.Reader, stdout, stderr i
 	}
 	fail := func(err error) int { return failure(stderr, "config", err) }
 	if len(pos) > 1 {
-		fs.Usage()
-		return 2
+		return usageError(fs, "want at most one path")
 	}
 	p, err := environment()
 	if err != nil {

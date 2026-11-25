@@ -38,6 +38,7 @@ import (
 	"regexp"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -554,6 +555,22 @@ func New(prj *config.Project, fsys vfs.FS, opts ...LinterOption) (*Linter, error
 		l.byKey[r.Group] = append(l.byKey[r.Group], r)
 		l.byKey["all"] = append(l.byKey["all"], r)
 	}
+	// A group's letter, the first of its rules' codes ("S" for
+	// suspicious), names the group too, where it is one group's only.
+	letters := map[string]string{}
+	for _, r := range l.rules {
+		letter := strings.ToUpper(r.Code[:1])
+		if g, ok := letters[letter]; ok && g != r.Group {
+			letters[letter] = ""
+		} else if !ok {
+			letters[letter] = r.Group
+		}
+	}
+	for letter, g := range letters {
+		if g != "" && l.byKey[letter] == nil {
+			l.byKey[letter] = l.byKey[g]
+		}
+	}
 	cfg := prj.Config
 	if err := cfg.Validate(); err != nil {
 		return nil, err
@@ -562,11 +579,11 @@ func New(prj *config.Project, fsys vfs.FS, opts ...LinterOption) (*Linter, error
 		l.failOn, _ = diag.ParseSeverity(cfg.Lint.FailOn)
 	}
 	var err error
-	if l.base, err = l.newLayer("lint.rules", nil, cfg.Lint.Rules); err != nil {
+	if l.base, err = l.newLayer(cfg.Path, "lint.rules", nil, cfg.Lint.Rules); err != nil {
 		return nil, err
 	}
 	for i, o := range cfg.Lint.Overrides {
-		lay, err := l.newLayer(fmt.Sprintf("lint.overrides[%d].rules", i), fileset.NewMatcher(o.Paths), o.Rules)
+		lay, err := l.newLayer(cfg.Path, fmt.Sprintf("lint.overrides[%d].rules", i), fileset.NewMatcher(o.Paths), o.Rules)
 		if err != nil {
 			return nil, err
 		}
@@ -688,8 +705,8 @@ func (l *Linter) Run(ctx context.Context, req Request) (*Result, error) {
 	}
 	for _, other := range slices.Sorted(maps.Keys(nested)) {
 		res.Notes = append(res.Notes, diag.Note{Kind: diag.NoteNestedProject, Path: other, Message: fmt.Sprintf(
-			"%d file(s) under %s are a project of their own (%s) and were not linted: lint that directory by itself",
-			nested[other], filepath.Dir(other), filepath.Base(other))})
+			"%s under %s %s a project of their own (%s) and %s not linted: lint that directory by itself",
+			plural(nested[other], "file"), filepath.Dir(other), are(nested[other]), filepath.Base(other), were(nested[other]))})
 	}
 	if place, what := prj.Root, "mudlib root"; prj.HasLib() && (place != "" || prj.CheckoutLib != "") {
 		if place == "" {
@@ -703,7 +720,7 @@ func (l *Linter) Run(ctx context.Context, req Request) (*Result, error) {
 		}
 		if outside > 0 {
 			res.Notes = append(res.Notes, diag.Note{Kind: diag.NoteOutsideLib, Path: place, Message: fmt.Sprintf(
-				"%d file(s) are outside the %s %s: file-local rules only for those", outside, what, place)})
+				"%s %s outside the %s %s: file-local rules only for %s", plural(outside, "file"), are(outside), what, place, verb(outside, "it", "those"))})
 		}
 	}
 
@@ -1026,3 +1043,21 @@ func RuleByName(key string) *Rule {
 // FailOn returns the severity at and above which the project's findings
 // fail a run: lint.fail_on, error when the configuration does not say.
 func (l *Linter) FailOn() diag.Severity { return l.failOn }
+
+// plural says how many of a thing there are: "1 file", "2 files".
+func plural(n int, thing string) string {
+	if n == 1 {
+		return "1 " + thing
+	}
+	return strconv.Itoa(n) + " " + thing + "s"
+}
+
+func verb(n int, one, more string) string {
+	if n == 1 {
+		return one
+	}
+	return more
+}
+
+func are(n int) string  { return verb(n, "is", "are") }
+func were(n int) string { return verb(n, "was", "were") }

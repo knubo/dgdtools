@@ -5,6 +5,7 @@ package fileset
 
 import (
 	"context"
+	"fmt"
 	"io/fs"
 	"path"
 	"path/filepath"
@@ -34,6 +35,16 @@ func NewMatcher(patterns []string) *Matcher {
 		m.res = append(m.res, regexp.MustCompile("^"+globToRe(p)+"$"))
 	}
 	return m
+}
+
+// CheckGlob reports a pattern NewMatcher would read otherwise than its
+// writer likely meant: one with the brackets, braces or backslashes other
+// glob dialects give a meaning, which here would be matched as they are.
+func CheckGlob(p string) error {
+	if i := strings.IndexAny(p, `[]{}\`); i >= 0 {
+		return fmt.Errorf("%q: %q is not part of a glob here (only *, ? and ** are)", p, p[i:i+1])
+	}
+	return nil
 }
 
 func globToRe(glob string) string {

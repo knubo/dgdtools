@@ -151,6 +151,14 @@ func TestScopeValidation(t *testing.T) {
 		"severity":       {"lint:\n  rules:\n    syntax: loud\n", `line 3: lint.rules: syntax: unknown severity "loud"`},
 		"scope severity": {"root: false\nlint:\n  overrides:\n    - paths: [\"a/**\"]\n      rules: {all: none}\n", `lint.overrides[0].rules: all: unknown severity "none"`},
 		"override paths": {"lint:\n  overrides:\n    - rules: {all: off}\n", "lint.overrides[0]: no paths"},
+		"width zero":     {"format: {indent_width: 0}\n", "line 1: format.indent_width: indent width 0 is not between 1 and 16"},
+		"width fraction": {"format: {indent_width: 1.5}\n", "line 1: format.indent_width: 1.5 is not a whole number"},
+		"width quoted":   {"format: {indent_width: \"4\"}\n", "format.indent_width: 4 is not a whole number"},
+		"key typo":       {"fromat: {indent_width: 2}\n", `line 1: unknown key "fromat" (did you mean "format"?)`},
+		"nested typo":    {"format: {indent_widht: 2}\n", `unknown key "indent_widht" in format (did you mean "indent_width"?)`},
+		"kind":           {"root: [a]\n", "line 1: want a string here, not a list"},
+		"bad glob":       {"exclude: [\"[bad\"]\n", `exclude: "[bad": "[" is not part of a glob here`},
+		"override glob":  {"lint:\n  overrides:\n    - paths: [\"{a,b}/**\"]\n      rules: {all: off}\n", "lint.overrides[0].paths:"},
 	} {
 		m := vfs.Mem{"/p/sub/dgdtools.yml": c.yml, "/p/sub/base.yml": "lib_path: /players/x\n", "/p/sub/a.c": ""}
 		_, err := Load(m, "/p/sub/dgdtools.yml")

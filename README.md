@@ -147,7 +147,7 @@ only settings can differ from one directory to the next.
 | `format.indent_style` | `space` (default) or `tab`. |
 | `format.indent_width` | Spaces per level, 1 to 16 (default 4). |
 | `format.line_endings` | `preserve` (default: every line break keeps its bytes), `lf` or `crlf`. |
-| `lint.rules` | Maps a rule name, code, or group (`all`, `syntax`, `runtime`, `suspicious`, `convention`) to `off`, `info`, `warning` or `error`, or to a mapping: `severity`, `max_per_file` (report at most that many findings of a rule in one file; the rest are counted), and, for one rule, its own options (`dgdtools explain RULE` lists them). Giving a severity turns the rule on. An option the rule does not have is an error, and so is setting one rule twice, by name and by code. |
+| `lint.rules` | Maps a rule name, code, or group (`all`, `syntax`, `runtime`, `suspicious`, `convention`, or a group's letter, `E`, `R`, `S`, `C`) to `off`, `info`, `warning` or `error`, or to a mapping: `severity`, `max_per_file` (report at most that many findings of a rule in one file; the rest are counted), and, for one rule, its own options (`dgdtools explain RULE` lists them). Giving a severity turns the rule on. An option the rule does not have is an error, and so is setting one rule twice, by name and by code. |
 | `lint.overrides` | `[{paths: [globs], rules: {…}}]`: different rule settings for parts of the mudlib. |
 | `lint.baseline` | Baseline file name (default `dgdtools-baseline.json` next to the config). Root config only. |
 | `lint.fail_on` | Exit-1 threshold: `info`, `warning` or `error` (default). Root config only. |
@@ -223,7 +223,9 @@ A path is required (`.` is the working directory). A directory stands
 for the `.c` and `.h` files under it, minus the `exclude` globs of its
 project. A file is formatted from its own text and its settings alone;
 no other file is read, so the result is the same in an editor buffer, in
-a wizard's checkout and in the whole mudlib.
+a wizard's checkout and in the whole mudlib. What only lint needs does
+not stop it: a profile not fetched yet, or a driver configuration that is
+not there, is gone without, with a note.
 
 There is one style and three settings: indentation with spaces or tabs,
 its width, and line endings (`format:` above; `--indent-style`,
@@ -367,13 +369,14 @@ wizards can fetch it; dgdtools itself ships no profiles.
 ### Usage
 
 ```
-dgdtools lint                          # the project found from the working directory
+dgdtools lint                          # the working directory's files, in the project found from there
 dgdtools lint dir/ file.c ...          # these; the project is found from the paths
 dgdtools lint --output-format json ... # also: sarif, github
 dgdtools lint --stdin-filename obj/key.c   # standard input as that file: an unsaved buffer
 dgdtools lint -                        # standard input, nameless: file-local rules
-dgdtools lint --select syntax ...      # run only these rules (names, codes or groups)
+dgdtools lint --select syntax,S ...    # run only these rules (names, codes, groups or their letters)
 dgdtools lint --enable RULES --ignore RULES ...   # adjust the configured set
+dgdtools lint --fix ...                # apply the safe fixes, report what is left (--diff: show them)
 dgdtools lint --write-baseline         # accept current findings; later runs report only new ones
 dgdtools lint --stats ...              # per-rule counts and what could not be verified
 dgdtools rules                         # list rules: code, name, default, scope
@@ -382,7 +385,10 @@ dgdtools config [path]                 # the resolved project, and the rules tha
 ```
 
 A directory stands for the `.c` files under it, each with the headers
-it includes; a header named by itself is linted on its own.
+it includes; a header named by itself is linted on its own. With no
+path the working directory is linted, as ruff and Biome do: the project
+is still found upward from it, and the files are checked against its
+whole mudlib, so `dgdtools lint` in `players/me` lints that folder only.
 
 Exit codes: `0` no findings at or above `fail_on`, `1` findings, `2`
 usage or configuration error, or an internal error of the linter on

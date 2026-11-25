@@ -191,7 +191,7 @@ func TestConfigurationChanges(t *testing.T) {
 	// for, until it is mended.
 	m["/other/dgdtools.yml"] = "lint:\n  rules: {no-such-rule: off}\n"
 	s.DiskChanged("/other/dgdtools.yml")
-	assert.Contains(t, findings(t, s, other), `error: line 2: lint.rules: unknown rule "no-such-rule"`)
+	assert.Contains(t, findings(t, s, other), `error: /other/dgdtools.yml: line 2: lint.rules: unknown rule "no-such-rule"`)
 	assert.NotContains(t, findings(t, s, plain), "error: /")
 	m["/other/dgdtools.yml"] = ""
 	s.DiskChanged("/other/dgdtools.yml")

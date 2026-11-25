@@ -93,7 +93,7 @@ func renameCmd(ctx context.Context, args []string, _ io.Reader, stdout, stderr i
 	fs.BoolVar(&diff, "diff", false, "print the edits as unified diffs and write nothing (the default)")
 	fs.BoolVar(&includePossible, "include-possible", false, "also rename the places that may be the symbol")
 	fs.BoolVar(&frc, "force", false, "rename a variable that save_object writes")
-	fs.StringVar(&format, "output-format", "human", "how the plan is written: human (diffs and a summary) or json (a `format`)")
+	fs.StringVar(&format, "output-format", "human", "write the plan in this `format`: human (diffs and a summary) or json")
 	fs.BoolVar(&quiet, "quiet", false, "no summary on standard error")
 	fs.BoolVar(&quiet, "q", false, "short for --quiet")
 	pos, code, done := parse(fs, args)
@@ -103,9 +103,7 @@ func renameCmd(ctx context.Context, args []string, _ io.Reader, stdout, stderr i
 	fail := func(err error) int { return failure(stderr, "rename", err) }
 	switch {
 	case len(pos) != 2:
-		fmt.Fprint(stderr, "dgdtools rename: want SYMBOL and NEW\n\n")
-		fs.Usage()
-		return 2
+		return usageError(fs, "want SYMBOL (or FILE) and NEW")
 	case write && diff:
 		return fail(errors.New("--write and --diff cannot be combined"))
 	case format != "human" && format != "json":

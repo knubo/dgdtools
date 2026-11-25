@@ -46,7 +46,7 @@ func TestSettingsScopes(t *testing.T) {
 		require.Len(t, res.Notes, 1)
 		assert.Equal(t, diag.Note{
 			Kind: diag.NoteNestedProject, Path: "/mud/lib/players/cyd/dgdtools.yml",
-			Message: "1 file(s) under /mud/lib/players/cyd are a project of their own (dgdtools.yml) and were not linted: lint that directory by itself",
+			Message: "1 file under /mud/lib/players/cyd is a project of their own (dgdtools.yml) and was not linted: lint that directory by itself",
 		}, res.Notes[0])
 		var out []string
 		for _, d := range res.Diagnostics {
@@ -106,7 +106,7 @@ func TestSettingsScopes(t *testing.T) {
 	m["/mud/lib/players/bob/dgdtools.yml"] = "root: false\nlint:\n  rules: {no-such-rule: off}\n"
 	again()
 	_, err = l.Run(context.Background(), lint.Request{})
-	assert.ErrorContains(t, err, "/mud/lib/players/bob/dgdtools.yml: lint.rules: unknown rule \"no-such-rule\"")
+	assert.ErrorContains(t, err, "/mud/lib/players/bob/dgdtools.yml: line 3: lint.rules: unknown rule \"no-such-rule\"")
 	_, err = l.Lint(context.Background(), "/mud/lib/players/bob/c.c", lint.Options{})
 	assert.ErrorContains(t, err, "unknown rule")
 	_, err = l.Lint(context.Background(), "/mud/lib/std/a.c", lint.Options{})

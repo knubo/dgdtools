@@ -29,9 +29,6 @@ var (
 	StubOf = stubOf
 )
 
-// SafeFixes is what "fix all" applies.
-var SafeFixes = safeFixes
-
 // ProgressDelay is how long a scan runs before the client is shown it.
 var ProgressDelay = &progressDelay
 

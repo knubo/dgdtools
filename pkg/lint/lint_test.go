@@ -291,7 +291,7 @@ func TestRuleOptionsAreChecked(t *testing.T) {
 	l, err := lint.New(prj, m)
 	require.NoError(t, err)
 	_, err = l.Run(context.Background(), lint.Request{})
-	assert.ErrorContains(t, err, `/q/sub/dgdtools.yml: lint.rules: rule raw-inherit-path has no option "names" (its options: deny)`)
+	assert.ErrorContains(t, err, `/q/sub/dgdtools.yml: line 3: lint.rules: rule raw-inherit-path has no option "names" (its options: deny)`)
 }
 
 // Options set in several layers add up key by key; max_per_file may be

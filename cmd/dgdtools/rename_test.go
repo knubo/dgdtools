@@ -165,7 +165,7 @@ func TestRenameErrors(t *testing.T) {
 		args []string
 		want string
 	}{
-		{[]string{"x"}, "want SYMBOL and NEW"},
+		{[]string{"x"}, "want SYMBOL (or FILE) and NEW"},
 		{[]string{"--write", "--diff", "/std/living::hp", "y"}, "--write and --diff cannot be combined"},
 		{[]string{"--output-format", "xml", "/std/living::hp", "y"}, `unknown format "xml"`},
 		{[]string{"query_name", "y"}, `"query_name" is no symbol`},

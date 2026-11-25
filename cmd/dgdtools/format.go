@@ -18,6 +18,7 @@ import (
 
 	"github.com/mmcdole/dgdtools/internal/par"
 	"github.com/mmcdole/dgdtools/pkg/config"
+	"github.com/mmcdole/dgdtools/pkg/diag"
 	"github.com/mmcdole/dgdtools/pkg/fileset"
 	"github.com/mmcdole/dgdtools/pkg/format"
 )
@@ -67,7 +68,7 @@ func formatCmd(ctx context.Context, args []string, stdin io.Reader, stdout, stde
 	fs.StringVar(&c.gitBase, "base", "", "with --changed: the git `revision` to compare the working tree with (default HEAD)")
 	fs.StringVar(&indentStyle, "indent-style", "", "indent with `space` or tab; overrides every configuration")
 	fs.IntVar(&indentWidth, "indent-width", 0, "spaces per level, a `number`; overrides every configuration")
-	fs.StringVar(&lineEndings, "line-endings", "", "line endings: preserve, lf or crlf (a `policy`); overrides every configuration")
+	fs.StringVar(&lineEndings, "line-endings", "", "write `line endings` as they are (preserve), lf or crlf; overrides every configuration")
 	fs.BoolVar(&c.quiet, "quiet", false, "no summary on standard error")
 	fs.BoolVar(&c.quiet, "q", false, "short for --quiet")
 	paths, code, done := parse(fs, args)
@@ -96,6 +97,9 @@ func formatCmd(ctx context.Context, args []string, stdin io.Reader, stdout, stde
 			return c.fail(fmt.Errorf("--line-endings: %w", err))
 		}
 	}
+	// A file is formatted by its settings: what only lint needs of the
+	// project (a profile not fetched yet) is gone without.
+	opt.SettingsOnly = true
 	c.projects = config.NewWorkspace(c.fsys, opt)
 
 	stdinPath, fromStdin, err := c.standardInput(paths, stdinName)
@@ -231,7 +235,16 @@ func (c *formatter) collect(paths []string) []job {
 	if c.changed {
 		changed = &changes{base: c.gitBase, lines: map[string][]format.LineRange{}, whole: map[string]bool{}}
 	}
+	told := map[*config.Project]bool{}
 	add := func(prj *config.Project, path, name string) {
+		if !told[prj] && !c.quiet {
+			told[prj] = true
+			for _, n := range prj.Notes {
+				if n.Kind == diag.NoteUnread {
+					fmt.Fprintf(c.stderr, "note: formatting by the settings without it: %s\n", n.Message)
+				}
+			}
+		}
 		j := job{path: path, name: name, prj: prj, lines: c.lines}
 		if changed != nil && !changed.whole[path] {
 			if j.lines = changed.lines[path]; len(j.lines) == 0 {

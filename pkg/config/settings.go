@@ -1,12 +1,15 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strconv"
 	"sync"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/mmcdole/dgdtools/internal/fuzzy"
 
 	"github.com/mmcdole/dgdtools/pkg/editorconfig"
 	"github.com/mmcdole/dgdtools/pkg/fileset"
@@ -73,6 +76,47 @@ func ParseLineEndings(s string) (LineEndings, error) {
 func CheckIndentWidth(n int) error {
 	if n < 1 || n > MaxIndentWidth {
 		return fmt.Errorf("indent width %d is not between 1 and %d", n, MaxIndentWidth)
+	}
+	return nil
+}
+
+// UnmarshalYAML reads format: as Format, with indent_width a whole
+// number from 1 to MaxIndentWidth as it is written: 0, 1.5 or "4" is an
+// error, not the default or 1.
+func (f *Format) UnmarshalYAML(n *yaml.Node) error {
+	if n.Kind != yaml.MappingNode {
+		return at(n, errors.New("format: want a mapping of indent_style, indent_width and line_endings"))
+	}
+	keys := []string{"indent_style", "indent_width", "line_endings"}
+	for i := 0; i+1 < len(n.Content); i += 2 {
+		k, v := n.Content[i], n.Content[i+1]
+		var err error
+		switch k.Value {
+		case "indent_style":
+			err = f.IndentStyle.UnmarshalYAML(v)
+		case "line_endings":
+			err = f.LineEndings.UnmarshalYAML(v)
+		case "indent_width":
+			w, aerr := strconv.Atoi(v.Value)
+			switch {
+			case v.Kind != yaml.ScalarNode || v.Tag != "!!int" || aerr != nil:
+				err = at(v, fmt.Errorf("format.indent_width: %s is not a whole number", v.Value))
+			default:
+				if cerr := CheckIndentWidth(w); cerr != nil {
+					err = at(v, fmt.Errorf("format.indent_width: %w", cerr))
+				}
+				f.IndentWidth = w
+			}
+		default:
+			msg := fmt.Sprintf("unknown key %q in format", k.Value)
+			if near := fuzzy.Nearest(k.Value, keys); near != "" {
+				msg += fmt.Sprintf(" (did you mean %q?)", near)
+			}
+			err = at(k, errors.New(msg))
+		}
+		if err != nil {
+			return err
+		}
 	}
 	return nil
 }

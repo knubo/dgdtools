@@ -104,7 +104,7 @@ func TestCommands(t *testing.T) {
 	assert.Contains(t, usage, "rename SYMBOL NEW")
 	code, _, errs = dgdtools(t, "", "rename", "x")
 	assert.Equal(t, 2, code)
-	assert.Contains(t, errs, "dgdtools rename: want SYMBOL and NEW")
+	assert.Contains(t, errs, "dgdtools rename: want SYMBOL (or FILE) and NEW")
 }
 
 func TestRulesAndExplain(t *testing.T) {
@@ -215,7 +215,7 @@ func TestConfigVerifies(t *testing.T) {
 		assert.Contains(t, errs, want, content)
 		write(t, "/", map[string]string{file: was})
 	}
-	bad(cfg, "root: lib\nincldue_dirs: [/x]\n", "field incldue_dirs not found")
+	bad(cfg, "root: lib\nincldue_dirs: [/x]\n", `line 2: unknown key "incldue_dirs" (did you mean "include_dirs"?)`)
 	bad(cfg, "root: lib\nrelative_object_paths: here\n", cfg+": relative_object_paths: unknown value \"here\"")
 	bad(cfg, "root: lib\nconventions:\n  macros: {X: thing}\n", "conventions.macros: X: unknown class \"thing\"")
 	bad(cfg, "root: lib\nconventions:\n  call_registry: {f: 0}\n", "line 3: a call registry entry is {function: N}")
@@ -223,9 +223,9 @@ func TestConfigVerifies(t *testing.T) {
 	bad(cfg, "root: lib\nlint:\n  rules:\n    syntax-error: {deny: [x]}\n", "rule syntax-error has no option \"deny\"")
 	bad(cfg, "root: lib\nlint:\n  rules: {E001: off, syntax-error: error}\n", "rule syntax-error is set twice")
 	bad(cfg, "root: lib\nlint: {fail_on: never}\n", "lint.fail_on: unknown severity \"never\"")
-	bad(cfg, "root: lib\nformat: {indent_width: wide}\n", "line 2: cannot unmarshal")
+	bad(cfg, "root: lib\nformat: {indent_width: wide}\n", "line 2: format.indent_width: wide is not a whole number")
 	bad(cfg, "root: lib\nprofile: nowhere\n", "profile \"nowhere\" not found")
-	bad(nested, "root: false\nlint:\n  rules: {lifecycle-chain: {nams: [create]}}\n", nested+": lint.rules: rule lifecycle-chain has no option \"nams\"")
+	bad(nested, "root: false\nlint:\n  rules: {lifecycle-chain: {nams: [create]}}\n", nested+": line 3: lint.rules: rule lifecycle-chain has no option \"nams\"")
 	bad(nested, "root: false\ninclude_dirs: [/x]\n", nested+": include_dirs belongs in the project's root config")
 
 	// Valid again; a file's own configuration is what is checked for a file.
@@ -294,7 +294,7 @@ func TestNestedProject(t *testing.T) {
 	assert.Equal(t, 0, code, errs)
 	assert.Contains(t, out, "a.c:1:5: warning")
 	assert.NotContains(t, out, "b.c")
-	assert.Contains(t, errs, "1 file(s) under "+own+" are a project of their own (dgdtools.yml) and were not linted")
+	assert.Contains(t, errs, "1 file under "+own+" is a project of their own (dgdtools.yml) and was not linted")
 	code, out, _ = dgdtools(t, "", "lint", own)
 	assert.Equal(t, 1, code)
 	assert.Contains(t, out, "b.c:1:5: error")

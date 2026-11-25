@@ -209,6 +209,13 @@ func newFlags(name, synopsis string, stderr io.Writer) *flag.FlagSet {
 	return fs
 }
 
+// usageError reports arguments a command cannot take, and where its help
+// is, and returns the exit code of a usage error.
+func usageError(fs *flag.FlagSet, msg string) int {
+	fmt.Fprintf(fs.Output(), "%s: %s\nsee `%s -h`\n", fs.Name(), msg, fs.Name())
+	return 2
+}
+
 // parse reads a command's arguments. Flags may stand before, between and
 // after the other arguments; everything after "--" is an argument. done
 // is set when there is nothing more to do: help was asked for (code 0)
@@ -218,11 +225,20 @@ func parse(fs *flag.FlagSet, args []string) (pos []string, code int, done bool) 
 	if i := slices.Index(args, "--"); i >= 0 {
 		args, literal = args[:i], args[i+1:]
 	}
+	// A flag that is wrong is one line, and where the help is; the help
+	// itself is for -h.
+	usage, out := fs.Usage, fs.Output()
+	fs.Usage = func() {}
+	fs.SetOutput(io.Discard)
+	defer func() { fs.Usage = usage; fs.SetOutput(out) }()
 	for {
 		if err := fs.Parse(args); err != nil {
 			if err == flag.ErrHelp {
+				fs.SetOutput(out)
+				usage()
 				return nil, 0, true
 			}
+			fmt.Fprintf(out, "%s: %v\nsee `%s -h`\n", fs.Name(), err, fs.Name())
 			return nil, 2, true
 		}
 		if fs.NArg() == 0 {

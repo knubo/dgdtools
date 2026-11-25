@@ -249,18 +249,3 @@ func TestStubURIs(t *testing.T) {
 		assert.False(t, ok, not)
 	}
 }
-
-func TestSafeFixes(t *testing.T) {
-	fix := func(a diag.Applicability, edits ...diag.TextEdit) diag.Diagnostic {
-		return diag.Diagnostic{Fixes: []diag.Fix{{Applicability: a, Edits: edits}}}
-	}
-	got := lsp.SafeFixes([]diag.Diagnostic{
-		fix(diag.Safe, diag.TextEdit{Start: 20, End: 22, NewText: "c"}),
-		fix(diag.Unsafe, diag.TextEdit{Start: 1, End: 2, NewText: "never"}),
-		fix(diag.Safe, diag.TextEdit{Start: 4, End: 8, NewText: "a"}, diag.TextEdit{Start: 30, End: 30, NewText: "a2"}),
-		// Overlaps the one before it, and one that inserts where another does.
-		fix(diag.Safe, diag.TextEdit{Start: 6, End: 9, NewText: "b"}),
-		fix(diag.Safe, diag.TextEdit{Start: 30, End: 30, NewText: "d"}),
-	})
-	assert.Equal(t, []diag.TextEdit{{Start: 4, End: 8, NewText: "a"}, {Start: 20, End: 22, NewText: "c"}, {Start: 30, End: 30, NewText: "a2"}}, got)
-}

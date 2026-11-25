@@ -50,8 +50,9 @@ type layer struct {
 
 // newLayer checks a rules mapping: every key names a rule, a rule is
 // named once, and options are options of the rule they are given to.
-// where says where the mapping is, for errors.
-func (l *Linter) newLayer(where string, match *fileset.Matcher, m map[string]config.RuleSettings) (*layer, error) {
+// file and where say where the mapping is, for errors: the configuration
+// file ("" for none) and the key in it.
+func (l *Linter) newLayer(file, where string, match *fileset.Matcher, m map[string]config.RuleSettings) (*layer, error) {
 	lay := &layer{id: int(l.layerIDs.Add(1)), match: match}
 	named := map[*Rule]string{}
 	// In the order of the file, and of the keys where there is no file.
@@ -64,6 +65,9 @@ func (l *Linter) newLayer(where string, match *fileset.Matcher, m map[string]con
 			if rs.Line > 0 {
 				at = "line " + strconv.Itoa(rs.Line) + ": " + where
 			}
+			if file != "" {
+				at = file + ": " + at
+			}
 			return fmt.Errorf("%s: %s", at, fmt.Sprintf(format, args...))
 		}
 		rules := l.lookup(key)
@@ -74,7 +78,7 @@ func (l *Linter) newLayer(where string, match *fileset.Matcher, m map[string]con
 		switch {
 		case key == "all":
 			s.rank = 0
-		case rules[0].Group == key:
+		case rules[0].Group == key || len(key) == 1:
 			s.rank = 1
 		}
 		if rs.Severity == config.SeverityOff {
@@ -205,13 +209,13 @@ func (l *Linter) layersOf(sc *config.Scope) ([]*layer, error) {
 		return sl.layers, sl.err
 	}
 	sl := &scopeLayers{}
-	lay, err := l.newLayer(sc.Path+": lint.rules", nil, sc.Rules)
+	lay, err := l.newLayer(sc.Path, "lint.rules", nil, sc.Rules)
 	sl.layers, sl.err = append(sl.layers, lay), err
 	for i, o := range sc.Overrides {
 		if sl.err != nil {
 			break
 		}
-		lay, sl.err = l.newLayer(fmt.Sprintf("%s: lint.overrides[%d].rules", sc.Path, i), fileset.NewMatcher(o.Paths), o.Rules)
+		lay, sl.err = l.newLayer(sc.Path, fmt.Sprintf("lint.overrides[%d].rules", i), fileset.NewMatcher(o.Paths), o.Rules)
 		sl.layers = append(sl.layers, lay)
 	}
 	v, _ := l.scopes.LoadOrStore(sc, sl)

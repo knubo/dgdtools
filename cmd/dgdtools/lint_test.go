@@ -38,19 +38,24 @@ func TestLintFromAnywhere(t *testing.T) {
 	code, out, errs := dgdtools(t, "", "lint", file)
 	assert.Equal(t, 1, code)
 	assert.Contains(t, out, "castle.c:5:11: error: missing ';' before 'c' [E001 syntax-error]")
-	assert.Contains(t, errs, "1 file(s): 1 error(s)")
+	assert.Contains(t, errs, "1 file: 1 error")
 
 	// A directory.
 	code, out, _ = dgdtools(t, "", "lint", filepath.Join(dir, "mud/lib/d"))
 	assert.Equal(t, 1, code)
 	assert.Equal(t, 1, strings.Count(out, "\n"))
 
-	// No path: the project of the working directory, all of it.
+	// No path: the working directory's files, in the project found
+	// from there.
 	t.Chdir(filepath.Join(dir, "mud/lib/std"))
+	code, out, errs = dgdtools(t, "", "lint")
+	assert.Equal(t, 0, code, out)
+	assert.Contains(t, errs, "1 file: 0 errors")
+	t.Chdir(filepath.Join(dir, "mud"))
 	code, out, errs = dgdtools(t, "", "lint")
 	assert.Equal(t, 1, code)
 	assert.Contains(t, out, "castle.c:5:11")
-	assert.Contains(t, errs, "3 file(s)")
+	assert.Contains(t, errs, "3 files")
 
 	// A clean file: exit 0, no output.
 	code, out, _ = dgdtools(t, "", "lint", filepath.Join(dir, "mud/lib/d/Foo/fine.c"))
@@ -234,20 +239,22 @@ func TestLintSettingsScopes(t *testing.T) {
 	assert.Contains(t, out, "a.c:1:5: warning:")
 	assert.Contains(t, out, "b.c:1:5: error:")
 	assert.NotContains(t, out, "c.c")
-	// From inside a scope the project is still the one above.
-	t.Chdir(filepath.Join(dir, "players/bob"))
+	// From inside a scope the project is still the one above, and the
+	// scope's files are linted by its settings.
+	t.Chdir(filepath.Join(dir, "players/ann"))
 	code, out, _ = dgdtools(t, "", "lint")
 	assert.Equal(t, 1, code)
-	assert.Equal(t, 2, strings.Count(out, "\n"))
+	assert.Equal(t, "b.c:1:5: error:", out[:len("b.c:1:5: error:")])
+	assert.Equal(t, 1, strings.Count(out, "\n"))
 
 	// A project key in a scope is an error, and names the file.
 	write(t, dir, map[string]string{"players/bob/dgdtools.yml": "root: false\ninclude_dirs: [/x]\n"})
-	code, _, errs = dgdtools(t, "", "lint")
+	code, _, errs = dgdtools(t, "", "lint", dir)
 	assert.Equal(t, 2, code)
 	assert.Contains(t, errs, filepath.Join(dir, "players/bob/dgdtools.yml")+": include_dirs belongs in the project's root config")
 	// So is a rule that does not exist.
 	write(t, dir, map[string]string{"players/bob/dgdtools.yml": "root: false\nlint:\n  rules: {nope: off}\n"})
-	code, _, errs = dgdtools(t, "", "lint")
+	code, _, errs = dgdtools(t, "", "lint", dir)
 	assert.Equal(t, 2, code)
 	assert.Contains(t, errs, "unknown rule \"nope\"")
 }
@@ -287,7 +294,7 @@ func TestLintBaseline(t *testing.T) {
 	})
 	code, _, errs := dgdtools(t, "", "lint", "--write-baseline", dir)
 	assert.Equal(t, 0, code)
-	assert.Contains(t, errs, "wrote 1 finding(s)")
+	assert.Contains(t, errs, "wrote 1 finding")
 	assert.FileExists(t, filepath.Join(dir, "dgdtools-baseline.json"))
 
 	// Legacy noise no longer gates...
@@ -329,7 +336,7 @@ func TestProfileCommands(t *testing.T) {
 	assert.Contains(t, out, filepath.Join("dgdtools", "profiles"))
 	code, _, errs := dgdtools(t, "", "profile")
 	assert.Equal(t, 2, code)
-	assert.Contains(t, errs, "usage: dgdtools profile build")
+	assert.Contains(t, errs, "dgdtools profile: want build, or show [NAME|FILE] [LIBPATH]\nsee `dgdtools profile -h`")
 
 	dir := tree(t, map[string]string{
 		"dgdtools.yml":            "root: lib\nprofile_build:\n  name: tiny\n  share: [\"std/**\"]\n  checkouts: [\"players/*\"]\ninclude_dirs: [/std/include]\n",
@@ -427,7 +434,7 @@ func TestLintStdin(t *testing.T) {
 	assert.Equal(t, 0, code, errs)
 	assert.Equal(t, "<stdin>:3:7: warning: comparison has no effect as a statement (did you mean =?) [S002 no-effect-statement]\n", out)
 	assert.Contains(t, errs, "note: standard input has no place in the mudlib")
-	assert.Contains(t, errs, "1 file(s): 0 error(s), 1 warning(s)")
+	assert.Contains(t, errs, "1 file: 0 errors, 1 warning")
 
 	// Named: the buffer is that file, whatever is on disk, with the
 	// lib around it and the settings of its path.
@@ -456,4 +463,47 @@ func TestLintStdin(t *testing.T) {
 		assert.Equal(t, 2, code, args)
 		assert.Contains(t, errs, "standard input", args)
 	}
+}
+
+// A group's letter selects the group, as its name does.
+func TestLintSelectByLetter(t *testing.T) {
+	dir := tree(t, map[string]string{"a.c": castle})
+	file := filepath.Join(dir, "a.c")
+	for _, sel := range []string{"syntax", "E", "e"} {
+		code, out, errs := dgdtools(t, "", "lint", "--no-config", "--select", sel, file)
+		assert.Equal(t, 1, code, errs)
+		assert.Contains(t, out, "[E001 syntax-error]", sel)
+	}
+	code, out, _ := dgdtools(t, "", "lint", "--no-config", "--select", "S", file)
+	assert.NotContains(t, out, "[E001", "S is suspicious")
+	assert.NotEqual(t, 2, code)
+}
+
+// --fix applies the safe fixes and reports what is left; with --diff it
+// prints them and writes nothing; standard input comes back fixed.
+func TestLintFix(t *testing.T) {
+	const src = "void f() {\n    x = 1\n    write(\"a\" \"b\");\n}\n"
+	const want = "void f() {\n    x = 1;\n    write(\"a\" + \"b\");\n}\n"
+	dir := tree(t, map[string]string{"a.c": src})
+	file := filepath.Join(dir, "a.c")
+
+	code, out, errs := dgdtools(t, "", "lint", "--no-config", "--fix", "--diff", file)
+	assert.Equal(t, 1, code, errs)
+	assert.Contains(t, out, "-    x = 1\n-    write(\"a\" \"b\");\n+    x = 1;\n+    write(\"a\" + \"b\");\n")
+	assert.Contains(t, errs, "2 fixes would be made in 1 file")
+	assert.Equal(t, src, read(t, file), "--diff writes nothing")
+
+	code, out, errs = dgdtools(t, "", "lint", "--no-config", "--fix", file)
+	assert.Equal(t, 0, code, errs)
+	assert.Empty(t, out)
+	assert.Contains(t, errs, "2 fixes made in 1 file")
+	assert.Equal(t, want, read(t, file))
+
+	code, out, _ = dgdtools(t, src, "lint", "--no-config", "--fix", "-")
+	assert.Equal(t, 0, code)
+	assert.Equal(t, want, out)
+
+	code, _, errs = dgdtools(t, "", "lint", "--diff", file)
+	assert.Equal(t, 2, code)
+	assert.Contains(t, errs, "--diff shows what --fix would do")
 }

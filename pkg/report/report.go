@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/mmcdole/dgdtools/pkg/diag"
@@ -116,8 +117,8 @@ func Summary(w io.Writer, res *lint.Result, o Options, verbose bool) {
 		fmt.Fprintf(w, "%s: %s: %s\n", level, o.name(e.Path), e.Message)
 	}
 	st := res.Stats
-	fmt.Fprintf(w, "%d file(s): %d error(s), %d warning(s), %d info", st.Files,
-		counts[diag.Error], counts[diag.Warning], counts[diag.Info])
+	fmt.Fprintf(w, "%s: %s, %s, %d info", plural(st.Files, "file"),
+		plural(counts[diag.Error], "error"), plural(counts[diag.Warning], "warning"), counts[diag.Info])
 	if st.Baselined > 0 {
 		fmt.Fprintf(w, "; %d in baseline", st.Baselined)
 	}
@@ -519,4 +520,12 @@ func SARIF(w io.Writer, res *lint.Result, rules []*lint.Rule, o Options) error {
 		}
 		return sr
 	})
+}
+
+// plural says how many of a thing there are: "1 file", "2 files".
+func plural(n int, thing string) string {
+	if n == 1 {
+		return "1 " + thing
+	}
+	return strconv.Itoa(n) + " " + thing + "s"
 }

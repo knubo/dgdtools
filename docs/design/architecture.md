@@ -280,7 +280,8 @@ need the lib root (the directory that is `/` to the driver).
    the lib root. A config that does not say where the lib is (`root:`,
    `profile:` or `lib_path:`) has none: its files get the file-local
    rules, and a note says how to give it one. With no path
-   arguments, discovery starts at the cwd and the whole root is linted.
+   arguments, the cwd is the path, as with ruff and Biome: its files are
+   linted, against the whole lib of the project found from it.
 3. **One project per invocation.** If the arguments discover different
    root configs `dgdtools lint` exits 2 naming both, like `go` and
    `cargo` when packages span modules. A whole-lib index has exactly one

@@ -173,12 +173,12 @@ func TestFormatSettingsPerFile(t *testing.T) {
 	out = show(filepath.Join(dir, "two/lib/d"))
 	assert.Contains(t, out, "deep.c\n@@ -1,4 +1,4 @@\n void f() {\n-if (x)\n-y();\n+        if (x)\n+                y();\n")
 	assert.Contains(t, out, "mine.c\n@@ -1,4 +1,4 @@\n void f() {\n-if (x)\n-y();\n+\tif (x)\n+\t\ty();\n")
-	// A project below that cannot be resolved is an error for its files,
-	// as it is when they are named by themselves; the rest is done.
-	code, listed, errs = dgdtools(t, "", "format", "--check", "-q", filepath.Join(dir, "lost"))
-	assert.Equal(t, 2, code)
-	assert.Contains(t, errs, `profile "not-installed" not found`)
-	assert.Equal(t, []string{"a.c"}, relLines(listed, filepath.Join(dir, "lost")))
+	// A profile that is not there is what lint needs: a file is still
+	// formatted by its settings, with a note.
+	code, listed, errs = dgdtools(t, "", "format", "--check", filepath.Join(dir, "lost"))
+	assert.Equal(t, 1, code)
+	assert.Contains(t, errs, `note: formatting by the settings without it: profile "not-installed" not found`)
+	assert.Equal(t, []string{"a.c", "own/mine.c"}, relLines(listed, filepath.Join(dir, "lost")))
 	// A file named explicitly is formatted even if excluded.
 	assert.Contains(t, show(filepath.Join(dir, "two/lib/d/old/gone.c")), "+  if (x)\n")
 

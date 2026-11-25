@@ -71,8 +71,7 @@ func profileCmd(ctx context.Context, args []string, _ io.Reader, stdout, stderr 
 	case len(pos) >= 1 && len(pos) <= 3 && pos[0] == "show":
 		return profileShow(p, project.profile, pos[1:], stdout, stderr)
 	}
-	fs.Usage()
-	return 2
+	return usageError(fs, "want build, or show [NAME|FILE] [LIBPATH]")
 }
 
 // profileShow summarizes a profile, or prints one of its stubs.

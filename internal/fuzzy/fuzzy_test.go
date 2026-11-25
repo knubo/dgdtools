@@ -33,3 +33,15 @@ func TestScore(t *testing.T) {
 	assert.True(t, New(" ").Empty())
 	assert.False(t, New("a").Empty())
 }
+
+func TestNearest(t *testing.T) {
+	names := []string{"format", "lint", "root", "profile", "lib_path"}
+	for q, want := range map[string]string{
+		"fromat": "format", "lnt": "lint", "rot": "root", "profiel": "profile",
+		"libpath": "lib_path", "xyz": "", "formatting": "",
+	} {
+		if got := Nearest(q, names); got != want {
+			t.Errorf("Nearest(%q) = %q, want %q", q, got, want)
+		}
+	}
+}

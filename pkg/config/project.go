@@ -107,6 +107,11 @@ type DiscoverOptions struct {
 	// Format are format settings that win over every configuration file
 	// (command-line flags).
 	Format Format
+	// SettingsOnly is for a caller that needs a file's settings and what
+	// the configuration file itself says, not the mudlib (the formatter):
+	// a profile or a driver configuration that cannot be read is a note
+	// of the project's, not an error, and the project goes without it.
+	SettingsOnly bool
 
 	// WorkDir is the absolute directory that relative paths (the paths
 	// to discover from, ConfigPath, Root, a Profile file) are relative
@@ -298,31 +303,49 @@ func resolve(fs vfs.FS, opt DiscoverOptions, found, base string) (*Project, erro
 	if ref == "" {
 		ref, rel = cfg.Profile, cfg.Dir
 	}
+	// A caller that needs the settings only goes without what it cannot
+	// read of the mudlib.
+	lenient := func(err error) error {
+		if opt.SettingsOnly {
+			prj.Notes = append(prj.Notes, diag.Note{Kind: diag.NoteUnread, Message: err.Error()})
+			return nil
+		}
+		return err
+	}
+	var prof *profile.Profile
 	if ref != "" {
 		p, err := profile.Load(fs, ref, rel, opt.ProfileDirs)
 		if err != nil {
-			return nil, err
+			if err := lenient(err); err != nil {
+				return nil, err
+			}
 		}
-		prj.Profile = p
-		prj.inputs = append(prj.inputs, p.Path)
-		applyProfile(cfg, p)
+		prof = p
+	}
+	if prof != nil {
+		prj.Profile = prof
+		prj.inputs = append(prj.inputs, prof.Path)
+		applyProfile(cfg, prof)
 		// What the profile says is checked like what the file says.
 		if err := cfg.Validate(); err != nil {
-			return nil, fmt.Errorf("%s: %w", p.Path, err)
+			return nil, fmt.Errorf("%s: %w", prof.Path, err)
 		}
-	} else if dc := cfg.ProfileBuild.DriverConfig; dc != "" {
+	} else if dc := cfg.ProfileBuild.DriverConfig; dc != "" && ref == "" {
 		// A whole lib with its build inputs at hand needs no profile.
 		if !filepath.IsAbs(dc) {
 			dc = filepath.Join(cfg.Dir, dc)
 		}
-		d, err := ReadDriverConfig(fs, dc)
-		if err != nil {
-			return nil, fmt.Errorf("profile_build.driver_config: %w", err)
-		}
 		prj.inputs = append(prj.inputs, dc)
-		d.Apply(cfg)
-		if err := cfg.Validate(); err != nil {
-			return nil, fmt.Errorf("%s: %w", dc, err)
+		switch d, err := ReadDriverConfig(fs, dc); {
+		case err != nil:
+			if err := lenient(fmt.Errorf("profile_build.driver_config: %w", err)); err != nil {
+				return nil, err
+			}
+		default:
+			d.Apply(cfg)
+			if err := cfg.Validate(); err != nil {
+				return nil, fmt.Errorf("%s: %w", dc, err)
+			}
 		}
 	}
 
