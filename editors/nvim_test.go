@@ -136,7 +136,7 @@ func TestNeovimClient(t *testing.T) {
 	require.Equal(t, 26, col, "bytes, where UTF-16 units would be 22")
 	assert.Equal(t, []string{"4:26-28 S002 dgdtools", "5:14-19 E002 dgdtools"}, got.First)
 	assert.Equal(t, []string{"5:14-19 E002 dgdtools"}, got.Second)
-	assert.Equal(t, strings.Split("void\nf()\n{\n    string s;\n\n    /* blåbær \U0001F600 */ s = \"x\";\n    s = \"one\" + \"two\";\n}", "\n"), got.Text)
+	assert.Equal(t, strings.Split("void f()\n{\n    string s;\n\n    /* blåbær \U0001F600 */ s = \"x\";\n    s = \"one\" + \"two\";\n}", "\n"), got.Text)
 	assert.Contains(t, log, "msg=initialized encoding=utf-8")
 }
 

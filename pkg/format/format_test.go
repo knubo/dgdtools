@@ -22,65 +22,42 @@ func fmtSrc(t *testing.T, src string, o Options) string {
 	return string(out)
 }
 
-func TestKNFHeaders(t *testing.T) {
-	// One-line definition explodes to KNF: specs+type line, name at col 0,
-	// brace on its own line.
-	in := "static void create() {\n    ::create();\n}\n"
-	want := "static void\ncreate()\n{\n    ::create();\n}\n"
+func TestHeadersAsWritten(t *testing.T) {
+	// A function's header keeps its lines: the formatter changes the
+	// spacing in it, as anywhere, and never where it breaks.
+	for _, in := range []string{
+		"static void create() {\n    ::create();\n}\n",
+		"static void\ncreate()\n{\n    ::create();\n}\n",
+		"static void create()\n{\n    ::create();\n}\n",
+		"add_penalty(int pen) {\n    return pen;\n}\n",
+		"static void\nset_count(int n);\nstring *\nquery_names();\n",
+		"SETUP_COMMAND\n\nstatic int main(string str) {\n    return 1;\n}\n",
+		"static void /* ctor */ create() {\n    ::create();\n}\n",
+	} {
+		assert.Equal(t, in, fmtSrc(t, in, Options{}))
+	}
+	// Spacing is normalized inside it.
+	in := "string * f( int x ) {\n    return ({ });\n}\nstatic   int\n  g (  ) ;\n"
+	want := "string *f(int x) {\n    return ({ });\n}\nstatic int\ng();\n"
 	assert.Equal(t, want, fmtSrc(t, in, Options{}))
-
-	// Already-KNF input is a fixed point.
-	assert.Equal(t, want, fmtSrc(t, want, Options{}))
-
-	// A specifier macro is part of the header, whether the project names
-	// it or the file defines it.
-	in = "public nomask int query_count() {\n    return 1;\n}\n"
-	want = "public nomask int\nquery_count()\n{\n    return 1;\n}\n"
+	in = "public nomask int   query_count( ){\n    return 1;\n}\n"
+	want = "public nomask int query_count() {\n    return 1;\n}\n"
 	assert.Equal(t, want, fmtSrc(t, in, Options{Macros: map[string]pp.Class{"public": pp.ClassEmpty}}))
-	in = "#define visible\nvisible\nint\nquery_count() {\n    return 1;\n}\n"
-	want = "#define visible\nvisible int\nquery_count()\n{\n    return 1;\n}\n"
+	in = "status *  query_flags(status all)\n{\nreturn flags;\n}\n"
+	want = "status *query_flags(status all)\n{\n    return flags;\n}\n"
 	assert.Equal(t, want, fmtSrc(t, in, Options{}))
-
-	// So is a return type that is a macro from a header the formatter
-	// does not read.
-	in = "status *query_flags(status all) {\n    return flags;\n}\n"
-	want = "status *\nquery_flags(status all)\n{\n    return flags;\n}\n"
-	assert.Equal(t, want, fmtSrc(t, in, Options{}))
-
-	// A name that only may be a specifier macro (it stands where one
-	// could) is left where it is: the header begins after it.
-	in = "SETUP_COMMAND\n\nstatic int main(string str) {\n    return 1;\n}\n"
-	want = "SETUP_COMMAND\n\nstatic int\nmain(string str)\n{\n    return 1;\n}\n"
-	assert.Equal(t, want, fmtSrc(t, in, Options{}))
-
-	// K&R typeless: no header line, brace still gets its own line.
-	in = "add_penalty(int pen) {\n    return pen;\n}\n"
-	want = "add_penalty(int pen)\n{\n    return pen;\n}\n"
-	assert.Equal(t, want, fmtSrc(t, in, Options{}))
-
-	// Prototypes collapse to one line, spaced like any declaration.
-	in = "static void\nset_count(int n);\nstring *\nquery_names();\n"
-	want = "static void set_count(int n);\nstring *query_names();\n"
-	assert.Equal(t, want, fmtSrc(t, in, Options{}))
-
-	// Headers containing comments are left in their original layout.
-	in = "static void /* ctor */ create() {\n    ::create();\n}\n"
-	out := fmtSrc(t, in, Options{})
-	assert.Contains(t, out, "static void /* ctor */ create() {")
 }
 
 func TestOneLinersPreserved(t *testing.T) {
 	// A definition written on one line stays on one line (the accessor
-	// idiom) — only its spacing is normalized. Like gofmt.
-	in := "string query_key_code() { return key_code; }\nvoid   set_key_code(string c) { key_code=c; }\n"
-	want := "string query_key_code() { return key_code; }\nvoid set_key_code(string c) { key_code = c; }\n"
+	// idiom); only its spacing is normalized. Like gofmt.
+	in := "string query_key_code() { return key_code; }\nvoid   set_key_code(string c) { key_code=c; }\nint open() { return 1; }\n"
+	want := "string query_key_code() { return key_code; }\nvoid set_key_code(string c) { key_code = c; }\nint open() { return 1; }\n"
 	assert.Equal(t, want, fmtSrc(t, in, Options{}))
-
-	// Idempotent, and multi-line definitions still explode to KNF.
 	assert.Equal(t, want, fmtSrc(t, want, Options{}))
+	// A body that ends on a line of its own keeps that line too.
 	in = "string query_key_code() { return key_code;\n}\n"
-	want = "string\nquery_key_code()\n{\n    return key_code;\n}\n"
-	assert.Equal(t, want, fmtSrc(t, in, Options{}))
+	assert.Equal(t, in, fmtSrc(t, in, Options{}))
 }
 
 func TestControlFlowCuddling(t *testing.T) {
@@ -340,7 +317,7 @@ func TestConditionalBranches(t *testing.T) {
 	// continues from the branch the preprocessor model selects.
 	in := "void f() {\n#ifdef A\nif (a) {\n#else\nif (b) {\n#endif\nc();\n}\n" +
 		"#if 0\nwhile (x)\ny();\nif (q) {\n#endif\nz();\n}\n"
-	want := "void\nf()\n{\n#ifdef A\n    if (a) {\n#else\n    if (b) {\n#endif\n        c();\n    }\n" +
+	want := "void f() {\n#ifdef A\n    if (a) {\n#else\n    if (b) {\n#endif\n        c();\n    }\n" +
 		"#if 0\n    while (x)\n        y();\n    if (q) {\n#endif\n    z();\n}\n"
 	assert.Equal(t, want, fmtSrc(t, in, Options{}))
 	assert.Equal(t, want, fmtSrc(t, want, Options{}))
@@ -348,7 +325,7 @@ func TestConditionalBranches(t *testing.T) {
 	// Each branch is read by the parser in turn: the #else of a function
 	// is a function too.
 	in = "#ifdef B\nint g() {\nif (a)\nreturn 1;\n#else\nint g(int x) {\nif (b)\nreturn 2\n+ x;\n#endif\nreturn 0;\n}\n"
-	want = "#ifdef B\nint\ng()\n{\n    if (a)\n        return 1;\n#else\nint\ng(int x)\n{\n    if (b)\n        return 2\n            + x;\n#endif\n    return 0;\n}\n"
+	want = "#ifdef B\nint g() {\n    if (a)\n        return 1;\n#else\nint g(int x) {\n    if (b)\n        return 2\n            + x;\n#endif\n    return 0;\n}\n"
 	assert.Equal(t, want, fmtSrc(t, in, Options{}))
 
 	// A conditional inside a statement, and nested ones.
@@ -358,7 +335,7 @@ func TestConditionalBranches(t *testing.T) {
 
 	// The branch selected is the project's: a name it predefines decides.
 	in = "void f() {\n#ifdef DEBUG\n{\n#endif\nx();\n#ifdef DEBUG\n}\n#endif\n}\n"
-	assert.Equal(t, "void\nf()\n{\n#ifdef DEBUG\n    {\n#endif\n        x();\n#ifdef DEBUG\n    }\n#endif\n}\n",
+	assert.Equal(t, "void f() {\n#ifdef DEBUG\n    {\n#endif\n        x();\n#ifdef DEBUG\n    }\n#endif\n}\n",
 		fmtSrc(t, in, Options{Defined: map[string]bool{"DEBUG": true}}))
 }
 
@@ -375,7 +352,7 @@ func TestErrorRegions(t *testing.T) {
 	// A declaration the parser gives up on: the brace-counting fallback,
 	// and the next declaration is unaffected.
 	in = "bad(a, new) {\nif (a) {\nb();\n}\n}\nint ok() {\nreturn 1;\n}\n"
-	want = "bad(a, new) {\n    if (a) {\n        b();\n    }\n}\nint\nok()\n{\n    return 1;\n}\n"
+	want = "bad(a, new) {\n    if (a) {\n        b();\n    }\n}\nint ok() {\n    return 1;\n}\n"
 	assert.Equal(t, want, fmtSrc(t, in, Options{}))
 
 	// A macro whose arguments are not expressions.
@@ -424,12 +401,12 @@ func TestNestedLiterals(t *testing.T) {
 // the block: the brace is the block's, and the result is a fixed point.
 func TestMissingBody(t *testing.T) {
 	for in, want := range map[string]string{
-		"f(){\nif(1)}":                                          "f()\n{\n    if (1)\n}\n",
-		"void f()\n{\n    if (x) }\n":                           "void\nf()\n{\n    if (x)\n}\n",
-		"void f()\n{\n    while (x) }\n":                        "void\nf()\n{\n    while (x)\n}\n",
-		"void f()\n{\n    for (;;) }\n":                         "void\nf()\n{\n    for (;;)\n}\n",
-		"void f()\n{\n    if (x) { if (y) } }\n":                "void\nf()\n{\n    if (x) { if (y) }\n}\n",
-		"void f()\n{\n    x = \"a\" \"b\";\n    if (x = 1) }\n": "void\nf()\n{\n    x = \"a\" \"b\";\n    if (x = 1)\n}\n",
+		"f(){\nif(1)}":                                          "f() {\n    if (1) }\n",
+		"void f()\n{\n    if (x) }\n":                           "void f()\n{\n    if (x) }\n",
+		"void f()\n{\n    while (x) }\n":                        "void f()\n{\n    while (x) }\n",
+		"void f()\n{\n    for (;;) }\n":                         "void f()\n{\n    for (;;) }\n",
+		"void f()\n{\n    if (x) { if (y) } }\n":                "void f()\n{\n    if (x) { if (y) } }\n",
+		"void f()\n{\n    x = \"a\" \"b\";\n    if (x = 1) }\n": "void f()\n{\n    x = \"a\" \"b\";\n    if (x = 1) }\n",
 	} {
 		assert.Equal(t, want, fmtSrc(t, in, Options{}), "%q", in)
 		assert.Equal(t, want, fmtSrc(t, want, Options{}), "%q", in)
@@ -441,7 +418,7 @@ func TestMissingBody(t *testing.T) {
 func TestOddTokensStayWhatTheyAre(t *testing.T) {
 	for in, want := range map[string]string{
 		// A '#' in a line is no directive, and is not made one.
-		"A(){#0\n00": "A()\n{ # 0\n    00\n",
+		"A(){#0\n00": "A() { # 0\n    00\n",
 		// A number does not take the '.' after it.
 		"int x = 0 .a;\n": "int x = 0 .a;\n",
 		// A directive that ends the file without ending.
@@ -450,7 +427,7 @@ func TestOddTokensStayWhatTheyAre(t *testing.T) {
 		"#/*\n":          "#/*\n",
 		"#endif":         "#endif\n",
 		// The end of the file ends a line, before it is written to.
-		"A(){for(;;)\n{": "A()\n{\n    for (;;) {\n",
+		"A(){for(;;)\n{": "A() { for (;;) {\n",
 		// A line break keeps its bytes, the last one too, unless it is a
 		// carriage return alone.
 		"\r\n\r\n0\n\n":      "\r\n\r\n0\n",
@@ -466,7 +443,7 @@ func TestOddTokensStayWhatTheyAre(t *testing.T) {
 func TestUnclosedBlock(t *testing.T) {
 	src := "void\nf()\n{\n    if (x) {\n        y();\n    }\n\n    retrieve()\n    {\n        move();\n        return 1;\n    }\n"
 	assert.Equal(t, src, fmtSrc(t, src, Options{}))
-	assert.Equal(t, "A()\n{\n    rlimits (0; 0)\n    { }\n", fmtSrc(t, "A() {rlimits(0;0)\n{}", Options{}))
+	assert.Equal(t, "A() { rlimits (0; 0)\n    { }\n", fmtSrc(t, "A() {rlimits(0;0)\n{}", Options{}))
 }
 
 // The gate holds the comments too: all of them, in order, with nothing

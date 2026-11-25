@@ -335,8 +335,8 @@ func gapNewlines(gap []token.Token) int {
 }
 
 // layout writes the trivia of a gap, or of the part of one that a skip
-// marker leaves to the formatter, in the one style: header plans,
-// cuddling, blank-line capping, spacing normalization, comments kept.
+// marker leaves to the formatter, in the one style: cuddling,
+// blank-line capping, spacing normalization, comments kept.
 // resumed says the part follows a comment already written (the marker
 // that turned the formatter back on) or rows of the gap that are kept,
 // and so must not be joined to what is before it; tail says it reaches
@@ -348,21 +348,6 @@ func (p *printer) layout(gap []token.Token, next int, resumed, tail bool) {
 		return
 	}
 	hasComments := resumed || gapComments(gap)
-
-	// Planned KNF header layout (headers with comments get no plan).
-	if !hasComments && p.prev >= 0 {
-		if p.plan.has(next, join) {
-			p.buf.WriteString(p.sep(next))
-			return
-		}
-		// A '#' that is not a directive's stays in its line: at the start
-		// of one it would be a directive.
-		if k := p.f.Tokens[next].Kind; (p.plan.has(next, breakBefore) || p.plan.has(p.prev, breakAfter)) && k != token.Hash && k != token.HashHash {
-			p.writeNewline(nil)
-			p.indent(next, p.indentOf(next))
-			return
-		}
-	}
 
 	// Cuddle control-flow braces and else.
 	if !hasComments && gapNewlines(gap) > 0 && p.shouldCuddle(next) {

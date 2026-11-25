@@ -312,6 +312,6 @@ func TestNestedProject(t *testing.T) {
 
 	code, _, errs = dgdtools(t, "", "format", "-q", dir)
 	assert.Equal(t, 0, code, errs)
-	assert.Equal(t, "int\nf()\n{\n    return 1;\n}\n", read(t, filepath.Join(dir, "a.c")))
-	assert.Equal(t, "int\nf()\n{\n\treturn 1;\n}\n", read(t, filepath.Join(own, "b.c")))
+	assert.Equal(t, "int f() {\n    return 1;\n}\n", read(t, filepath.Join(dir, "a.c")))
+	assert.Equal(t, "int f() {\n\treturn 1;\n}\n", read(t, filepath.Join(own, "b.c")))
 }

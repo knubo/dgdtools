@@ -28,16 +28,15 @@
 // `dgdtools-ignore-end format` that answers it (pkg/directive) nothing is
 // touched, and Lines formats only part of a file.
 //
-// Style: KNF as practiced in DGD-era LPC. Function definitions get their
-// specifiers and return type on one line, the name at column 0, and the
-// opening brace on its own line at column 0; control-flow braces are
-// cuddled. Statements are indented by their nesting, with or without
-// braces; case labels sit at the switch statement's level; a line that
-// continues a statement is indented one level further. Horizontal spacing
-// between tokens is normalized gofmt-style while the author's line breaks
-// are preserved. Comments are never reflowed: line comments keep their
-// bytes, multi-line block comments are shifted whole, and function
-// headers containing comments are left in their original layout.
+// Style: only spacing and indentation are chosen; the author's line
+// breaks are kept, function headers and one-line definitions included,
+// except that control-flow braces written Allman-style are cuddled and
+// runs of blank lines are capped. Statements are indented by their
+// nesting, with or without braces; case labels sit at the switch
+// statement's level; a line that continues a statement is indented one
+// level further. Horizontal spacing between tokens is normalized
+// gofmt-style. Comments are never reflowed: line comments keep their
+// bytes and multi-line block comments are shifted whole.
 package format
 
 import (

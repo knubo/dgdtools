@@ -223,11 +223,10 @@ its width, and line endings (`format:` above; `--indent-style`,
 `--indent-width` and `--line-endings` on the command line). Everything
 else is decided:
 
-- Function definitions in KNF: specifiers and return type on one line,
-  the name at column 0 (so `grep '^name('` finds a definition), braces
-  on their own lines.
-- Definitions written entirely on one line stay on one line
-  (`string query_code() { return code; }`).
+- Function headers keep their lines: a return type on a line of its
+  own stays there, `int f() {` stays on one line, and a definition
+  written on one line stays one line (`string query_code() { return code; }`);
+  only the spacing in them is normalized.
 - Control-flow braces are cuddled (`if (x) {`, `} else {`) when the
   source uses Allman layout; one-line brace blocks keep their own lines.
 - Statements are indented by their nesting, with or without braces: the

@@ -15,9 +15,9 @@ import (
 
 const (
 	messy     = "void f() {\nif (x)\ny();\n}\n"
-	formatted = "void\nf()\n{\n    if (x)\n        y();\n}\n"
-	indent2   = "void\nf()\n{\n  if (x)\n    y();\n}\n"
-	tabbed    = "void\nf()\n{\n\tif (x)\n\t\ty();\n}\n"
+	formatted = "void f() {\n    if (x)\n        y();\n}\n"
+	indent2   = "void f() {\n  if (x)\n    y();\n}\n"
+	tabbed    = "void f() {\n\tif (x)\n\t\ty();\n}\n"
 )
 
 func TestFormatModes(t *testing.T) {
@@ -45,7 +45,7 @@ func TestFormatModes(t *testing.T) {
 	// --diff prints unified diffs, writes nothing and exits 1.
 	code, out, _ = dgdtools(t, "", "format", "--diff", "a.c", "b.c")
 	assert.Equal(t, 1, code)
-	assert.True(t, strings.HasPrefix(out, "--- a.c\n+++ a.c\n@@ -1,4 +1,6 @@\n-void f() {\n-if (x)\n-y();\n+void\n+f()\n+{\n+    if (x)\n+        y();\n }\n"), out)
+	assert.True(t, strings.HasPrefix(out, "--- a.c\n+++ a.c\n@@ -1,4 +1,4 @@\n void f() {\n-if (x)\n-y();\n+    if (x)\n+        y();\n }\n"), out)
 	assert.NotContains(t, out, "b.c")
 	assert.Equal(t, messy, read(t, a))
 	code, out, _ = dgdtools(t, "", "format", "--diff", "b.c")
@@ -159,9 +159,9 @@ func TestFormatSettingsPerFile(t *testing.T) {
 	// found from the file, not from where the command runs.
 	t.Chdir(filepath.Join(dir, "none"))
 	out := show(filepath.Join(dir, "two/lib/d/a.c"), filepath.Join(dir, "tabs/b.c"), "c.c")
-	assert.Contains(t, out, "a.c\n@@ -1,4 +1,6 @@\n-void f() {\n-if (x)\n-y();\n+void\n+f()\n+{\n+  if (x)\n+    y();\n")
-	assert.Contains(t, out, "b.c\n@@ -1,4 +1,6 @@\n-void f() {\n-if (x)\n-y();\n+void\n+f()\n+{\n+\tif (x)\n+\t\ty();\n")
-	assert.Contains(t, out, "+++ c.c\n@@ -1,4 +1,6 @@\n-void f() {\n-if (x)\n-y();\n+void\n+f()\n+{\n+    if (x)\n+        y();\n")
+	assert.Contains(t, out, "a.c\n@@ -1,4 +1,4 @@\n void f() {\n-if (x)\n-y();\n+  if (x)\n+    y();\n")
+	assert.Contains(t, out, "b.c\n@@ -1,4 +1,4 @@\n void f() {\n-if (x)\n-y();\n+\tif (x)\n+\t\ty();\n")
+	assert.Contains(t, out, "+++ c.c\n@@ -1,4 +1,4 @@\n void f() {\n-if (x)\n-y();\n+    if (x)\n+        y();\n")
 
 	// A directory: the excludes of its project are matched from the lib
 	// root wherever the walk starts; a settings scope adjusts the files
@@ -171,8 +171,8 @@ func TestFormatSettingsPerFile(t *testing.T) {
 	assert.Equal(t, 1, code, errs)
 	assert.Equal(t, []string{"a.c", "own/mine.c", "sub/deep.c"}, relLines(listed, filepath.Join(dir, "two/lib/d")))
 	out = show(filepath.Join(dir, "two/lib/d"))
-	assert.Contains(t, out, "deep.c\n@@ -1,4 +1,6 @@\n-void f() {\n-if (x)\n-y();\n+void\n+f()\n+{\n+        if (x)\n+                y();\n")
-	assert.Contains(t, out, "mine.c\n@@ -1,4 +1,6 @@\n-void f() {\n-if (x)\n-y();\n+void\n+f()\n+{\n+\tif (x)\n+\t\ty();\n")
+	assert.Contains(t, out, "deep.c\n@@ -1,4 +1,4 @@\n void f() {\n-if (x)\n-y();\n+        if (x)\n+                y();\n")
+	assert.Contains(t, out, "mine.c\n@@ -1,4 +1,4 @@\n void f() {\n-if (x)\n-y();\n+\tif (x)\n+\t\ty();\n")
 	// A project below that cannot be resolved is an error for its files,
 	// as it is when they are named by themselves; the rest is done.
 	code, listed, errs = dgdtools(t, "", "format", "--check", "-q", filepath.Join(dir, "lost"))
@@ -341,7 +341,7 @@ func TestFormatProfileDialectAndConventions(t *testing.T) {
 	}}
 	data, err := p.Marshal()
 	require.NoError(t, err)
-	const src = "visible function make() {\nreturn 0;\n}\n"
+	const src = "visible function*make() {\nreturn 0;\n}\n"
 	dir := tree(t, map[string]string{
 		"mine/test.profile": string(data),
 		"mine/dgdtools.yml": "profile: test\n",
@@ -351,15 +351,15 @@ func TestFormatProfileDialectAndConventions(t *testing.T) {
 	// this is a function definition.
 	code, out, errs := dgdtools(t, src, "format", "--stdin-filename", filepath.Join(dir, "mine/a.c"))
 	assert.Equal(t, 0, code, errs)
-	assert.Equal(t, "visible function\nmake()\n{\n    return 0;\n}\n", out)
+	assert.Equal(t, "visible function *make() {\n    return 0;\n}\n", out)
 	// Without it the same text is not one.
 	code, out, _ = dgdtools(t, src, "format", "--stdin-filename", filepath.Join(dir, "bare/a.c"))
 	assert.Equal(t, 0, code)
-	assert.Equal(t, "visible function make() {\n    return 0;\n}\n", out)
+	assert.Equal(t, "visible function * make() {\n    return 0;\n}\n", out)
 	// The profile can be named on the command line.
 	code, out, _ = dgdtools(t, src, "format", "--profile", filepath.Join(dir, "mine/test.profile"), "--stdin-filename", filepath.Join(dir, "bare/a.c"))
 	assert.Equal(t, 0, code)
-	assert.Contains(t, out, "\nmake()\n{\n")
+	assert.Contains(t, out, "function *make()")
 }
 
 // A file is replaced whole: the new text is written beside it and renamed

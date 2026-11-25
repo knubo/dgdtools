@@ -57,10 +57,10 @@ the reflowing formatters do not have:
 
 ### 2.2 No line wrapping
 
-Lines are never broken for length, and the author's line breaks inside
-expressions and argument lists are kept, as in gofmt. The formatter
-moves a line break only where structure fixes it: the header and braces
-of a function definition, a control statement's `{`, `else`.
+Lines are never broken for length, and the author's line breaks are
+kept, as in gofmt, function headers included (2.3). The formatter moves
+a line break only to cuddle a control statement's `{` and an `else`
+written Allman-style, and to cap runs of blank lines.
 
 Why not wrap:
 
@@ -102,16 +102,19 @@ every file differ in every line the first time it runs.
 
 Two things that could be options are the house style instead:
 
-- **Function headers: KNF, always.** Specifiers and return type on one
-  line, the name at column 0, the brace on its own line. The reason for
-  the split form is practical and specific to how mud code is worked on:
-  `grep '^name('` finds the definition of a function in any file with
-  any tool, including the ones available in a mud's own editor. A
-  definition written entirely on one line (`int query_x() { return x; }`)
-  is left alone; that is a vertical decision the author made, not a
-  header style. No strong reason for offering the joined form
-  (`static void create()` on one line) survived: it is a preference,
-  and a preference is what an opinionated formatter exists to end.
+- **Function headers: as written.** The formatter normalizes the
+  spacing in a header (`string * f( int x )` becomes `string *f(int x)`)
+  and never where it breaks: a return type on its own line stays there,
+  `static void create() {` stays on one line, and a definition written
+  on one line (`int query_x() { return x; }`) stays one line. This is
+  gofmt's camp: a formatter that only chooses spacing and indentation is
+  one nobody has to argue with, and on this corpus forcing one header
+  layout was most of the line breaks the formatter moved (28,505 of the
+  edits over a 5,205-file sample lib changed lines; without it 4,535
+  do). An earlier version forced KNF (the name at column 0, so that
+  `grep '^name('` finds a definition); that is a reason for a style of
+  new code, which, if it is wanted, belongs in an opt-in lint rule, not
+  in the formatter. It is not built.
 - **Blank lines: at most two in a row, none at the end of a file,
   which ends with exactly one newline.** gofmt, Prettier and clang-format
   keep one; black keeps two between top-level definitions. Two is kept

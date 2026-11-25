@@ -20,16 +20,13 @@ const (
 	// token's level; a line that starts with anything else continues
 	// what came before.
 	head
-	binary      // '+' '-' '*' '&' between two operands
-	postfix     // '++' or '--' after its operand
-	ternary     // the '?' or ':' of a conditional expression
-	literal     // a brace of ({ }) or a bracket of ([ ])
-	block       // a brace of a block statement or function body
-	caseLabel   // 'case' or 'default' in the block of its switch
-	cuddle      // '{' or 'else' that joins the line before it when it stands alone
-	join        // stays on the line of the token before it
-	breakBefore // starts a line
-	breakAfter  // ends its line
+	binary    // '+' '-' '*' '&' between two operands
+	postfix   // '++' or '--' after its operand
+	ternary   // the '?' or ':' of a conditional expression
+	literal   // a brace of ({ }) or a bracket of ([ ])
+	block     // a brace of a block statement or function body
+	caseLabel // 'case' or 'default' in the block of its switch
+	cuddle    // '{' or 'else' that joins the line before it when it stands alone
 )
 
 // info is the plan for one token.
@@ -244,16 +241,6 @@ func (b *builder) startsLine(i int) bool {
 	return true
 }
 
-// multiline reports whether a line break lies between tokens a and b.
-func (b *builder) multiline(first, last int) bool {
-	for i := first; i <= last && i < len(b.f.Tokens); i++ {
-		if b.f.Tokens[i].Kind == token.Newline {
-			return true
-		}
-	}
-	return false
-}
-
 func (b *builder) decl(d syntax.Decl) {
 	first, last := d.Span()
 	switch d := d.(type) {
@@ -296,57 +283,6 @@ func (b *builder) function(d *syntax.FuncDecl) {
 	}
 	if d.Body != nil {
 		b.block(d.Body, 0, false)
-	}
-	b.header(d)
-}
-
-// header plans the KNF layout of a function's header and of the braces of
-// its body. A header with a comment or a directive in it is left as
-// written, and so is a definition written entirely on one line: that is a
-// deliberate vertical decision (the accessor idiom).
-func (b *builder) header(d *syntax.FuncDecl) {
-	toks := b.f.Tokens
-	first, _ := d.Span()
-	for i := first; i <= d.RParen; i++ {
-		switch toks[i].Kind {
-		case token.LineComment, token.BlockComment, token.Directive:
-			return
-		}
-	}
-	body := d.Body
-	if body != nil && !b.multiline(first, body.Last) {
-		return
-	}
-	// A name the parser took for a specifier macro only because of where
-	// it stands (`SETUP` on the line above `static int f()`) may be
-	// anything: the header that is laid out begins after it.
-	for _, spec := range d.Specs {
-		if spec.Kind == token.Ident && b.env.Lookup(string(b.f.Text(toks[spec.Tok]))) == nil {
-			first = spec.Tok + 1
-		}
-	}
-	lead := false // specifiers, type or stars come before the name
-	for i := first; i < d.NameTok; i++ {
-		if toks[i].Kind.IsTrivia() {
-			continue
-		}
-		if lead {
-			b.mark(i, join)
-		}
-		lead = true
-	}
-	if lead {
-		if body != nil {
-			b.mark(d.NameTok, breakBefore) // name at column 0
-		} else {
-			b.mark(d.NameTok, join)
-		}
-	}
-	if body != nil {
-		b.markKind(body.First, token.LBrace, breakBefore|breakAfter)
-		if body.Last > body.First && !body.Unclosed {
-			b.markKind(body.Last, token.RBrace, breakBefore)
-		}
 	}
 }
 

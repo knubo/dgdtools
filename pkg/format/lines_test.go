@@ -37,9 +37,7 @@ func TestSkipMarkers(t *testing.T) {
 		"",
 	}, "\n")
 	want := strings.Join([]string{
-		"void",
-		"f()",
-		"{",
+		"void f() {",
 		"    x = 1;",
 		"    /* dgdtools-ignore-start format */",
 		"  exits = ([ \"north\" : \"/room/hall\",",

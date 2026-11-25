@@ -6,7 +6,7 @@ lint:
   rules:
     unformatted: info
 -- lib/obj/a.c --
-void f()
+void  f()
 {
     string s;
 
@@ -31,7 +31,7 @@ actions lib/obj/a.c 5:6-5:8 quickfix
 apply 0
 diagnostics lib/obj/a.c
 # A comment that is about the line already takes the next rule too.
-replace lib/obj/a.c "void f()\n{\n    string s;\n\n    /* dgdtools-ignore lint/sscanf-format */\n    s == \"x\" \"y\";\n}\n"
+replace lib/obj/a.c "void  f()\n{\n    string s;\n\n    /* dgdtools-ignore lint/sscanf-format */\n    s == \"x\" \"y\";\n}\n"
 actions lib/obj/a.c 5:6-5:6 quickfix
 apply 0
 diagnostics lib/obj/a.c
@@ -238,7 +238,7 @@ exit
 <   }
 < ]
 > apply 0
-| void f()\n
+| void  f()\n
 | {\n
 |     string s;\n
 | \n
@@ -331,7 +331,7 @@ exit
 <   }
 < ]
 > apply 0
-| void f()\n
+| void  f()\n
 | {\n
 |     string s;\n
 | \n
@@ -355,7 +355,7 @@ exit
 <   ]
 < }
 # A comment that is about the line already takes the next rule too.
-> replace lib/obj/a.c "void f()\n{\n    string s;\n\n    /* dgdtools-ignore lint/sscanf-format */\n    s == \"x\" \"y\";\n}\n"
+> replace lib/obj/a.c "void  f()\n{\n    string s;\n\n    /* dgdtools-ignore lint/sscanf-format */\n    s == \"x\" \"y\";\n}\n"
 > actions lib/obj/a.c 5:6-5:6 quickfix
 < [
 <   {
@@ -418,7 +418,7 @@ exit
 <   }
 < ]
 > apply 0
-| void f()\n
+| void  f()\n
 | {\n
 |     string s;\n
 | \n
@@ -536,7 +536,7 @@ exit
 < ]
 > apply 2
 | /* dgdtools-ignore-start lint/adjacent-strings */\n
-| void f()\n
+| void  f()\n
 | {\n
 |     string s;\n
 | \n
