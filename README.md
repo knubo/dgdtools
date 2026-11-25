@@ -71,7 +71,7 @@ mud/
 
 ```yaml
 # What the project is.
-root: lib                    # filesystem directory that is the lib's "/"
+root: lib                    # filesystem directory that is the mudlib's "/"
 exclude:                     # glob patterns, ** crosses directories
   - "**/attic/**"            # retired code kept for reference
   - "**/old/**"
@@ -80,8 +80,8 @@ exclude:                     # glob patterns, ** crosses directories
 dialect:
   slash_slash: true          # // comments (driver SLASHSLASH build flag)
   closures: false            # `function` keyword (driver CLOSURES flag)
-conventions:                 # the lib's own habits; none is built in
-  # The lib's functions that take the name of a function to call later,
+conventions:                 # the mudlib's own habits; none is built in
+  # The mudlib's functions that take the name of a function to call later,
   # and which argument (0-based) is what. The driver's call_other and
   # call_out are built in.
   call_registry:
@@ -126,13 +126,13 @@ only settings can differ from one directory to the next.
 |---|---|
 | `root` | The directory that is `/` to the driver; relative to the config file, which is the default. |
 | `profile` | The mudlib profile to work against: a name, found as `NAME.profile` next to the config file, in a directory listed in `$DGDTOOLS_PROFILE_PATH`, or in the user config directory (`~/.config/dgdtools/profiles/`); or a path to a profile file. No profile is built in. It supplies the driver settings, the shared headers and the signatures of shared objects, so a wizard needs nothing else. Files on disk always win over the profile. |
-| `lib_path` | The lib path of the directory a partial checkout is (`/usr/ann`), when its path on disk does not show it (the profile lists the lib's checkout patterns, such as `usr/*`). |
-| `exclude` | Globs, relative to the lib root, that directory walks skip. A file named on the command line is always taken. |
+| `lib_path` | The mudlib path of the directory a partial checkout is (`/usr/ann`), when its path on disk does not show it (the profile lists the mudlib's checkout patterns, such as `usr/*`). |
+| `exclude` | Globs, relative to the mudlib root, that directory walks skip. A file named on the command line is always taken. |
 | `dialect` | `slash_slash`, `closures`, `typechecking` (the driver's level; the rules that depend on it are silent while it is unknown), and `kfuns`: the kernel functions the driver has beyond stock DGD's, those of the extension modules it loads, each as a prototype (`"int *rusage()"`, `"string sha256(string text, varargs int rounds)"`). The editor shows them like the driver's own, which are built in. |
-| `include_dirs`, `include_file`, `auto_objects`, `create` | What the driver's config says: the include search path, the header included into every file, the object every object inherits, and the function a new object is initialized by. Usually read from `profile_build.driver_config` or the profile; set here they override both (a lib whose auto object receives the driver's `create` call and passes it on as another function names that function). |
-| `relative_object_paths` | What `"std/room"` (no leading slash) is relative to. DGD hands every `inherit` and every `call_other("path", …)` to the lib's driver object to resolve, so this is the lib's choice: `root` (the default, and what the driver's own functions such as `compile_object` do) or `file` (the directory of the file that says it, as in the kernel library). |
-| `conventions` | The lib's own habits; nothing here has a default. `specifier_macros: [public]` names empty macros that stand where a specifier does, and `macros: {FOREACH: statement}` says how to read a macro that cannot be classified from its `#define` (`expression`, `empty`, `specifier`, `type`, `string`, `statement`, `opaque`); `defines:` lists names to treat as defined in `#ifdef`. `call_registry`: the lib's functions that take the name of a function to call later, each with the argument that names the `function`, optionally the argument that says in which `object` (without it: `this_object()`) and the first of the `args` passed on; a function called in several ways lists its forms. `object_registry`: functions whose string argument is an object path (`compile_object`, `find_object`, `clone_object` are built in). `format_registry`: scanf-style functions and the position of their format string (`sscanf` is built in). `autosave_markers`: names whose mention marks an object as one that saves itself with `save_object`. `virtual_paths`: lib-path globs served by virtual-object daemons. |
-| `profile_build` | For whoever has the whole lib: `driver_config` (the DGD driver config), `share` (globs of shared code), `omit` (never put in a profile), `checkouts` (per-wizard tree patterns), `name`. Used by `dgdtools profile build`, and directly when linting the whole lib. |
+| `include_dirs`, `include_file`, `auto_objects`, `create` | What the driver's config says: the include search path, the header included into every file, the object every object inherits, and the function a new object is initialized by. Usually read from `profile_build.driver_config` or the profile; set here they override both (a mudlib whose auto object receives the driver's `create` call and passes it on as another function names that function). |
+| `relative_object_paths` | What `"std/room"` (no leading slash) is relative to. DGD hands every `inherit` and every `call_other("path", …)` to the mudlib's driver object to resolve, so this is the mudlib's choice: `root` (the default, and what the driver's own functions such as `compile_object` do) or `file` (the directory of the file that says it, as in the kernel library). |
+| `conventions` | The mudlib's own habits; nothing here has a default. `specifier_macros: [public]` names empty macros that stand where a specifier does, and `macros: {FOREACH: statement}` says how to read a macro that cannot be classified from its `#define` (`expression`, `empty`, `specifier`, `type`, `string`, `statement`, `opaque`); `defines:` lists names to treat as defined in `#ifdef`. `call_registry`: the mudlib's functions that take the name of a function to call later, each with the argument that names the `function`, optionally the argument that says in which `object` (without it: `this_object()`) and the first of the `args` passed on; a function called in several ways lists its forms. `object_registry`: functions whose string argument is an object path (`compile_object`, `find_object`, `clone_object` are built in). `format_registry`: scanf-style functions and the position of their format string (`sscanf` is built in). `autosave_markers`: names whose mention marks an object as one that saves itself with `save_object`. `virtual_paths`: lib-path globs served by virtual-object daemons. |
+| `profile_build` | For whoever has the whole mudlib: `driver_config` (the DGD driver config), `share` (globs of shared code), `omit` (never put in a profile), `checkouts` (per-wizard tree patterns), `name`. Used by `dgdtools profile build`, and directly when linting the whole mudlib. |
 
 ### Settings
 
@@ -142,7 +142,7 @@ only settings can differ from one directory to the next.
 | `format.indent_width` | Spaces per level, 1 to 16 (default 4). |
 | `format.line_endings` | `preserve` (default: every line break keeps its bytes), `lf` or `crlf`. |
 | `lint.rules` | Maps a rule name, code, or group (`all`, `syntax`, `runtime`, `suspicious`, `convention`) to `off`, `info`, `warning` or `error`, or to a mapping: `severity`, `max_per_file` (report at most that many findings of a rule in one file; the rest are counted), and, for one rule, its own options (`dgdtools explain RULE` lists them). Giving a severity turns the rule on. An option the rule does not have is an error, and so is setting one rule twice, by name and by code. |
-| `lint.overrides` | `[{paths: [globs], rules: {…}}]`: different rule settings for parts of the lib. |
+| `lint.overrides` | `[{paths: [globs], rules: {…}}]`: different rule settings for parts of the mudlib. |
 | `lint.baseline` | Baseline file name (default `dgdtools-baseline.json` next to the config). Root config only. |
 | `lint.fail_on` | Exit-1 threshold: `info`, `warning` or `error` (default). Root config only. |
 
@@ -187,7 +187,7 @@ tools know.
 
 A `dgdtools.yml` below a project that does not say `root: false` is a
 project of its own (a wizard's folder with `profile: NAME` in it, inside
-the whole lib). Its files are formatted by its own settings, and linted
+the whole mudlib). Its files are formatted by its own settings, and linted
 by naming that folder; a lint of the project above passes over them and
 says so.
 
@@ -216,7 +216,7 @@ A path is required (`.` is the working directory). A directory stands
 for the `.c` and `.h` files under it, minus the `exclude` globs of its
 project. A file is formatted from its own text and its settings alone;
 no other file is read, so the result is the same in an editor buffer, in
-a wizard's checkout and in the whole lib.
+a wizard's checkout and in the whole mudlib.
 
 There is one style and three settings: indentation with spaces or tabs,
 its width, and line endings (`format:` above; `--indent-style`,
@@ -290,7 +290,7 @@ reported (exit 2).
 
 You do not need the whole mud. Download your own directory, put a
 one-line `dgdtools.yml` in it that names your mud's profile, and lint
-there. On a lib that keeps its wizards under `/usr`, for a wizard called
+there. On a mudlib that keeps its wizards under `/usr`, for a wizard called
 ann:
 
 ```
@@ -312,21 +312,21 @@ looked for by name, in this order:
    on Windows `%AppData%\dgdtools\profiles\`).
 
 `profile: path/to/mymud.profile` works too, and `dgdtools profile show`
-prints the directories searched. A profile holds the lib's driver
+prints the directories searched. A profile holds the mudlib's driver
 settings, its shared headers (so `#include <std.h>` and the macros in it
 resolve) and the names and argument counts of the functions in the
 shared objects you inherit and call. With it the linter checks your code
-the way it would inside the full lib. Anything that is neither in your
-folder nor in the profile (another wizard's files, a part of the lib you
+the way it would inside the full mudlib. Anything that is neither in your
+folder nor in the profile (another wizard's files, a part of the mudlib you
 did not download) is *unknown*: nothing is said about it rather than
 guess.
 
-The linter has to know where in the lib your folder belongs. The profile
-lists the places the lib keeps such folders (here `usr/*`), so a folder
+The linter has to know where in the mudlib your folder belongs. The profile
+lists the places the mudlib keeps such folders (here `usr/*`), so a folder
 downloaded with its place in the path (`…/usr/ann/`) is recognized;
 anywhere else, add `lib_path: /usr/ann`. `dgdtools lint --profile mymud
 file.c` works without any config file (with `--lib-path /usr/ann`, run
-from the folder: the lib path is the working directory's), and so does `profile: mymud` in
+from the folder: the mudlib path is the working directory's), and so does `profile: mymud` in
 `~/.config/dgdtools/dgdtools.yml`, the user-level configuration that
 applies wherever no project has its own.
 
@@ -339,7 +339,7 @@ VikingMUD is one mud set up this way: its wizards' trees are
 viking`, and `examples/viking/dgdtools.yml` is the configuration its
 profile is built from.
 
-**For lib maintainers:** `dgdtools profile build` (with the whole lib and a
+**For mudlib maintainers:** `dgdtools profile build` (with the whole mudlib and a
 `profile_build:` section, above) writes `dgdtools.profile`: 114 KB for
 VikingMUD's 723 shared files. It contains each shared file's public
 interface, like a C header or a `.d.ts`: `#define`s and `#include`s of
@@ -392,7 +392,7 @@ concluded from an unknown. `--stats` shows how much was unknown.
 
 **What it needs.** Nothing, for the file-local rules: `dgdtools lint castle.c`
 with no config anywhere reports syntax errors and suspicious constructs.
-Cross-file rules need the lib root, which comes from the nearest
+Cross-file rules need the mudlib root, which comes from the nearest
 `dgdtools.yml` above the linted path (or `--root`); a root is never
 guessed. A file outside the root gets the file-local rules only.
 
@@ -403,7 +403,7 @@ guessed. A file outside the root gets the file-local rules only.
 | `syntax` | `E…` | what the DGD compiler rejects: an object with one does not load |
 | `runtime` | `R…` | code that compiles and then fails or silently returns nil: calls to functions and objects that do not exist |
 | `suspicious` | `S…` | legal constructs that are probably not what was meant |
-| `convention` | `C…` | a lib's own policy; off until asked for |
+| `convention` | `C…` | a mudlib's own policy; off until asked for |
 
 [docs/rules.md](docs/rules.md) describes every rule: what it finds,
 whether it is on by default, its options. It is written from the rule
@@ -411,11 +411,11 @@ table, as are `dgdtools rules` (the list) and `dgdtools explain RULE`
 (one rule). Rule names and codes are stable.
 
 The `E` rules were checked against DGD 1.7.9 compiling a 108,000-file
-lib: of 30,747 files flagged by an `E` rule, none compiles.
+mudlib: of 30,747 files flagged by an `E` rule, none compiles.
 
-### Adopting it on an old lib
+### Adopting it on an old mudlib
 
-A lib that predates DGD will have tens of thousands of findings in code
+A mudlib that predates DGD will have tens of thousands of findings in code
 nobody loads. Record them once and gate only on new ones:
 
 ```
@@ -469,7 +469,7 @@ TARGETS   lint/RULE, ...   a lint rule, by name or code
 A comment is a directive when it begins with the prefix; a comment that
 merely mentions it is prose. The plain form is about the line of code it
 stands on, or the next line when it stands alone. `grep -rn
-dgdtools-ignore` finds every exemption in a lib.
+dgdtools-ignore` finds every exemption in a mudlib.
 
 ### Conditional assignments
 
@@ -497,7 +497,7 @@ DGD rather than being duplicated as lint rules.
 
 The lifecycle function is the project's `create` function: the driver
 config's `create` parameter (read from `profile_build.driver_config` or
-the profile), and `create` when nothing says. A lib whose auto object
+the profile), and `create` when nothing says. A mudlib whose auto object
 receives the driver's call and passes it on under another name sets the
 project key (`create: create`), so that its profile carries it; other
 functions to hold to the same rule are the rule's option:
@@ -576,14 +576,14 @@ format` for a file or a selection. It also answers what a name is: go
 to definition (the header of an `#include`, the object of an `inherit`,
 the function of a call, a macro's `#define`, a variable or parameter), a
 hover with the declaration, the comment above it and where it is, and
-signature help in the arguments of a call, for the lib's functions and
+signature help in the arguments of a call, for the mudlib's functions and
 for the driver's kfuns alike. It completes what can be written where
 you type: the locals in scope, the object's variables and functions,
 macros, kfuns and keywords; after `::` and `->` the functions that can
 be called there; the paths of an `#include` and an `inherit`; the name
 in a `call_out("...")`. It lists the outline of a file (inherits,
 functions, variables, macros) and finds a function, a variable or a
-header's macro anywhere in the lib by a few letters of its name. Where
+header's macro anywhere in the mudlib by a few letters of its name. Where
 the tools cannot know (a call on an
 object held in a variable) they say so, or nothing, and never guess. It
 reads the same `dgdtools.yml` as the commands, so the editor and the
@@ -591,7 +591,7 @@ command line cannot disagree.
 [`editors/`](editors/README.md) has what each editor needs: syntax
 highlighting for VS Code and for Vim and Neovim, under the language name
 `dgdlpc`, a VS Code extension that starts the server, and how to start
-it from Neovim and others. A `.c` file is LPC there only inside a lib:
+it from Neovim and others. A `.c` file is LPC there only inside a mudlib:
 nothing claims the extension on a machine that has C sources too.
 
 ## License note

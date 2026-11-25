@@ -56,7 +56,7 @@ commands:
   rules                 list the lint rules
   explain RULE          describe one rule
   config [path]         show the project and the settings of a path
-  profile build         capture the whole lib as a profile
+  profile build         capture the whole mudlib as a profile
   profile show          summarize a profile, or print one of its stubs
   lsp                   run the language server, for an editor to talk to
   version               print the version
@@ -84,7 +84,7 @@ var commands = map[string]command{
 // which lists what works; they are known here so that whoever asks for
 // one is told what is the matter, and so that the names stay free.
 var reserved = map[string]string{
-	"rename": "renaming a symbol across the lib",
+	"rename": "renaming a symbol across the mudlib",
 }
 
 func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) int {
@@ -187,9 +187,9 @@ type projectFlags struct {
 func (f *projectFlags) register(fs *flag.FlagSet) {
 	fs.StringVar(&f.config, "config", "", "use this `file` as the configuration of every path, and no other")
 	fs.BoolVar(&f.noConfig, "no-config", false, "read no configuration file (dgdtools.yml, user-level, .editorconfig)")
-	fs.StringVar(&f.root, "root", "", "lib root `dir` (the driver's \"/\"); overrides the config")
+	fs.StringVar(&f.root, "root", "", "mudlib root `dir` (the driver's \"/\"); overrides the config")
 	fs.StringVar(&f.profile, "profile", "", "mudlib profile: a `name` (see `dgdtools profile show`) or a profile file")
-	fs.StringVar(&f.libPath, "lib-path", "", "the lib `path` of the directory this checkout is, when it is not the whole lib")
+	fs.StringVar(&f.libPath, "lib-path", "", "the mudlib `path` of the directory this checkout is, when it is not the whole mudlib")
 }
 
 // discover returns the options project discovery runs with.

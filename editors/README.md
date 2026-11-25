@@ -93,12 +93,12 @@ npm run build    # writes dist/extension.js, the one file VS Code runs
 (The packages were built here and looked into; none was installed:
 there is no VS Code on the machine this was written on.)
 
-Then say which files are LPC. The command **dgdtools: Treat This Folder
-as an LPC Lib** does (the command palette, or a folder's menu in the
+Then say which files are LPC. The command **dgdtools: Use DGD LPC for This
+Folder's .c/.h Files** does (the command palette, or a folder's menu in the
 explorer once the extension is at work), and the extension offers it
 when a folder with a `dgdtools.yml` is opened whose files are not LPC
 yet. What it writes is `files.associations` in the workspace's settings,
-so that it holds for this lib and nowhere else; by hand, in the lib's
+so that it holds for this mudlib and nowhere else; by hand, in the mudlib's
 own `.vscode/settings.json`:
 
 ```json
@@ -112,12 +112,12 @@ for one folder of a workspace with several, the patterns name the
 folder, since the setting is the whole window's: `**/lib/**/*.c` and
 `**/lib/**/*.h` for a folder `lib`. The command also lists
 Microsoft's C extensions in `.vscode/extensions.json` as
-`unwantedRecommendations`. **dgdtools: Stop Treating This Folder as an
-LPC Lib** takes out what the first command put in, and deletes a file it
+`unwantedRecommendations`. **dgdtools: Use C for This Folder's .c/.h
+Files** takes out what the first command put in, and deletes a file it
 leaves empty. A single
-file can be switched with *Change Language Mode* → *DGD LPC*.
+file can be switched with *Change Language Mode* → *LPC (DGD)*.
 
-A lib whose files are Latin-1 should also say so, or saving a file
+A mudlib whose files are Latin-1 should also say so, or saving a file
 opened as UTF-8 damages it:
 
 ```json
@@ -126,14 +126,14 @@ opened as UTF-8 damages it:
 }
 ```
 
-What the grammar cannot do, being one fixed file for every lib:
+What the grammar cannot do, being one fixed file for every mudlib:
 
 - `//` is always shown as a comment, whatever `dialect.slash_slash`
   says. Where the driver was built without it, `//` outside a string is
   a syntax error (the linter reports it), so no valid file is coloured
   wrongly.
 - `function` is always a plain name, as it is unless `dialect.closures`
-  is set. In a lib that sets it, the word is not coloured as a type.
+  is set. In a mudlib that sets it, the word is not coloured as a type.
 
 ## Vim and Neovim
 
@@ -187,7 +187,7 @@ What you get in a `dgdlpc` buffer:
   inside of `({ })` and `([ ])`. `shiftwidth` and `expandtab` are yours
   (or your `.editorconfig`'s); the formatter's default is four spaces.
 
-Variables (`b:` is asked before `g:`, so a lib can differ from the rest):
+Variables (`b:` is asked before `g:`, so a mudlib can differ from the rest):
 
 | | default | |
 |---|---|---|
@@ -197,10 +197,10 @@ Variables (`b:` is asked before `g:`, so a lib can differ from the rest):
 | `g:dgdlpc_no_functions` | `0` | `1`: do not highlight a name before `(` |
 | `g:dgdlpc_minlines` | unset | synchronize the syntax on comments within this many lines, instead of reading the file from its start |
 
-The two dialect variables are set by hand to what the lib's
+The two dialect variables are set by hand to what the mudlib's
 `dgdtools.yml` (or its profile) says; the runtime files do not read it.
 
-In Vim a lib's `.c` file is given the filetype `c` first and `dgdlpc`
+In Vim a mudlib's `.c` file is given the filetype `c` first and `dgdlpc`
 right after, because Vim's own detection runs first; an autocommand on
 `FileType c` sees it for that moment. In Neovim (0.8 and later) the
 answer is `dgdlpc` from the start.
@@ -251,7 +251,7 @@ and what it formats is what `dgdtools format` writes. What it does:
   none.
 - **Symbols**: the outline of a file (its inherit statements, by the
   object inherited, its functions, global variables and macros), and
-  the search for a name in the whole lib: the functions and variables
+  the search for a name in the whole mudlib: the functions and variables
   of its objects and the macros of its headers that have the letters
   you type, in their order, the closest match first. With a profile
   the names of the profile's stubs are found too, and say so.
@@ -263,7 +263,7 @@ and what it formats is what `dgdtools format` writes. What it does:
   that can be called there, and nothing on a receiver nobody knows; the
   files of an `#include` and the objects of an `inherit` path, on disk
   and in a profile; the function's name in the string of `call_out`,
-  `call_other` and your lib's registrars. It is asked for by itself
+  `call_other` and your mudlib's registrars. It is asked for by itself
   after `->`, `::`, and in a path at `"`, `<` and `/`.
 
 It keeps a log when asked to: `dgdtools lsp --log /tmp/dgdtools-lsp.log`,
@@ -273,7 +273,7 @@ standard error.
 **Settings.** There are two, for a wizard whose folder has no
 `dgdtools.yml`: `dgdtools.profile` (the mudlib profile to work against:
 a name or a file, as `profile:` in a config) and `dgdtools.libPath`
-(where the folder sits in the lib, as `lib_path:`). They are per
+(where the folder sits in the mudlib, as `lib_path:`). They are per
 workspace folder, a config file always wins over them, and nothing else
 about the tools is set from an editor.
 
@@ -296,7 +296,7 @@ a selection; `CTRL-]` goes to a definition, `K` shows the hover, and
 `CTRL-S` in insert mode the signature of the call being written, and
 `CTRL-X CTRL-O` completes (the server sets `omnifunc`); `gO`
 lists the outline, and `:lua vim.lsp.buf.workspace_symbol()` asks for a
-name to find in the lib. To
+name to find in the mudlib. To
 format on save:
 
 ```lua
@@ -337,7 +337,7 @@ diagnostics of a file, mends one finding by typing and one by the
 server's fix, and has the file formatted. `TestNeovimDefinition` goes
 to definitions the same way, `TestNeovimHover` reads what `K` and
 `CTRL-S` show, `TestNeovimSymbols` lists the outline and searches
-the lib, and `TestNeovimCompletion` completes with `CTRL-X CTRL-O`.
+the mudlib, and `TestNeovimCompletion` completes with `CTRL-X CTRL-O`.
 
 ### Vim
 
@@ -401,7 +401,7 @@ belong to, a text the formatter refuses) is in the *dgdtools* channel of
 the Output panel.
 
 Fixes are in the lightbulb, formatting is *Format Document* and *Format
-Selection*, and both can be had on saving, in the lib's settings:
+Selection*, and both can be had on saving, in the mudlib's settings:
 
 ```json
 {
@@ -429,8 +429,8 @@ Both highlight through tree-sitter, and there is no tree-sitter grammar
 for DGD LPC yet (deferred: [lsp.md](../docs/design/lsp.md), 10.1). Until
 there is, LPC files keep their C highlighting there, which is tolerable
 and gets `({ })` and `::` wrong. The language server they can use now.
-For Helix, in the lib's own `.helix/languages.toml`, so that it holds
-for this lib and nowhere else (not run here):
+For Helix, in the mudlib's own `.helix/languages.toml`, so that it holds
+for this mudlib and nowhere else (not run here):
 
 ```toml
 [language-server.dgdtools]

@@ -37,7 +37,7 @@ import (
 func Build(ctx context.Context, prj *config.Project, fsys vfs.FS) (*profile.Profile, error) {
 	cfg, ix := prj.Config, index.Open(prj, fsys).Snapshot()
 	if prj.Root == "" {
-		return nil, fmt.Errorf("profile build needs the whole lib (a dgdtools.yml with root: at the lib)")
+		return nil, fmt.Errorf("profile build needs the whole mudlib (a dgdtools.yml with root: at the mudlib)")
 	}
 	if !ix.Complete() {
 		var why []string

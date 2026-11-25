@@ -1408,12 +1408,14 @@ repository. (`scripts/` is how a release packs it: 11.2.)
   Nothing is looked for in other places (`~/go/bin`): without a program
   in the package, what a shell would run is what the editor runs.
 - **Commands:** `dgdtools.restartServer`; `dgdtools.associateFolder`
-  ("Treat This Folder as an LPC Lib") and its inverse,
-  `dgdtools.dissociateFolder`. The two are in the command palette, for
+  ("Use DGD LPC for This Folder's .c/.h Files") and its inverse,
+  `dgdtools.dissociateFolder` ("Use C for This Folder's .c/.h Files"),
+  which also list Microsoft's C extensions as unwanted recommendations
+  in `.vscode/extensions.json` and take them out again. The two are in the command palette, for
   the workspace's folder (asked for when there are several), and in the
   explorer's menu of a folder once the extension is active: a menu of
   every folder of every workspace is no place for them otherwise.
-- **What "an LPC lib" is written as.** `files.associations` in the
+- **What "a folder of DGD LPC" is written as.** `files.associations` in the
   workspace's settings (`ConfigurationTarget.Workspace`), never the
   user's. The setting has window scope in VS Code, not resource scope:
   a folder's own settings file is not read for it in a workspace of

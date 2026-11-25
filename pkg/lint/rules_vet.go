@@ -223,10 +223,10 @@ var ruleUnreachable = &Rule{
 
 var ruleRawInheritPath = &Rule{
 	Code: "C001", Name: "raw-inherit-path", Group: GroupConvention,
-	Doc: "inherit uses a literal path string where the lib mandates macros",
-	Explain: "For libs that name their inheritable objects with macros (inherit " +
+	Doc: "inherit uses a literal path string where the mudlib mandates macros",
+	Explain: "For mudlibs that name their inheritable objects with macros (inherit " +
 		"ROOM;), so that a moved file is one changed #define. The option deny " +
-		"restricts the rule to the parts of the lib that have such macros.",
+		"restricts the rule to the parts of the mudlib that have such macros.",
 	Default: false, Severity: diag.Warning,
 	Options: func() any { return &inheritPathOptions{} },
 	Run: func(p *Pass) {
@@ -243,7 +243,7 @@ var ruleRawInheritPath = &Rule{
 			if len(deny) > 0 && !hasAnyPrefix(lit, deny) {
 				continue
 			}
-			p.ReportNode(inh.Path, "inherit uses literal path %q; prefer the lib's path macro", lit)
+			p.ReportNode(inh.Path, "inherit uses literal path %q; prefer the mudlib's path macro", lit)
 		}
 	},
 }
@@ -291,7 +291,7 @@ var ruleMissingVisibility = &Rule{
 	Code: "C002", Name: "missing-visibility", Group: GroupConvention,
 	Doc: "function with no visibility specifier",
 	Explain: "Flags functions declared without private, static, nomask or one " +
-		"of the lib's specifier macros (conventions.specifier_macros, or an empty " +
+		"of the mudlib's specifier macros (conventions.specifier_macros, or an empty " +
 		"macro the file's headers define).",
 	Default: false, Severity: diag.Warning,
 	Run: func(p *Pass) {
@@ -326,7 +326,7 @@ var ruleStaticAutosaveVar = &Rule{
 		"static is also the deliberate idiom for runtime-only state, so this is a " +
 		"review aid for specifier changes, not a standing audit. An object saves " +
 		"itself when its source mentions one of conventions.autosave_markers (the " +
-		"lib's function or macro that turns saving on); without markers the rule " +
+		"mudlib's function or macro that turns saving on); without markers the rule " +
 		"reports nothing.",
 	Default: false, Severity: diag.Warning,
 	Run: func(p *Pass) {

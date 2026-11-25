@@ -16,10 +16,10 @@ import (
 const profileUsage = `usage: dgdtools profile build [flags]
        dgdtools profile show [NAME|FILE] [LIBPATH]
 
-build captures the whole lib of the project (the working directory's, or
---config) as a profile: what somebody with only part of the lib needs to
+build captures the whole mudlib of the project (the working directory's, or
+--config) as a profile: what somebody with only part of the mudlib needs to
 know about the rest. show summarizes a profile, or prints its stub for
-one lib file; without arguments it says where profiles are looked for.
+one mudlib file; without arguments it says where profiles are looked for.
 `
 
 // profileCmd is `dgdtools profile build|show`.

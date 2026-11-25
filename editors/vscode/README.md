@@ -23,11 +23,11 @@ the linter and formatter for it:
   from a macro to its `#define`, from a variable or a parameter to its
   declaration.
 - **Hover**: the declaration, the comment above it and where it is, for
-  the lib's functions, variables and macros and the driver's kfuns.
+  the mudlib's functions, variables and macros and the driver's kfuns.
 - **Signature help** in the arguments of a call, while the line is half
   written.
 - **Symbols**: the outline of a file, and *Go to Symbol in Workspace*
-  for a function, a variable or a header's macro anywhere in the lib.
+  for a function, a variable or a header's macro anywhere in the mudlib.
 - **Completion**: the locals in scope, the object's variables and
   functions, macros, kfuns and keywords; after `::` and `->` the
   functions that can be called there; `#include` and `inherit` paths;
@@ -37,7 +37,7 @@ Where the tools cannot know (a call on an object held in a variable)
 they say nothing rather than guess.
 
 The language is called `dgdlpc`, *DGD LPC* in the language picker. The
-editor shows what the command line prints: both read the lib's
+editor shows what the command line prints: both read the mudlib's
 `dgdtools.yml`.
 
 ## Installing
@@ -62,8 +62,8 @@ code --install-extension dgdtools-darwin-arm64-0.4.0.vsix
 ## Saying which files are LPC
 
 The extension claims no file by its name: a `.c` file is C on your
-machine everywhere but in a lib. Open the lib's folder and run
-**dgdtools: Treat This Folder as an LPC Lib** (the command palette, or a
+machine everywhere but in a mudlib. Open the mudlib's folder and run
+**dgdtools: Use DGD LPC for This Folder's .c/.h Files** (the command palette, or a
 folder's menu in the explorer); the extension offers it by itself when
 the folder has a `dgdtools.yml`. It writes `files.associations` to the
 workspace's settings and never to your own:
@@ -84,7 +84,7 @@ Word-based suggestions are off for `dgdlpc` by default
 (`editor.wordBasedSuggestions`): the server's completion knows the
 names.
 
-A lib whose files are Latin-1 should say that too, or saving a file
+A mudlib whose files are Latin-1 should say that too, or saving a file
 opened as UTF-8 damages it:
 
 ```json
@@ -108,8 +108,8 @@ To fix and format on saving:
 
 | command | |
 |---|---|
-| **dgdtools: Treat This Folder as an LPC Lib** | the `*.c` and `*.h` files of a folder are `dgdlpc`, in the workspace's settings |
-| **dgdtools: Stop Treating This Folder as an LPC Lib** | takes out what the first command put in |
+| **dgdtools: Use DGD LPC for This Folder's .c/.h Files** | the `*.c` and `*.h` files of a folder are `dgdlpc`, in the workspace's settings |
+| **dgdtools: Use C for This Folder's .c/.h Files** | takes out what the first command put in |
 | **dgdtools: Restart Server** | stops the language server and starts it again |
 
 ## Settings
@@ -118,12 +118,12 @@ To fix and format on saving:
 |---|---|
 | `dgdtools.path` | the `dgdtools` executable to run: an absolute path (`~` is your home directory) or a command name on `PATH`. Empty: the one this extension came with, else `dgdtools` on `PATH` |
 | `dgdtools.profile` | the mudlib profile to work against in a folder that has no `dgdtools.yml`: a name or a file, as `profile:` in a config file |
-| `dgdtools.libPath` | where a folder that has no `dgdtools.yml` sits in the lib (for example `/players/me`), as `lib_path:` in a config file |
+| `dgdtools.libPath` | where a folder that has no `dgdtools.yml` sits in the mudlib (for example `/players/me`), as `lib_path:` in a config file |
 | `dgdtools.logFile` | a file the server appends its debug log to |
 | `dgdtools.trace.server` | `messages` or `verbose`: how much is traced while the log level of the *dgdtools* channel of the Output panel is *Trace* |
 
 A `dgdtools.yml` always wins over `dgdtools.profile` and
-`dgdtools.libPath`, and everything else about the tools is the lib's to
+`dgdtools.libPath`, and everything else about the tools is the mudlib's to
 say, in that file: an editor cannot make the server disagree with the
 command line.
 

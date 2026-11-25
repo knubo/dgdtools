@@ -162,7 +162,7 @@ exit
 <   ]
 < }
 > received window/logMessage
-< {"message": "project $ROOT/lib/dgdtools.yml: lib $ROOT/lib", "type": 3}
+< {"message": "project $ROOT/lib/dgdtools.yml: mudlib $ROOT/lib", "type": 3}
 # The header changes on disk: STORE is another object.
 > write lib/include/paths.h "#define STORE \"/obj/nowhere\"\n"
 > watched changed lib/include/paths.h
@@ -260,7 +260,7 @@ exit
 <   ]
 < }
 > received window/logMessage
-< {"message": "project $ROOT/lib/dgdtools.yml: lib $ROOT/lib", "type": 3}
+< {"message": "project $ROOT/lib/dgdtools.yml: mudlib $ROOT/lib", "type": 3}
 < {"message": "no dgdtools.yml: $ROOT/wizard is /players/ann", "type": 3}
 > settings wizard {}
 > configuration

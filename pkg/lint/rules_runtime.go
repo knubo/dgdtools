@@ -48,7 +48,7 @@ var ruleCallableNotFound = &Rule{
 			case index.SearchedStub:
 				where = " or is private there (a profile lists public functions only)"
 			case index.SearchedCheckout:
-				where = " (nor in this checkout; inheritors elsewhere in the lib cannot be seen)"
+				where = " (nor in this checkout; inheritors elsewhere in the mudlib cannot be seen)"
 			case index.SearchedUsers:
 				if lk.Users > 0 {
 					where = fmt.Sprintf(" (nor in any of its %d inheritors)", lk.Users)
@@ -140,7 +140,7 @@ var ruleTargetObjectMissing = &Rule{
 	Doc: "literal object path (inherit, clone_object, call target) with no backing file",
 	Explain: "Loading an object whose file does not exist is a runtime error (for " +
 		"an inherit, a compile error). Paths served by virtual-object daemons " +
-		"belong in conventions.virtual_paths. Not reported when the lib on disk is " +
+		"belong in conventions.virtual_paths. Not reported when the mudlib on disk is " +
 		"incomplete.",
 	Default: true, Severity: diag.Error, CrossFile: true, CompiledOnly: true,
 	Run: func(p *Pass) {
@@ -209,7 +209,7 @@ var ruleLifecycleChain = &Rule{
 		"no explicit inherit, parents without the function, and unresolved " +
 		"parents are skipped. The function is the project's create function: the " +
 		"project key create, which is read from the driver config's create " +
-		"parameter and set by a lib whose auto object receives the driver's call " +
+		"parameter and set by a mudlib whose auto object receives the driver's call " +
 		"and passes it on under another name; \"create\" when nothing says. The " +
 		"option names lists other functions to hold to the same rule.",
 	Default: true, Severity: diag.Warning, CrossFile: true, CompiledOnly: true,

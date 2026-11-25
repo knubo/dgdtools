@@ -169,7 +169,7 @@ async function chosenFolder(uri: vscode.Uri | undefined): Promise<vscode.Uri | u
   }
   if (folders.length === 0) {
     void vscode.window.showWarningMessage(
-      'dgdtools: open the folder of the lib first (File > Open Folder). Which files are LPC is written to the settings of a workspace, never to your own.',
+      'dgdtools: open the folder of the mudlib first (File > Open Folder). Which files are LPC is written to the settings of a workspace, never to your own.',
     );
   }
   return folders[0]?.uri;

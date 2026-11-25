@@ -149,7 +149,7 @@ func TestConfigCommand(t *testing.T) {
 	code, out, errs := dgdtools(t, "", "config", filepath.Join(dir, "lib/a.c"))
 	assert.Equal(t, 0, code, errs)
 	assert.Contains(t, out, "config file:   "+cfg)
-	assert.Contains(t, out, "lib root:      "+filepath.Join(dir, "lib"))
+	assert.Contains(t, out, "mudlib root:   "+filepath.Join(dir, "lib"))
 	assert.Contains(t, out, "typechecking:  1")
 	assert.Contains(t, out, "incomplete", "the configured include dir does not exist")
 	// The settings of the file, and where each is from.

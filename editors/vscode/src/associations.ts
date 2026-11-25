@@ -1,4 +1,4 @@
-// What "this folder is an LPC lib" is in VS Code: entries of
+// What "this folder is DGD LPC" is in VS Code: entries of
 // `files.associations` in the workspace's settings that make the
 // folder's *.c and *.h files `dgdlpc`. Nothing here knows VS Code:
 // `npm test` runs it under plain Node.

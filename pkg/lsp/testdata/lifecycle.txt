@@ -79,7 +79,7 @@ exit
 <   ]
 < }
 > received window/logMessage
-< {"message": "project $ROOT/lib/dgdtools.yml: lib $ROOT/lib", "type": 3}
+< {"message": "project $ROOT/lib/dgdtools.yml: mudlib $ROOT/lib", "type": 3}
 > watchers
 < [
 <   "**/*.profile",

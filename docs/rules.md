@@ -42,7 +42,7 @@ Older LPmud drivers and C concatenate adjacent string literals. DGD does not: it
 
 (: ob, "fn" :) function-pointer literal; not DGD syntax.
 
-The (: ... :) literal comes from other LPC dialects. DGD rejects it as a syntax error. Use the lib's function-pointer constructor instead.
+The (: ... :) literal comes from other LPC dialects. DGD rejects it as a syntax error. Use the mudlib's function-pointer constructor instead.
 
 ### declaration-initializer
 
@@ -66,7 +66,7 @@ DGD requires every local declaration of a block to come before the block's first
 
 #include target not found in the file's directory or the include dirs.
 
-A missing #include is a compile error when the object loads. Only reported when the lib is complete (the configured include dirs and force-included header exist); in a partial checkout the target is unknown, not missing. Like a C compiler's fatal "file not found", it stops syntax reporting for the rest of the file.
+A missing #include is a compile error when the object loads. Only reported when the mudlib is complete (the configured include dirs and force-included header exist); in a partial checkout the target is unknown, not missing. Like a C compiler's fatal "file not found", it stops syntax reporting for the rest of the file.
 
 ### bad-directive
 
@@ -134,7 +134,7 @@ DGD compiles a call to a function that only has a prototype and raises "Undefine
 
 Literal object path (inherit, clone_object, call target) with no backing file.
 
-Loading an object whose file does not exist is a runtime error (for an inherit, a compile error). Paths served by virtual-object daemons belong in conventions.virtual_paths. Not reported when the lib on disk is incomplete.
+Loading an object whose file does not exist is a runtime error (for an inherit, a compile error). Paths served by virtual-object daemons belong in conventions.virtual_paths. Not reported when the mudlib on disk is incomplete.
 
 ### callback-arity
 
@@ -150,7 +150,7 @@ Under non-strict typechecking DGD silently pads missing call_other arguments wit
 
 Lifecycle function (the create function) does not call the inherited implementations.
 
-A create function that overrides an inherited one without calling it (::create()) leaves the parent uninitialized. With several defining parents, label each inherit and chain each one. Proof-based: files with no explicit inherit, parents without the function, and unresolved parents are skipped. The function is the project's create function: the project key create, which is read from the driver config's create parameter and set by a lib whose auto object receives the driver's call and passes it on under another name; "create" when nothing says. The option names lists other functions to hold to the same rule.
+A create function that overrides an inherited one without calling it (::create()) leaves the parent uninitialized. With several defining parents, label each inherit and chain each one. Proof-based: files with no explicit inherit, parents without the function, and unresolved parents are skipped. The function is the project's create function: the project key create, which is read from the driver config's create parameter and set by a mudlib whose auto object receives the driver's call and passes it on under another name; "create" when nothing says. The option names lists other functions to hold to the same rule.
 
 Options:
 
@@ -208,9 +208,9 @@ The lib's own policy.
 
 `C001` · warning · off by default · one file is enough
 
-Inherit uses a literal path string where the lib mandates macros.
+Inherit uses a literal path string where the mudlib mandates macros.
 
-For libs that name their inheritable objects with macros (inherit ROOM;), so that a moved file is one changed #define. The option deny restricts the rule to the parts of the lib that have such macros.
+For mudlibs that name their inheritable objects with macros (inherit ROOM;), so that a moved file is one changed #define. The option deny restricts the rule to the parts of the mudlib that have such macros.
 
 Options:
 
@@ -222,7 +222,7 @@ Options:
 
 Function with no visibility specifier.
 
-Flags functions declared without private, static, nomask or one of the lib's specifier macros (conventions.specifier_macros, or an empty macro the file's headers define).
+Flags functions declared without private, static, nomask or one of the mudlib's specifier macros (conventions.specifier_macros, or an empty macro the file's headers define).
 
 ### unformatted
 
@@ -238,7 +238,7 @@ Formats the file exactly as `dgdtools format` does, with the format settings of 
 
 Static global in an object that saves itself; excluded from save_object.
 
-Static variables are not saved by save_object. Off by default: static is also the deliberate idiom for runtime-only state, so this is a review aid for specifier changes, not a standing audit. An object saves itself when its source mentions one of conventions.autosave_markers (the lib's function or macro that turns saving on); without markers the rule reports nothing.
+Static variables are not saved by save_object. Off by default: static is also the deliberate idiom for runtime-only state, so this is a review aid for specifier changes, not a standing audit. An object saves itself when its source mentions one of conventions.autosave_markers (the mudlib's function or macro that turns saving on); without markers the rule reports nothing.
 
 ### unresolved-inherit
 
@@ -254,4 +254,4 @@ Informational: cross-file rules cannot verify anything involving this object's i
 
 A dgdtools-ignore comment for a finding that is not there.
 
-Reported for each rule a dgdtools-ignore comment names that has no finding where the comment says. A suppression that is not needed hides the next finding that turns up there. A comment for a rule that did not run on the file (it is off, or needs a lib that is not known) is not reported: whether it is needed cannot be told.
+Reported for each rule a dgdtools-ignore comment names that has no finding where the comment says. A suppression that is not needed hides the next finding that turns up there. A comment for a rule that did not run on the file (it is off, or needs a mudlib that is not known) is not reported: whether it is needed cannot be told.

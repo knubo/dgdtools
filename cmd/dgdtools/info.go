@@ -16,7 +16,7 @@ import (
 
 // rulesCmd is `dgdtools rules`: the rule table.
 func rulesCmd(_ context.Context, args []string, _ io.Reader, stdout, stderr io.Writer) int {
-	fs := newFlags("rules", "usage: dgdtools rules\n\nLists the lint rules: code, name, on or off by default, default severity,\nwhether the rule needs the lib (lib) or one file is enough (file).\n", stderr)
+	fs := newFlags("rules", "usage: dgdtools rules\n\nLists the lint rules: code, name, on or off by default, default severity,\nwhether the rule needs the mudlib (mudlib) or one file is enough (file).\n", stderr)
 	pos, code, done := parse(fs, args)
 	if done {
 		return code
@@ -35,9 +35,9 @@ func rulesCmd(_ context.Context, args []string, _ io.Reader, stdout, stderr io.W
 		if r.Default {
 			def = "on "
 		}
-		scope := "file "
+		scope := "file  "
 		if r.CrossFile {
-			scope = "lib  "
+			scope = "mudlib"
 		}
 		fmt.Fprintf(stdout, "  %s %-28s %s %-7s %s %s\n", r.Code, r.Name, def, r.Severity, scope, r.Doc)
 	}
@@ -65,7 +65,7 @@ func explainCmd(_ context.Context, args []string, _ io.Reader, stdout, stderr io
 	}
 	scope := "file-local"
 	if r.CrossFile {
-		scope = "needs the lib index"
+		scope = "needs the mudlib index"
 	}
 	fmt.Fprintf(stdout, "%s  %s\n%s group, %s, %s, %s\n\n%s\n\n%s\n", r.Code, r.Name, r.Group, r.Severity, def, scope, r.Doc, r.Explain)
 	if opts := r.OptionList(); len(opts) > 0 {
@@ -169,16 +169,16 @@ func configCmd(ctx context.Context, args []string, _ io.Reader, stdout, stderr i
 	default:
 		fmt.Fprintf(w, "config file:   %s\n", orNone(prj.ConfigPath))
 	}
-	fmt.Fprintf(w, "lib root:      %s\n", orNone(prj.Root))
+	fmt.Fprintf(w, "mudlib root:   %s\n", orNone(prj.Root))
 	switch {
 	case !prj.HasLib():
-		fmt.Fprintf(w, "mode:          file-local (cross-file rules need a lib root)\n")
+		fmt.Fprintf(w, "mode:          file-local (cross-file rules need a mudlib root)\n")
 	case prj.Partial:
 		fmt.Fprintf(w, "mode:          partial checkout (what is not in the checkout or the profile is unknown)\n")
 	case l.Index().Snapshot().Complete():
-		fmt.Fprintf(w, "mode:          whole lib\n")
+		fmt.Fprintf(w, "mode:          whole mudlib\n")
 	default:
-		fmt.Fprintf(w, "mode:          whole lib, incomplete\n")
+		fmt.Fprintf(w, "mode:          whole mudlib, incomplete\n")
 	}
 	if prj.Profile != nil {
 		fmt.Fprintf(w, "profile:       %s (%d stubs)\n", prj.Profile.Name, len(prj.Profile.Files))

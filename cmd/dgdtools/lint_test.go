@@ -357,7 +357,7 @@ func TestProfileCommands(t *testing.T) {
 	t.Chdir(wiz)
 	code, _, errs = dgdtools(t, "", "profile", "build", "--profile", prof)
 	assert.Equal(t, 2, code)
-	assert.Contains(t, errs, "needs the whole lib")
+	assert.Contains(t, errs, "needs the whole mudlib")
 }
 
 // What a run comes to as an exit code.
@@ -398,7 +398,7 @@ func TestLintStdin(t *testing.T) {
 	code, out, errs := dgdtools(t, buffer, "lint", "-")
 	assert.Equal(t, 0, code, errs)
 	assert.Equal(t, "<stdin>:3:7: warning: comparison has no effect as a statement (did you mean =?) [S002 no-effect-statement]\n", out)
-	assert.Contains(t, errs, "note: standard input has no place in the lib")
+	assert.Contains(t, errs, "note: standard input has no place in the mudlib")
 	assert.Contains(t, errs, "1 file(s): 0 error(s), 1 warning(s)")
 
 	// Named: the buffer is that file, whatever is on disk, with the

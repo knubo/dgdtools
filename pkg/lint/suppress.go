@@ -279,7 +279,7 @@ var ruleUnusedSuppression = &Rule{
 	Explain: "Reported for each rule a dgdtools-ignore comment names that has " +
 		"no finding where the comment says. A suppression that is not needed " +
 		"hides the next finding that turns up there. A comment for a rule that " +
-		"did not run on the file (it is off, or needs a lib that is not known) " +
+		"did not run on the file (it is off, or needs a mudlib that is not known) " +
 		"is not reported: whether it is needed cannot be told.",
 	Default: false, Severity: diag.Warning, Late: true, Tags: []diag.Tag{diag.Unnecessary},
 	Run: func(p *Pass) {

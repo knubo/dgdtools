@@ -21,14 +21,14 @@ const lintUsage = `usage: dgdtools lint [flags] [path ...]
 Lints the named files and the .c files under the named directories: the
 objects, with the headers they include read as part of them. A header
 named by itself is linted on its own. With no path, the whole project:
-the lib root of the nearest dgdtools.yml at or above the working
+the mudlib root of the nearest dgdtools.yml at or above the working
 directory. Without a dgdtools.yml only file-local rules run. A wizard
 with only their own folder puts "profile: NAME" in a dgdtools.yml there
 (or passes --profile).
 
 "-" lints standard input. With --stdin-filename it is linted as that
 file, in that file's project, in place of what is on disk (an editor's
-unsaved buffer); without, it has no place in a lib and file-local rules
+unsaved buffer); without, it has no place in a mudlib and file-local rules
 run.
 
 Exit codes: 0 no findings at or above the fail-on severity, 1 findings,
@@ -61,7 +61,7 @@ func lintCmd(ctx context.Context, args []string, stdin io.Reader, stdout, stderr
 	fs.StringVar(&baseline, "baseline", "", "baseline `file` (default "+lint.BaselineFileName+" next to the config)")
 	fs.BoolVar(&writeBaseline, "write-baseline", false, "record the current findings as the baseline and exit 0")
 	fs.BoolVar(&noBaseline, "no-baseline", false, "report findings that are in the baseline too")
-	fs.BoolVar(&local, "local", false, "file-local rules only; do not use the lib index")
+	fs.BoolVar(&local, "local", false, "file-local rules only; do not use the mudlib index")
 	fs.BoolVar(&stats, "stats", false, "print per-rule counts and what could not be verified")
 	fs.IntVar(&maxPerFile, "max-per-file", 0, "report at most `n` findings per rule per file; -1 lifts the limits of the configuration")
 	fs.BoolVar(&quiet, "quiet", false, "no summary on standard error")
@@ -172,7 +172,7 @@ func lintCmd(ctx context.Context, args []string, stdin io.Reader, stdout, stderr
 	}
 	if !quiet {
 		if fromStdin && stdinName == "" && l.Project().HasLib() {
-			fmt.Fprintln(stderr, "note: standard input has no place in the lib: file-local rules only (--stdin-filename says where it belongs)")
+			fmt.Fprintln(stderr, "note: standard input has no place in the mudlib: file-local rules only (--stdin-filename says where it belongs)")
 		}
 		report.Summary(stderr, res, ropt, stats)
 	}

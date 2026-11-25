@@ -520,7 +520,7 @@ func (l *Linter) Run(ctx context.Context, req Request) (*Result, error) {
 	res.Notes = append(res.Notes, prj.Notes...)
 	if !prj.HasLib() {
 		res.Notes = append(res.Notes, diag.Note{Kind: diag.NoteNoLib,
-			Message: "no dgdtools.yml and no --root: running file-local rules only (cross-file rules need a lib root)"})
+			Message: "no dgdtools.yml and no --root: running file-local rules only (cross-file rules need a mudlib root)"})
 	}
 	// Rule names and the baseline are checked once, up front.
 	sel, err := l.selection(&req.Options)
@@ -582,7 +582,7 @@ func (l *Linter) Run(ctx context.Context, req Request) (*Result, error) {
 			"%d file(s) under %s are a project of their own (%s) and were not linted: lint that directory by itself",
 			nested[other], filepath.Dir(other), filepath.Base(other))})
 	}
-	if place, what := prj.Root, "lib root"; prj.HasLib() && (place != "" || prj.CheckoutLib != "") {
+	if place, what := prj.Root, "mudlib root"; prj.HasLib() && (place != "" || prj.CheckoutLib != "") {
 		if place == "" {
 			place, what = prj.CheckoutDir, "checkout"
 		}

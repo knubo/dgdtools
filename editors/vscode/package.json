@@ -48,6 +48,7 @@
       {
         "id": "dgdlpc",
         "aliases": [
+          "LPC (DGD)",
           "DGD LPC",
           "dgdlpc"
         ],
@@ -75,12 +76,12 @@
       },
       {
         "command": "dgdtools.associateFolder",
-        "title": "Treat This Folder as an LPC Lib",
+        "title": "Use DGD LPC for This Folder's .c/.h Files",
         "category": "dgdtools"
       },
       {
         "command": "dgdtools.dissociateFolder",
-        "title": "Stop Treating This Folder as an LPC Lib",
+        "title": "Use C for This Folder's .c/.h Files",
         "category": "dgdtools"
       }
     ],
@@ -117,7 +118,7 @@
           "type": "string",
           "default": "",
           "scope": "resource",
-          "markdownDescription": "Where a folder that has no `dgdtools.yml` sits in the lib (for example `/players/me`), as `lib_path:` in a config file. A config file always wins over this."
+          "markdownDescription": "The mudlib path of a folder that has no `dgdtools.yml`: where it sits in the mudlib (for example `/players/me`), as `lib_path:` in a config file. A config file always wins over this."
         },
         "dgdtools.logFile": {
           "type": "string",

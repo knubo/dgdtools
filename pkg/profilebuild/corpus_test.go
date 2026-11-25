@@ -68,7 +68,7 @@ func TestCorpusPartialCheckout(t *testing.T) {
 		out := map[key]int{}
 		for _, d := range res.Diagnostics {
 			rel, _ := filepath.Rel(base, d.Path)
-			msg := strings.Replace(d.Message, " (nor in this checkout; inheritors elsewhere in the lib cannot be seen)", "", 1)
+			msg := strings.Replace(d.Message, " (nor in this checkout; inheritors elsewhere in the mudlib cannot be seen)", "", 1)
 			msg = strings.Replace(msg, " or is private there (a profile lists public functions only)", "", 1)
 			out[key{filepath.ToSlash(rel), d.Rule, msg, d.Line}]++
 		}

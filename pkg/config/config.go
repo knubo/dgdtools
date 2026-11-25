@@ -277,7 +277,7 @@ func (h *header) scope() (bool, error) {
 		return false, err
 	}
 	if v {
-		return false, fmt.Errorf("line %d: root: true is not a setting: a dgdtools.yml is a root config unless it says root: false; give the lib root's directory, or leave root out", h.Root.Line)
+		return false, fmt.Errorf("line %d: root: true is not a setting: a dgdtools.yml is a root config unless it says root: false; give the mudlib root's directory, or leave root out", h.Root.Line)
 	}
 	return true, nil
 }

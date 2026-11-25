@@ -110,7 +110,7 @@ var ruleLegacyClosure = &Rule{
 	Code: "E003", Name: "legacy-closure", Group: GroupSyntax,
 	Doc: `(: ob, "fn" :) function-pointer literal; not DGD syntax`,
 	Explain: "The (: ... :) literal comes from other LPC dialects. DGD rejects it " +
-		"as a syntax error. Use the lib's function-pointer constructor instead.",
+		"as a syntax error. Use the mudlib's function-pointer constructor instead.",
 	Default: true, Severity: diag.Error, CompiledOnly: true,
 	Run: func(p *Pass) {
 		syntax.Inspect(p.Tree, func(n syntax.Node) bool {
@@ -180,7 +180,7 @@ var ruleIncludeNotFound = &Rule{
 	Code: "E006", Name: "include-not-found", Group: GroupSyntax,
 	Doc: "#include target not found in the file's directory or the include dirs",
 	Explain: "A missing #include is a compile error when the object loads. Only " +
-		"reported when the lib is complete (the configured include dirs and " +
+		"reported when the mudlib is complete (the configured include dirs and " +
 		"force-included header exist); in a partial checkout the target is " +
 		"unknown, not missing. Like a C compiler's fatal \"file not found\", it " +
 		"stops syntax reporting for the rest of the file.",

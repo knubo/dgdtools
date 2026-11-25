@@ -194,7 +194,7 @@ func (s *server) encodingHint(doc *document) {
 	}
 	if disk, err := s.opt.FS.ReadFile(doc.path); err == nil && !utf8.Valid(disk) {
 		s.tell(MessageWarning, fmt.Sprintf("%s is not UTF-8 on disk and was opened as UTF-8: saving it from here would damage it. "+
-			"Open it in the encoding it has (Latin-1 for most old libs), and set that as the encoding of the lib's files.", doc.path))
+			"Open it in the encoding it has (Latin-1 for most old mudlibs), and set that as the encoding of the mudlib's files.", doc.path))
 		s.said[key] = true
 	}
 }
@@ -428,11 +428,11 @@ func describe(prj *config.Project) string {
 	}
 	switch {
 	case prj.Root != "":
-		b.WriteString(": lib " + prj.Root)
+		b.WriteString(": mudlib " + prj.Root)
 	case prj.CheckoutDir != "":
 		b.WriteString(": " + prj.CheckoutDir + " is " + prj.CheckoutLib)
 	case !prj.HasLib():
-		b.WriteString(": no lib, file-local rules only")
+		b.WriteString(": no mudlib, file-local rules only")
 	}
 	return b.String()
 }

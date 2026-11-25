@@ -81,7 +81,7 @@ func findings(t *testing.T, prj *config.Project, fsys vfs.FS, paths ...string) [
 	require.NoError(t, err)
 	var out []string
 	for _, d := range res.Diagnostics {
-		msg := strings.Replace(d.Message, " (nor in this checkout; inheritors elsewhere in the lib cannot be seen)", "", 1)
+		msg := strings.Replace(d.Message, " (nor in this checkout; inheritors elsewhere in the mudlib cannot be seen)", "", 1)
 		msg = strings.Replace(msg, " or is private there (a profile lists public functions only)", "", 1)
 		out = append(out, fmt.Sprintf("%s:%d %s %s", d.Path[strings.LastIndex(d.Path, "/")+1:], d.Line, d.Rule, msg))
 	}

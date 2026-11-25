@@ -349,7 +349,7 @@ func resolve(fs vfs.FS, opt DiscoverOptions, found, base string) (*Project, erro
 		prj.Notes = append(prj.Notes, diag.Note{Kind: diag.NoteProfile, Path: prj.Profile.Path, Message: what})
 	}
 	if prj.Root != "" && !prj.Partial && !fs.IsDir(prj.Root) {
-		return nil, fmt.Errorf("lib root %s is not a directory", prj.Root)
+		return nil, fmt.Errorf("mudlib root %s is not a directory", prj.Root)
 	}
 	return prj, nil
 }
@@ -361,7 +361,7 @@ func unplaced(dir string, checkouts []string) string {
 	if len(checkouts) > 0 {
 		why = " (no " + strings.Join(checkouts, " or ") + " in its path)"
 	}
-	return fmt.Sprintf("cannot tell where %s sits in the lib%s: set `lib_path:` in dgdtools.yml to the lib path of that directory to check references between its own files", dir, why)
+	return fmt.Sprintf("cannot tell where %s sits in the mudlib%s: set `lib_path:` in dgdtools.yml to the mudlib path of that directory to check references between its own files", dir, why)
 }
 
 // Workspace finds the project of each path it is asked about, for tools

@@ -218,7 +218,7 @@ func (l *lib) extent() *extent {
 		e.complete = false
 		e.notes = []diag.Note{{
 			Kind: diag.NoteIncompleteLib, Path: l.lay.Root,
-			Message: "lib looks incomplete under " + l.lay.Root + " (missing " +
+			Message: "mudlib looks incomplete under " + l.lay.Root + " (missing " +
 				strings.Join(missing, ", ") + "): missing-reference findings are disabled",
 		}}
 	}
