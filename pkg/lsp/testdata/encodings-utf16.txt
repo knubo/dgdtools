@@ -1,0 +1,54 @@
+The same session as encodings.txt with a client that counts in UTF-16
+code units, as every client can: the finding is six columns further left,
+and the change that mends it is sent in those columns.
+
+-- lib/dgdtools.yml --
+-- lib/obj/a.c --
+void f() { /* blåbær € 😀 */ a == 1; }
+-- script --
+initialize lib
+open lib/obj/a.c
+diagnostics lib/obj/a.c
+change lib/obj/a.c 0:31-0:33 "="
+text lib/obj/a.c
+diagnostics lib/obj/a.c
+shutdown
+exit
+-- transcript --
+> initialize lib
+< {
+<   "capabilities": {
+<     "positionEncoding": "utf-16",
+<     "textDocumentSync": {"openClose": true, "change": 2},
+<     "codeActionProvider": {"codeActionKinds": ["quickfix", "source.fixAll.dgdtools"]},
+<     "documentFormattingProvider": true,
+<     "documentRangeFormattingProvider": true,
+<     "workspace": {"workspaceFolders": {"supported": true, "changeNotifications": true}}
+<   },
+<   "serverInfo": {"name": "dgdtools", "version": "test"}
+< }
+> open lib/obj/a.c
+> diagnostics lib/obj/a.c
+< {
+<   "uri": "file://$ROOT/lib/obj/a.c",
+<   "version": 1,
+<   "diagnostics": [
+<     {
+<       "range": {"start": {"line": 0, "character": 31}, "end": {"line": 0, "character": 33}},
+<       "severity": 2,
+<       "code": "S002",
+<       "codeDescription": {"href": "https://github.com/mmcdole/dgdtools/blob/main/docs/rules.md#no-effect-statement"},
+<       "source": "dgdtools",
+<       "message": "comparison has no effect as a statement (did you mean =?)"
+<     }
+<   ]
+< }
+> change lib/obj/a.c 0:31-0:33 "="
+> text lib/obj/a.c
+| void f() { /* blåbær € 😀 */ a = 1; }\n
+> diagnostics lib/obj/a.c
+< {"uri": "file://$ROOT/lib/obj/a.c", "version": 2, "diagnostics": []}
+> shutdown
+< null
+> exit
+< "the server exited after shutdown"

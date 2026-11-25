@@ -130,9 +130,18 @@ func published(t testing.TB, c *lsptest.Client, path string) []string {
 	out := []string{}
 	for _, d := range p.Diagnostics {
 		assert.Equal(t, "dgdtools", d.Source)
-		out = append(out, finding(d.Range, d.Severity, d.Code, d.Message, len(d.RelatedInformation)))
+		out = append(out, finding(d.Range, d.Severity, ruleOf(t, d.Code), d.Message, len(d.RelatedInformation)))
 	}
 	return out
+}
+
+// ruleOf returns the name of the rule with the given code, which is what
+// a diagnostic of the protocol carries.
+func ruleOf(t testing.TB, code string) string {
+	r := lint.RuleByName(code)
+	require.NotNil(t, r, code)
+	require.Equal(t, code, r.Code, "a diagnostic's code is the rule's code, not its name")
+	return r.Name
 }
 
 // rules are the rules of the findings, in order.
@@ -183,6 +192,38 @@ func TestDiagnosticsAreTheLinters(t *testing.T) {
 	// Among them one that only the scan of the whole lib finds: a
 	// callback that no object inheriting the file provides.
 	assert.Contains(t, fmt.Sprint(linted(t, filepath.Join(dir, "std/mixin.c"), files["std/mixin.c"], lsp.UTF8)), "'later' is not defined")
+}
+
+// The scan of the whole lib, which the first question about who inherits
+// a file starts, is shown to a client that shows progress.
+func TestScanProgress(t *testing.T) {
+	defer func(d time.Duration) { *lsp.ProgressDelay = d }(*lsp.ProgressDelay)
+	*lsp.ProgressDelay = 0
+	dir := tree(t, lib())
+	path := filepath.Join(dir, "std/mixin.c")
+	for _, plain := range []bool{false, true} {
+		c := start(t)
+		c.Initialize(lsptest.Capabilities{Plain: plain}, dir)
+		c.Open(path, lib()["std/mixin.c"])
+		assert.Contains(t, fmt.Sprint(published(t, c, path)), "'later' is not defined", "what only the scan finds")
+		var shown []string
+		for _, m := range c.Received("$/progress") {
+			var p struct {
+				Token string
+				Value lsp.WorkDoneProgress
+			}
+			require.NoError(t, json.Unmarshal(m.Params, &p))
+			shown = append(shown, p.Value.Kind+" "+p.Value.Title)
+		}
+		if plain {
+			assert.Empty(t, shown)
+			assert.Empty(t, c.Received("window/workDoneProgress/create"))
+		} else {
+			assert.Equal(t, []string{"begin dgdtools: indexing the lib", "end "}, shown)
+			assert.Len(t, c.Received("window/workDoneProgress/create"), 1)
+		}
+		require.NoError(t, c.Shutdown())
+	}
 }
 
 // A session that does not end as the protocol has it.
@@ -376,7 +417,7 @@ func TestBurst(t *testing.T) {
 		versions = append(versions, *p.Version)
 		got := []string{}
 		for _, d := range p.Diagnostics {
-			got = append(got, d.Code)
+			got = append(got, ruleOf(t, d.Code))
 		}
 		assert.Equal(t, rules(linted(t, path, texts[*p.Version], c.Encoding)), got, "version %d", *p.Version)
 	}

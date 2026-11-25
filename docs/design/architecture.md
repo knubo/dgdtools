@@ -7,8 +7,8 @@ Section 9 has the measurements against the VikingMUD lib and a DGD 1.7.9
 compile oracle; section 11 lists what is not built. Companion documents:
 [config.md](config.md) (the configuration file, per-file settings, the
 `dgdtools` command), [formatter.md](formatter.md) (the formatter as a
-tool) and [lsp.md](lsp.md) (the plan for the language server and for
-rename).
+tool) and [lsp.md](lsp.md) (the language server, and the plan for the
+rest of it and for rename).
 
 ## 1. Purpose and non-negotiables
 
@@ -748,15 +748,17 @@ file read per edit, and findings identical to the whole-lib run's.
 
 ### 6.1 `dgdtools lsp`
 
-Planned in [lsp.md](lsp.md): a thin layer, the reserved `dgdtools lsp`
-subcommand, holding one `session.Session`. What it maps onto:
+Described in [lsp.md](lsp.md): a thin layer, `pkg/lsp` behind the
+`dgdtools lsp` subcommand, holding one `session.Session`. Diagnostics,
+code actions and formatting are built; the rows below them are planned.
+What it maps onto:
 
 | LSP feature | Maps onto |
 |---|---|
 | `textDocument/didOpen`, `didChange`, `didClose` | `Session.Change(path, text)` (`nil` on close) |
 | `textDocument/publishDiagnostics` | `Session.Lint` for the changed document, debounced, with the previous lint cancelled through its context, published when `Session.Current(doc)`. A change returns the dependents; those that are open are linted again. `Diagnostic.code` = rule code, `codeDescription` = `Rule.URL`, `relatedInformation` = `Related` (a range), `tags` = `Tags`, positions via `diag.UTF16Col` and `diag.ByteCol`. |
 | `workspace/didChangeWatchedFiles` | `Session.DiskChanged(paths...)`: sources, directories, and every kind of configuration file alike. |
-| `textDocument/codeAction` | `Fixes` on the diagnostics in range (quick-fix edits), plus generated "suppress with `dgdtools-ignore lint/RULE`" actions. |
+| `textDocument/codeAction` | `Fixes` on the diagnostics in range (quick-fix edits), plus the "suppress with `dgdtools-ignore lint/RULE`" actions of `lint.Suppress`. |
 | `textDocument/definition` | the document's snapshot (`Document.Snapshot`): resolve the identifier under the cursor through `Snapshot.Chain` (functions and variables; `::` and `label::` calls), `->` calls with a known receiver through `LookupCallable`, `inherit`/`#include` paths through `ObjectPath`/`ResolveInclude`, macros through the file's `pp.Env`. `ChainFunc`, `ChainVar` and `pp.Macro` carry the defining file and position; a definition in a profile stub is at `dgdtools-profile://NAME/std/room.c`. |
 | `textDocument/hover` | the same lookups: specifiers and argument range of a function, the object that provides it, a macro's body and class. |
 | `textDocument/documentSymbol`, `workspace/symbol` | `syntax.File.Decls`; the units' symbol tables. |
@@ -1374,8 +1376,9 @@ Not built, in rough priority order:
    statement keeps its line breaks. Giving the formatter the project's
    headers would lay it out too, at the price of a result that depends
    on other files.
-7. **`dgdtools lsp`** and **`dgdtools rename`** (both names are
-   reserved by the command; the plan for both is [lsp.md](lsp.md)), plus
+7. **The rest of `dgdtools lsp`** (navigation, completion, semantic
+   tokens) and **`dgdtools rename`** (the name is reserved by the
+   command; the plan for both is [lsp.md](lsp.md)), plus
    `dgdtools init` to write a starter config. Line wrapping in the
    formatter is not planned ([formatter.md](formatter.md) 2.2).
 8. **Type rules** on the declarations the index keeps. Candidates,

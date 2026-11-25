@@ -14,6 +14,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/mmcdole/dgdtools/pkg/lint"
 	"github.com/mmcdole/dgdtools/pkg/lsp"
 	"github.com/mmcdole/dgdtools/pkg/lsp/lsptest"
 )
@@ -68,16 +69,16 @@ var lspLib = map[string]string{
 func TestLSPMatchesLint(t *testing.T) {
 	dir := tree(t, lspLib)
 	type finding struct {
-		Rule, Message, Severity string
+		Code, Message, Severity string
 		Start, End              lsp.Position
 		Tags                    []string
 		Related                 []string
 	}
 	type report struct {
 		Diagnostics []struct {
-			Rule, Message, Severity, Path string
-			Tags                          []string
-			Range                         struct {
+			Rule, Code, Message, Severity, Path string
+			Tags                                []string
+			Range                               struct {
 				Offset    int
 				EndOffset int `json:"end_offset"`
 			}
@@ -106,7 +107,7 @@ func TestLSPMatchesLint(t *testing.T) {
 			require.NoError(t, json.Unmarshal([]byte(out), &rep))
 			want := []finding{}
 			for _, d := range rep.Diagnostics {
-				f := finding{Rule: d.Rule, Message: d.Message, Severity: d.Severity, Tags: d.Tags,
+				f := finding{Code: d.Code, Message: d.Message, Severity: d.Severity, Tags: d.Tags,
 					Start: lsptest.PositionOf(text, d.Range.Offset, c.Encoding), End: lsptest.PositionOf(text, d.Range.EndOffset, c.Encoding)}
 				for _, r := range d.Related {
 					f.Related = append(f.Related, fmt.Sprintf("%s:%d %s", filepath.Base(r.Path), r.Line, r.Message))
@@ -115,7 +116,7 @@ func TestLSPMatchesLint(t *testing.T) {
 			}
 			got := []finding{}
 			for _, d := range c.Diagnostics(path).Diagnostics {
-				f := finding{Rule: d.Code, Message: d.Message, Start: d.Range.Start, End: d.Range.End,
+				f := finding{Code: d.Code, Message: d.Message, Start: d.Range.Start, End: d.Range.End,
 					Severity: map[int]string{1: "error", 2: "warning", 3: "info"}[d.Severity]}
 				for _, tag := range d.Tags {
 					f.Tags = append(f.Tags, map[int]string{1: "unnecessary", 2: "deprecated"}[tag])
@@ -123,7 +124,7 @@ func TestLSPMatchesLint(t *testing.T) {
 				for _, r := range d.RelatedInformation {
 					f.Related = append(f.Related, fmt.Sprintf("%s:%d %s", filepath.Base(r.Location.URI), r.Location.Range.Start.Line+1, r.Message))
 				}
-				assert.Contains(t, d.CodeDescription.Href, "#"+d.Code)
+				assert.Equal(t, lint.RuleByName(d.Code).URL(), d.CodeDescription.Href)
 				got = append(got, f)
 			}
 			assert.Equal(t, want, got, "%s (%s)", rel, c.Encoding)
@@ -134,7 +135,7 @@ func TestLSPMatchesLint(t *testing.T) {
 			var p lsp.PublishDiagnosticsParams
 			require.NoError(t, json.Unmarshal(m.Params, &p))
 			for _, d := range p.Diagnostics {
-				seen = append(seen, d.Code)
+				seen = append(seen, lint.RuleByName(d.Code).Name)
 			}
 		}
 		sort.Strings(seen)

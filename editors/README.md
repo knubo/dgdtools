@@ -10,14 +10,16 @@ knows none of `nil`, `atomic` and `rlimits`.)
 |---|---|
 | `vscode/` | the VS Code extension: a TextMate grammar and the language configuration (comments, brackets, indentation) |
 | `vim/` | runtime files for Vim and Neovim: filetype detection, syntax, filetype plugin, indent |
+| `nvim/` | for Neovim 0.11 and later: the entry that starts the language server (`lsp/dgdtools.lua`) |
 | `common/` | what the two share: the word list (`dgdlpc.json`) and the sample files the tests run over |
 
-This is the first of two layers ([lsp.md](../docs/design/lsp.md),
-section 10): highlighting that works with no server, offline, on a file
-that does not parse. It knows the tokens of the language, exactly as the
-tool's own lexer reads them. It does not know which name is a macro, a
-kfun or an inherited function; that is for the language server
-(`dgdtools lsp`, planned), which these files will be the clients of.
+There are two layers ([lsp.md](../docs/design/lsp.md), section 10). The
+first is highlighting that works with no server, offline, on a file that
+does not parse: it knows the tokens of the language, exactly as the
+tool's own lexer reads them. The second is the language server,
+`dgdtools lsp`, which knows what a grammar cannot: today it gives an
+editor the linter's findings as you type, their fixes, and the
+formatter ([below](#the-language-server)).
 
 ## A `.c` file is LPC only where you say so
 
@@ -142,16 +144,186 @@ right after, because Vim's own detection runs first; an autocommand on
 `FileType c` sees it for that moment. In Neovim (0.8 and later) the
 answer is `dgdlpc` from the start.
 
+## The language server
+
+`dgdtools lsp` is the server: the one binary, started by the editor,
+talking on its standard input and output. It needs no configuration of
+its own. A file's project is the nearest `dgdtools.yml` above it, as for
+every command, so what the editor shows is what `dgdtools lint` prints
+and what it formats is what `dgdtools format` writes. What it does:
+
+- **Diagnostics** for the files that are open, a moment after you stop
+  typing, with the rule's code, a link to the rule's documentation and
+  the related places in other files. A change to a header or an
+  inherited file reaches the open files that depend on it; a change to
+  a `dgdtools.yml`, an `.editorconfig`, a profile or a baseline reaches
+  all of them.
+- **Code actions** on a finding: its fix when it has one, a comment
+  that suppresses it for the line (`/* dgdtools-ignore lint/RULE */`) or
+  for the file, and "fix all" (`source.fixAll.dgdtools`) for every fix
+  that is safe to apply unseen.
+- **Formatting** of a file or a selection, with the project's settings
+  (`format:` in `dgdtools.yml`, else `.editorconfig`), not the editor's.
+
+It keeps a log when asked to: `dgdtools lsp --log /tmp/dgdtools-lsp.log`,
+and with `--trace` every message in both directions. It never writes to
+standard error.
+
+**Settings.** There are two, for a wizard whose folder has no
+`dgdtools.yml`: `dgdtools.profile` (the mudlib profile to work against:
+a name or a file, as `profile:` in a config) and `dgdtools.libPath`
+(where the folder sits in the lib, as `lib_path:`). They are per
+workspace folder, a config file always wins over them, and nothing else
+about the tools is set from an editor.
+
+### Neovim (0.11 and later)
+
+With `editors/vim` (the filetype) and `editors/nvim` (the server's
+entry) on the runtime path, and `dgdtools` on `PATH`:
+
+```lua
+vim.opt.runtimepath:prepend('~/src/dgdtools/editors/vim')
+vim.opt.runtimepath:prepend('~/src/dgdtools/editors/nvim')
+vim.lsp.enable('dgdtools')
+```
+
+Open a `.c` file under a `dgdtools.yml`; `:checkhealth vim.lsp` shows
+the client attached, `:lua vim.diagnostic.setqflist()` lists the
+findings, `gra` (or `:lua vim.lsp.buf.code_action()`) offers the fixes
+and the comments, `:lua vim.lsp.buf.format()` formats, and `gq` formats
+a selection. To format on save:
+
+```lua
+vim.api.nvim_create_autocmd('BufWritePre', {
+  pattern = { '*.c', '*.h' },
+  callback = function(ev)
+    if vim.bo[ev.buf].filetype == 'dgdlpc' then vim.lsp.buf.format({ bufnr = ev.buf }) end
+  end,
+})
+```
+
+A folder with no `dgdtools.yml` has no root marker; say where it is and
+what it is (and list it in `g:dgdlpc_roots`, so that its files are
+`dgdlpc`):
+
+```lua
+vim.g.dgdlpc_roots = { vim.fs.normalize('~/mud/players/me') }
+vim.lsp.config('dgdtools', {
+  root_dir = vim.fs.normalize('~/mud/players/me'),
+  settings = { dgdtools = { profile = 'mylib', libPath = '/players/me' } },
+})
+```
+
+To try it without touching your configuration, from a checkout of this
+repository (`go build -o /tmp/dgdtools ./cmd/dgdtools` first):
+
+```
+nvim -u NONE \
+  --cmd 'set rtp^=editors/vim,editors/nvim' --cmd 'filetype plugin indent on' --cmd 'syntax on' \
+  --cmd "lua vim.lsp.config('dgdtools', { cmd = { '/tmp/dgdtools', 'lsp', '--log', '/tmp/dgdtools-lsp.log' } })" \
+  --cmd "lua vim.lsp.enable('dgdtools')" \
+  /path/to/your/lib/std/room.c
+```
+
+`go test ./editors -run TestNeovimClient` does the same without a
+screen: it runs the server under the `nvim` on `PATH`, waits for the
+diagnostics of a file, mends one finding by typing and one by the
+server's fix, and has the file formatted.
+
+### Vim
+
+Vim has no client of its own. With
+[vim-lsp](https://github.com/prabirshrestha/vim-lsp):
+
+```vim
+if executable('dgdtools')
+  autocmd User lsp_setup call lsp#register_server({
+      \ 'name': 'dgdtools',
+      \ 'cmd': ['dgdtools', 'lsp'],
+      \ 'allowlist': ['dgdlpc'],
+      \ })
+endif
+```
+
+and with [coc.nvim](https://github.com/neoclide/coc.nvim), in
+`coc-settings.json`:
+
+```json
+{
+  "languageserver": {
+    "dgdtools": {
+      "command": "dgdtools",
+      "args": ["lsp"],
+      "filetypes": ["dgdlpc"],
+      "rootPatterns": ["dgdtools.yml", ".dgdtools.yml"]
+    }
+  }
+}
+```
+
+Neither was run here; they are each client's usual lines for a server on
+standard input and output.
+
+### VS Code
+
+The extension in `vscode/` has no client yet: it is the next step
+([lsp.md](../docs/design/lsp.md), section 12), and until it is there VS
+Code shows the highlighting and nothing of the server. Whoever wants to
+try the server in VS Code before that needs only what the client will
+be, a dozen lines over `vscode-languageclient`. In `editors/vscode`:
+
+```
+npm install vscode-languageclient
+```
+
+add `"main": "./client.js"` to `package.json`, and as `client.js`:
+
+```js
+const { LanguageClient, TransportKind } = require('vscode-languageclient/node');
+let client;
+exports.activate = () => {
+  client = new LanguageClient('dgdtools', 'dgdtools',
+    { command: 'dgdtools', args: ['lsp'], transport: TransportKind.stdio },
+    { documentSelector: [{ language: 'dgdlpc' }] });
+  return client.start();
+};
+exports.deactivate = () => client && client.stop();
+```
+
+Then start it as above (`code --extensionDevelopmentPath=...`), with the
+lib's files associated with `dgdlpc`. The server takes the `--stdio`
+the client adds, asks for the two settings as `dgdtools.profile` and
+`dgdtools.libPath`, and registers its own file watchers. This was not
+run here (no VS Code on the machine the server was built on): it is the
+recipe, not a tested client.
+
 ## Helix, Zed
 
 Both highlight through tree-sitter, and there is no tree-sitter grammar
 for DGD LPC yet (deferred: [lsp.md](../docs/design/lsp.md), 10.1). Until
-there is, they have nothing to gain from this directory: LPC files keep
-their C highlighting, which is tolerable and gets `({ })` and `::`
-wrong. What they will get first is the language server (diagnostics,
-formatting, navigation), configured as a language named `dgdlpc` with
-`dgdtools.yml` as its root marker; the lines for their configuration
-come with the server.
+there is, LPC files keep their C highlighting there, which is tolerable
+and gets `({ })` and `::` wrong. The language server they can use now.
+For Helix, in the lib's own `.helix/languages.toml`, so that it holds
+for this lib and nowhere else (not run here):
+
+```toml
+[language-server.dgdtools]
+command = "dgdtools"
+args = ["lsp"]
+
+[[language]]
+name = "dgdlpc"
+scope = "source.dgdlpc"
+file-types = ["c", "h"]
+roots = ["dgdtools.yml", ".dgdtools.yml"]
+comment-tokens = "//"
+block-comment-tokens = { start = "/*", end = "*/" }
+indent = { tab-width = 4, unit = "    " }
+grammar = "c"
+language-servers = ["dgdtools"]
+```
+
+Zed needs an extension to name a language; none is written.
 
 ## Changing a grammar
 

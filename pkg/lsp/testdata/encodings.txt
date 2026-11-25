@@ -1,0 +1,57 @@
+What a column counts. A client that offers UTF-8 gets it, and a column
+is a byte offset in the line; one that does not gets UTF-16 code units.
+The line below has characters of two and three bytes (one unit each) and
+one of four (two units) before the finding.
+
+-- lib/dgdtools.yml --
+-- lib/obj/a.c --
+void f() { /* blåbær € 😀 */ a == 1; }
+-- script --
+initialize utf-8 lib
+open lib/obj/a.c
+diagnostics lib/obj/a.c
+# A change at the finding, in bytes: "==" becomes "=".
+change lib/obj/a.c 0:37-0:39 "="
+text lib/obj/a.c
+diagnostics lib/obj/a.c
+shutdown
+exit
+-- transcript --
+> initialize utf-8 lib
+< {
+<   "capabilities": {
+<     "positionEncoding": "utf-8",
+<     "textDocumentSync": {"openClose": true, "change": 2},
+<     "codeActionProvider": {"codeActionKinds": ["quickfix", "source.fixAll.dgdtools"]},
+<     "documentFormattingProvider": true,
+<     "documentRangeFormattingProvider": true,
+<     "workspace": {"workspaceFolders": {"supported": true, "changeNotifications": true}}
+<   },
+<   "serverInfo": {"name": "dgdtools", "version": "test"}
+< }
+> open lib/obj/a.c
+> diagnostics lib/obj/a.c
+< {
+<   "uri": "file://$ROOT/lib/obj/a.c",
+<   "version": 1,
+<   "diagnostics": [
+<     {
+<       "range": {"start": {"line": 0, "character": 37}, "end": {"line": 0, "character": 39}},
+<       "severity": 2,
+<       "code": "S002",
+<       "codeDescription": {"href": "https://github.com/mmcdole/dgdtools/blob/main/docs/rules.md#no-effect-statement"},
+<       "source": "dgdtools",
+<       "message": "comparison has no effect as a statement (did you mean =?)"
+<     }
+<   ]
+< }
+# A change at the finding, in bytes: "==" becomes "=".
+> change lib/obj/a.c 0:37-0:39 "="
+> text lib/obj/a.c
+| void f() { /* blåbær € 😀 */ a = 1; }\n
+> diagnostics lib/obj/a.c
+< {"uri": "file://$ROOT/lib/obj/a.c", "version": 2, "diagnostics": []}
+> shutdown
+< null
+> exit
+< "the server exited after shutdown"

@@ -1,9 +1,12 @@
 # `dgdtools lsp`: implementation plan
 
-Status: a plan, of which the first step of section 12 is built: the
-editor-side grammars of section 10.1, under `editors/`. Nothing of the
-server is implemented; the command reserves the names `lsp` and
-`rename`. It builds on the library described in
+Status: a plan, of which the first two steps of section 12 are built:
+the editor-side grammars of section 10.1, under `editors/`, and the
+server itself for steps 1 to 3 of section 8 (live diagnostics, code
+actions, formatting), as `dgdtools lsp` and `pkg/lsp`; "What is built"
+below says exactly what, and where it differs from the plan. The rest of
+section 8 is still a plan, and the command reserves the name `rename`.
+The server builds on the library described in
 [architecture.md](architecture.md) (sections 6 and 10),
 [config.md](config.md) and [formatter.md](formatter.md), and on one type
 above all: `session.Session` (`pkg/session`), which holds what a server
@@ -65,6 +68,48 @@ s.FS()                             // the files as the tools read them
   of section 3 may not reach (an `extends:` base, a profile in the user's
   configuration directory, the driver's configuration).
 
+### What is built
+
+`dgdtools lsp` speaks LSP 3.17 on standard input and output. `pkg/lsp`
+is some 1,300 lines over `session.Session`:
+
+| file | |
+|---|---|
+| `server.go` | `Serve`, the connection (the only file that knows `sourcegraph/jsonrpc2`), the order of things: notifications one at a time in the goroutine that reads, a goroutine for each request and for each answer; `initialize`, `shutdown`, `exit`; `$/cancelRequest`; panics; the queue of outgoing notifications; what "idle" is |
+| `sync.go` | the open documents and their incremental changes; watched files; workspace folders and the two settings; the file watchers asked of the client |
+| `diagnostics.go` | when a document is linted, and what is published: the timers, the lint that a newer change stops, the whole-lib scan, `diag.Diagnostic` to the protocol's |
+| `actions.go` | `textDocument/codeAction`, `formatting`, `rangeFormatting` |
+| `position.go` | `PositionMapper`, URIs and paths |
+| `protocol.go` | the protocol's types, as far as used (some 45) |
+| `lsptest/` | a client in the test's own process, over a pipe |
+
+Capabilities announced: `positionEncoding` (`utf-8` when the client
+offers it, else `utf-16`), `textDocumentSync` (open and close,
+incremental changes), `codeActionProvider` (`quickfix`,
+`source.fixAll.dgdtools`; only to a client with code action literals),
+`documentFormattingProvider`, `documentRangeFormattingProvider`,
+`workspace.workspaceFolders` (with change notifications). Asked of the
+client when it can: `workspace/configuration`,
+`client/registerCapability` for `workspace/didChangeWatchedFiles`,
+`window/workDoneProgress/create`.
+
+What the library got for it, since both are a script's or a command's as
+much as the server's: `config.DiscoverOptions.Folders` (section 3) and
+`lint.Suppress` (the suppression comments of section 8, step 2).
+
+Where what is built is not what the sections below planned, the section
+says so in a paragraph that begins **As built**. In short:
+
+- A closed document's diagnostics are always cleared (section 4).
+- One timer for each document, not a scheduler for each project; and
+  only the first scan of a lib is made beside the lints (section 5).
+- The lines of a position are counted by the server, not taken from the
+  lexer (section 6).
+- `dgdtools.showBaselined` and the "explain rule" command are not built
+  (sections 3 and 8).
+- The server has one request of its own, `dgdtools/idle`, for tests and
+  scripts (section 13).
+
 ## 1. Shape
 
 - `dgdtools lsp` subcommand (one binary to install and version; the
@@ -83,19 +128,22 @@ s.FS()                             // the files as the tools read them
 - Hand-rolling the framing is 100 lines; the part that goes wrong is the
   rest: request/response correlation in both directions (the server also
   *sends* requests: `workspace/configuration`, `client/registerCapability`,
-  `workspace/applyEdit`), `$/cancelRequest` mapped to context
-  cancellation, concurrent writers, and orderly shutdown. That is exactly
-  what the library does, in ~1,500 lines with no dependencies of its own,
-  and it has years of production use (Sourcegraph, many Go language
-  servers).
+  `workspace/applyEdit`), concurrent writers, and orderly shutdown. That
+  is what the library does, in ~1,500 lines, and it has years of
+  production use (Sourcegraph, many Go language servers). It has a
+  websocket transport in a package of its own, which is not imported:
+  `go.sum` names `gorilla/websocket` for it and the binary has none of
+  it. `$/cancelRequest` it leaves to its user: the server keeps the
+  cancel function of each request it is answering.
 - `golang.org/x/tools/internal/jsonrpc2` (gopls) cannot be imported;
   `golang.org/x/exp/jsonrpc2` is its experimental copy with no stability
   promise. `go.lsp.dev/jsonrpc2` is fine but comes paired with
   `go.lsp.dev/protocol`, which is what we should avoid (next point).
 - If the project's dependency policy is "none beyond yaml", hand-rolling
-  is acceptable and bounded (2 days including cancellation); the handler
-  layer below is written against a 3-method interface (`Notify`, `Call`,
-  `Reply`) so the choice is swappable.
+  is acceptable and bounded (2 days including cancellation); the server
+  is written against a small interface (`Notify`, `Call`, `Close`; a
+  handler returns its answer) and names the library in one file, so the
+  choice is swappable.
 
 **Protocol types:** hand-written structs for the subset used (about 40
 types), in `pkg/lsp/protocol.go`. Generated full-spec packages lag the
@@ -108,7 +156,15 @@ strictly in arrival order on one goroutine, each as one call on the
 session. Requests are handled concurrently against what a lint returned
 (a `lint.Document`: one document version, one generation of the index,
 which no later change disturbs), each with a context cancelled by
-`$/cancelRequest` or by a newer version of its document.
+`$/cancelRequest`.
+
+**As built:** a request is not cancelled by a newer version of its
+document; it is answered `ContentModified` when the document changed
+while it was being answered, which a client passes over. The goroutine
+that reads never writes: every answer is a goroutine's, since a client
+may be waiting for its own message to be read before it reads the
+server's. Notifications to the client go through one queue, so what was
+published last for a document is what the client has.
 
 ## 3. Workspaces, projects and profiles
 
@@ -145,6 +201,19 @@ which no later change disturbs), each with a context cancelled by
   is where a wizard names their mud's profile (resolved with
   `profile.Resolve`, so a profile installed in the user config directory
   works for every folder).
+
+  **As built:** the settings are not passed as
+  `DiscoverOptions.Profile/LibPath`, which are a command's flags and win
+  over every config file in the workspace. They are
+  `DiscoverOptions.Folders`: for each workspace folder the settings say
+  something of, its directory, profile and lib path, which hold for the
+  paths under it that no config file claims and make them a project of
+  the folder's, anchored there. The one session serves every folder; it
+  is made again (the open documents its buffers again, all of them
+  linted) when the folders' settings are no longer those it was made
+  with, and only then. A client without `workspace/configuration` says
+  the same two keys in `initializationOptions` and in the `dgdtools`
+  section of `workspace/didChangeConfiguration`, for all its folders.
 - **Watching:** register `workspace/didChangeWatchedFiles` for
   `**/*.{c,h}`, `**/dgdtools.yml`, `**/.dgdtools.yml`,
   `**/.editorconfig`, `**/*.profile`, `**/dgdtools-baseline.json`, and
@@ -154,8 +223,20 @@ which no later change disturbs), each with a context cancelled by
   events for a document that is open change nothing the tools read. The
   open documents in `Affected.Files` are linted again, all of them when
   `Affected.All` is set.
-- The baseline applies in the editor as on the command line; a setting
-  `dgdtools.showBaselined` shows baselined findings as hints.
+
+  **As built:** the patterns are one registration; the files of
+  `Project.Inputs()` and `Linter.BaselinePath()` are added to it, each as
+  a pattern relative to its directory (`relativePatternSupport`; an
+  absolute path as the pattern otherwise), when the patterns do not have
+  them: outside every folder, or under a name no pattern has (a config
+  that is extended, the driver's configuration). The registration is made
+  again when that set changes. A client without dynamic registration is
+  not asked; the server then sees what the buffers say and nothing of the
+  disk.
+- The baseline applies in the editor as on the command line. A setting
+  `dgdtools.showBaselined`, to show baselined findings as hints, is not
+  built: the editor's settings say the profile and the lib path of a
+  folder without a config, and nothing else.
 
 ## 4. Documents and text synchronization
 
@@ -168,10 +249,18 @@ which no later change disturbs), each with a context cancelled by
   the document and for every *open* document in `affected.Files`.
 - `didOpen` is the same call even if the text equals the disk file (the
   editor is now the source of truth); `didClose` is
-  `session.Change(path, nil)`, and clears the document's diagnostics
-  unless the file is in a project (then they are recomputed from disk
-  once).
-- `didSave` needs nothing (the watcher covers other processes).
+  `session.Change(path, nil)`, and clears the document's diagnostics.
+  (The plan was to compute them once more from disk for a file in a
+  project. Nothing would have kept them true after that: diagnostics are
+  of open documents, section 14.)
+- `didSave` needs nothing (the watcher covers other processes), is not
+  asked for, and is passed over when it comes.
+
+**As built:** the line table is made again whole after a change, not
+from the first changed line: the change copies the text anyway, and a
+table made from the text has no way to be wrong (a line break can be
+made or unmade across the edge of an edit). A document whose URI names
+no file (`untitled:`) is kept in step and nothing is said about it.
 - A full-document fallback (`TextDocumentSyncKind.Full`) is kept for
   clients that do not do incremental sync; the fuzz test (section 13)
   proves both paths produce the same buffer.
@@ -209,6 +298,24 @@ which no later change disturbs), each with a context cancelled by
   stops and gives the scan slot to the next. In a partial checkout the
   scan covers only the checkout and takes milliseconds.
 
+**As built:** there is no scheduler object. A document has at most one
+timer and one running lint; a change to it restarts the timer and stops
+the lint, and a lint that is scheduled for the document's own change is
+not put off by one for something else. Lints of different documents run
+beside each other. What is published is compared with what was
+published last for the document, version included, and not sent twice.
+A lint that fails on the configuration is said to the user once
+(`window/showMessage`) and clears the document's diagnostics.
+
+The scan differs from the plan in one way that was found by a test: a
+document linted with `NoScan` right after a change to another file says
+less than it said before (the scan is not complete for a moment), and
+publishing that makes findings blink. So only the first scan of a lib is
+made beside the lints, with `$/progress` when it takes longer than
+300 ms; once a document has been linted with the scan complete, its
+lints are made without `NoScan` and complete it themselves, which is a
+file or two after a change.
+
 ## 6. Positions and encodings
 
 Two separate questions.
@@ -221,6 +328,12 @@ via `diag.UTF16Col` and its inverse `diag.ByteCol(line, utf16)`,
 computed on the single line involved. Both directions live in
 one small type, `lsp.PositionMapper`, used for every incoming position
 and every outgoing range.
+
+**As built:** the mapper counts lines itself, as the protocol does
+("\n", "\r\n", a "\r" alone), and does not use the lexer's line table.
+The two agree except about a lone "\r" inside a token (a string that is
+never closed), which the random sessions of section 13 found: an editor
+counts a line there and the lexer does not.
 
 **What bytes the server analyzes.** The lexer is byte-oriented and never
 transcodes; the corpus has Latin-1 files. The editor, however, sends
@@ -269,6 +382,13 @@ document text as a JSON string, i.e. as Unicode.
   timing, `--trace` to dump the JSON-RPC stream (this is also how golden
   transcripts are recorded).
 
+**As built:** `--log FILE` is a `log/slog` text log at debug level
+(each lint and request with its duration, panics with their stacks), and
+`--trace` adds every message to it and needs `--log`. `window/logMessage`
+gets, once for each project: what project a document was found to belong
+to, and the notes about it; and a line for a text the formatter refuses.
+`$/logTrace` gets the time each request took.
+
 ## 8. Features, in order
 
 Each step is shippable. Estimates are working days for one person who
@@ -276,9 +396,9 @@ knows the code base.
 
 | # | Feature | Maps onto | Needs first | Days |
 |---|---|---|---|---|
-| 1 | Skeleton: initialize/shutdown, projects, incremental sync, `publishDiagnostics` with code, `codeDescription` (`Rule.URL`), related information, tags (`Diagnostic.Tags`: `unnecessary` for unreachable-code and unused suppressions) | `Session.Change`, `DiskChanged`, `Lint`, `Current`; `Linter.Scan`; `diag` | `PositionMapper` | 5 |
-| 2 | `codeAction`: quick fixes from `Diagnostic.Fixes` (a `safe` fix is `isPreferred` and joins "fix all"; an `unsafe` one is offered alone); "suppress with `dgdtools-ignore lint/RULE`" and "…for this file" (a `dgdtools-ignore-start lint/RULE` at its top) generated per diagnostic; "explain rule" as a command | fixes as text edits with their applicability (already data) | a helper that renders a suppression comment in the file's comment style and indentation | 2 |
-| 3 | `formatting` and `rangeFormatting`; format-on-save of modified lines is the client's use of the latter | `format.Source(prj, path, text, lines)`: a function of the buffer and the file's settings, behind the gate (the same tokens, the same comments, a fixed point; a refusal returns no edits and a log line); `format.Edits(file, out)` gives one text edit per changed gap, so cursors and folds survive | LSP range to line range (a range that ends at column 0 does not include that line) | 2 |
+| 1 **built** | Skeleton: initialize/shutdown, projects, incremental sync, `publishDiagnostics` with code, `codeDescription` (`Rule.URL`), related information, tags (`Diagnostic.Tags`: `unnecessary` for unreachable-code and unused suppressions) | `Session.Change`, `DiskChanged`, `Lint`, `Current`; `Linter.Scan`; `diag` | `PositionMapper` | 5 |
+| 2 **built**, but for "explain rule" | `codeAction`: quick fixes from `Diagnostic.Fixes` (a `safe` fix is `isPreferred` and joins "fix all"; an `unsafe` one is offered alone); "suppress with `dgdtools-ignore lint/RULE`" and "…for this file" (a `dgdtools-ignore-start lint/RULE` at its top) generated per diagnostic; "explain rule" as a command | fixes as text edits with their applicability (already data) | a helper that renders a suppression comment in the file's comment style and indentation | 2 |
+| 3 **built** | `formatting` and `rangeFormatting`; format-on-save of modified lines is the client's use of the latter | `format.Source(prj, path, text, lines)`: a function of the buffer and the file's settings, behind the gate (the same tokens, the same comments, a fixed point; a refusal returns no edits and a log line); `format.Edits(file, out)` gives one text edit per changed gap, so cursors and folds survive | LSP range to line range (a range that ends at column 0 does not include that line) | 2 |
 | 4 | `definition`: `#include` targets, `inherit` paths, function calls (direct, `::`, `label::`, `->` with a known receiver, string callbacks in registrars), macros | `Document.Snapshot` and a `Query` on it: `ResolveInclude`, `ObjectPath`, `Chain`, `LookupCallable`; the file's `pp.Env` (`pp.Macro.Path/Off`) | `syntax.PathAt(file, offset)` (innermost node chain at a position); a stub target is already located by its virtual document URI (`dgdtools-profile://NAME/std/room.c`, see `profile.Location`), which the server answers with the stub's text | 4 |
 | 5 | `hover` and `signatureHelp` | `ChainFunc.Decl/Type/DefinedIn`, `index.Params`, macro body and class, variable types | active-parameter computation from the argument list around the cursor; kfun table for built-ins (new data file) | 3 |
 | 6 | `documentSymbol`, `workspace/symbol` | `syntax.File.Decls`; units' symbol tables (whole-lib scan, cached) | fuzzy matcher | 2 |
@@ -289,6 +409,24 @@ knows the code base.
 | 11 | Rename across files, in the editor and as `dgdtools rename SYMBOL NEW` (section 9): functions, object globals, header macros; every occurrence classified certain, possible or excluded; edits previewed with change annotations, or written as a patch | `pkg/rename` over the reverse index, who inherits a file (a `Query` on the snapshot), `Chain`, `LookupCallable`, `calls.Extract` | the reverse index (from 8); the whole-lib scan; step 10 | 9 |
 | 12 | Refactorings as code actions (section 9.6): add the missing prototype, fix an `#include` path; renaming a file updates the `inherit` and `#include` lines that name it (`workspace/willRenameFiles`) | `ResolveInclude`, `ObjectPath`, the include and inherit edges `Invalidate` already follows | the reverse index (from 8) for the file rename | 3 |
 | later | inlay hints for parameter names, pull diagnostics (`textDocument/diagnostic`, `workspace/diagnostic`), call hierarchy over inherit chains | | | |
+
+**As built, steps 1 to 3.** A diagnostic's `code` is the rule's code
+(`R001`), its `codeDescription` the rule's section of `docs/rules.md`,
+its `source` `dgdtools`; related locations, tags and the link are sent
+to a client that says it reads them. A fix is a `quickfix` with the
+finding it is for, preferred when safe; all safe fixes of the document
+are `source.fixAll.dgdtools`, which is what an editor's "fix all on
+save" asks for by kind. The two suppression actions are
+`lint.Suppress`: the line form goes above the finding's line at its
+indentation, or into the comment that is already about that line (a
+second comment above would be about the first), and is not offered where
+no line can be put (inside a comment or a macro's continued line); the
+file form is not offered in a file that already has a range for the
+rule. Edits name the document's version for a client that reads
+`documentChanges`. "Explain rule" as a command is not built: the rule's
+link is on the diagnostic, and a command would need `executeCommand` and
+a place to show text, for the same words. Formatting takes the project's
+settings and passes over the request's `tabSize` and `insertSpaces`.
 
 Steps 1 to 3 (9 days) are the "useful every day" milestone: live
 diagnostics, fixes, formatting. Steps 4 to 6 (9 days) make it a
@@ -523,8 +661,9 @@ editors/
   *_test.go              the tests of all of it (package editors)
 ```
 
-Still to come, with the server: `editors/nvim/lsp/dgdtools.lua`, the
-Neovim 0.11+ `vim.lsp.config` entry (section 11).
+Beside them now: `editors/nvim/lsp/dgdtools.lua`, the Neovim 0.11+
+`vim.lsp.config` entry (section 11), with a test that runs the server
+under the `nvim` on `PATH`.
 
 **TextMate grammar** (VS Code; also usable by other editors such as
 Sublime and by GitHub's Linguist if submitted), scope name
@@ -745,7 +884,9 @@ servers under one id is worse than a new word.
   {"dgdtools", "lsp"}`, `root_markers = {"dgdtools.yml",
   ".dgdtools.yml"}`, `filetypes = {"dgdlpc"}`); submit it to
   `nvim-lspconfig` once stable. For Vim, `editors/README.md` has the
-  lines for vim-lsp, ALE and coc.nvim.
+  lines for vim-lsp and coc.nvim. The Neovim entry is there and tested
+  (`TestNeovimClient`); the lines for the others are written down and
+  were not run.
 - **Helix:** a `languages.toml` entry in `editors/README.md` (language
   `dgdlpc`, roots `dgdtools.yml`, `language-servers = ["dgdtools"]`).
   Helix highlights only through tree-sitter and does not use semantic
@@ -766,6 +907,7 @@ servers under one id is worse than a new word.
 2. The prerequisite of step 1 that is left (`PositionMapper`),
    `pkg/lsp` skeleton, transcript test harness. Ship steps 1 to 3 behind
    `dgdtools lsp` and test with Neovim (no extension needed) (9 days).
+   **Done** ("What is built", above).
 3. VS Code extension (client, settings, grammar packaging) against steps
    1 to 3 (4 days).
 4. `syntax.PathAt`; steps 4 to 6 (9 days); then semantic tokens 9a (2
@@ -805,6 +947,35 @@ grammars alone can ship in the first.
   in-process client over `io.Pipe` runs them; `-update` rewrites the
   expectations. `--trace` output from a real editor session converts to
   a transcript, so every bug report becomes a test.
+
+  **As built:** `pkg/lsp/testdata/*.txt`, played by `TestTranscripts`
+  (its comment lists the script's commands; `go test ./pkg/lsp -run
+  TestTranscripts -update` rewrites them): the life of a session, code
+  actions for a rich and for a plain client, formatting, both position
+  encodings, and what changes around the documents (watched files,
+  configuration, settings). There is no `wait`: a script asks for what
+  is published once the server is idle, which it learns from the
+  server's one request of its own, `dgdtools/idle`, answered when
+  nothing is scheduled, running or unsent. That is what makes a
+  transcript the same on every run; an editor has no use for it.
+  Converting a `--trace` log to a script is not built.
+- **As built, the rest of this list.** `TestDiagnosticsAreTheLinters`
+  (every file of a fixture lib, both encodings, against a fresh lint;
+  after an edit and its undo) and, through the command itself,
+  `TestLSPMatchesLint` in `cmd/dgdtools` (against `dgdtools lint
+  --output-format json`); `TestIncrementalChanges` and `FuzzChange`
+  (ranges in both encodings against a plain string, and the mapper
+  against positions worked out the long way); `TestRandomSession` (edits,
+  opens and closes, files changing on disk; after each step what is
+  published is what a fresh lint finds; `-seeds N`, 600 sessions clean);
+  `TestDependents`, `TestWatchedFiles`, `TestSettings` (invalidation,
+  rebuild on a configuration change, files and directories created and
+  deleted, a baseline, the two settings); `TestBurst` (200 changes, each
+  publication of the text it names, the last of the last);
+  `TestCancel`, `TestPanics`, `TestEndings`, `TestLatin1`,
+  `TestScanProgress`, `TestLogAndTrace`; `TestNeovimClient` in
+  `editors`. All under `-race`. Not built: the corpus smoke test and the
+  VS Code integration test (the client is the next step).
 - **Edit fuzzing** (`go test -fuzz`): start from a corpus file, apply a
   random sequence of range edits through incremental sync while applying
   the same edits to a plain string; after each step the server's buffer
@@ -881,6 +1052,14 @@ Each with the alternative it was chosen over.
   the price of a regular expression syntax both engines share (10.1).
 - **One rename engine for the editor and the command line; no
   deprecation machinery** (section 9).
+- **A diagnostic's code is the rule's code** (`R001`), as in every
+  other output; the name is in the link and in the suppression actions.
+- **The editor's settings say two things**, the profile and the lib path
+  of a folder without a config file, and a config file wins over them.
+  Everything else is the project's: an editor cannot make the server
+  disagree with the command line.
+- **A closed document has no diagnostics**: what nothing keeps true is
+  not shown.
 
 - **The VS Code extension is published under the repository owner's
   account**, to both the Visual Studio Marketplace and Open VSX (so

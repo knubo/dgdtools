@@ -32,6 +32,7 @@ format lib/obj/a.c 0:0-4:0
 
 # A text the formatter refuses gets no edits, and a line in the log.
 open lib/obj/bad.c
+diagnostics lib/obj/bad.c
 format lib/obj/bad.c
 received window/logMessage
 # A document that is not open, and one that is no file.
@@ -119,14 +120,38 @@ exit
 < []
 # A text the formatter refuses gets no edits, and a line in the log.
 > open lib/obj/bad.c
+> diagnostics lib/obj/bad.c
+< {
+<   "uri": "file://$ROOT/lib/obj/bad.c",
+<   "version": 1,
+<   "diagnostics": [
+<     {
+<       "range": {"start": {"line": 0, "character": 21}, "end": {"line": 0, "character": 21}},
+<       "severity": 1,
+<       "code": "E001",
+<       "codeDescription": {"href": "https://github.com/mmcdole/dgdtools/blob/main/docs/rules.md#syntax-error"},
+<       "source": "dgdtools",
+<       "message": "missing '}' to close '{' opened on line 1",
+<       "relatedInformation": [
+<         {
+<           "location": {
+<             "uri": "file://$ROOT/lib/obj/bad.c",
+<             "range": {"start": {"line": 0, "character": 8}, "end": {"line": 0, "character": 9}}
+<           },
+<           "message": "opened here"
+<         }
+<       ]
+<     }
+<   ]
+< }
 > format lib/obj/bad.c
 < null
 > received window/logMessage
+< {"message": "project $ROOT/lib/dgdtools.yml: lib $ROOT/lib", "type": 3}
 < {
 <   "message": "not formatted: $ROOT/lib/obj/bad.c: file contains unlexable content; refusing to format",
 <   "type": 3
 < }
-< {"message": "project $ROOT/lib/dgdtools.yml: lib $ROOT/lib", "type": 3}
 # A document that is not open, and one that is no file.
 > request textDocument/formatting {"textDocument":{"uri":"file:///nowhere.c"},"options":{}}
 < null

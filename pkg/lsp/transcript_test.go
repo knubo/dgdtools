@@ -137,9 +137,11 @@ func layout(t *testing.T, dec *json.Decoder, indent string) string {
 	require.NoError(t, err)
 	open, isOpen := tok.(json.Delim)
 	if !isOpen {
-		data, err := json.Marshal(tok)
-		require.NoError(t, err)
-		return string(data)
+		var b bytes.Buffer
+		enc := json.NewEncoder(&b)
+		enc.SetEscapeHTML(false) // "->" as it reads
+		require.NoError(t, enc.Encode(tok))
+		return strings.TrimSuffix(b.String(), "\n")
 	}
 	var members []string
 	for dec.More() {

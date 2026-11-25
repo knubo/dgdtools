@@ -24,14 +24,14 @@ func (s *server) linted(ctx context.Context, uri string) (*lint.Document, int, *
 		s.mu.Unlock()
 		return nil, 0, nil, nil
 	}
-	version := doc.version
+	version, scanned := doc.version, doc.scanned
 	if d := doc.linted; d != nil && doc.lintedVersion == version && doc.lintedIn == sess && sess.Current(d) {
 		s.mu.Unlock()
 		return d, version, sess, nil
 	}
 	s.mu.Unlock()
 
-	d, err := sess.Lint(ctx, doc.path, lint.Options{NoScan: true})
+	d, _, err := lintWith(ctx, sess, doc.path, scanned)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var fe *lint.FileError

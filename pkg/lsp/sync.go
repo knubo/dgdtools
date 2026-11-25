@@ -48,8 +48,10 @@ type document struct {
 	lintedVersion int
 	lintedIn      *session.Session
 	inputs        []string
-	// rescanned is the generation of the lib a lint after the whole-lib
-	// scan was last asked for.
+	// scanned is the linter the document was linted by with the scan of
+	// the whole lib complete, and rescanned the generation of the lib a
+	// lint after the scan was last asked for.
+	scanned   *lint.Linter
 	rescanned *index.Snapshot
 	// published is what the client was last told of the document, and
 	// shown whether that was anything.

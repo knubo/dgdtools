@@ -78,25 +78,22 @@ func (s *server) lint(doc *document, t *ticket) {
 	ctx, cancel := context.WithCancel(s.ctx)
 	defer cancel()
 	doc.ticket, doc.running, doc.cancel = nil, t, cancel
-	sess, version := s.session, doc.version
+	sess, version, scanned := s.session, doc.version, doc.scanned
 	s.mu.Unlock()
 
 	start := time.Now()
-	d, err := sess.Lint(ctx, doc.path, lint.Options{NoScan: true})
+	d, l, err := lintWith(ctx, sess, doc.path, scanned)
 	var (
 		found  []Diagnostic
-		l      *lint.Linter
 		prj    *config.Project
 		inputs []string
 	)
 	if err == nil {
 		found = s.diagnostics(sess, d)
-		if l, _ = sess.Linter(doc.path); l != nil {
-			prj = l.Project()
-			inputs = prj.Inputs()
-			if b := l.BaselinePath(); b != "" {
-				inputs = append(inputs, b)
-			}
+		prj = l.Project()
+		inputs = prj.Inputs()
+		if b := l.BaselinePath(); b != "" {
+			inputs = append(inputs, b)
 		}
 	}
 	s.log.Debug("lint", "path", doc.path, "version", version, "took", time.Since(start), "err", err)
@@ -135,12 +132,13 @@ func (s *server) lint(doc *document, t *ticket) {
 	}
 	doc.linted, doc.lintedVersion, doc.lintedIn, doc.inputs = d, version, sess, inputs
 	s.publish(doc, version, found)
-	if prj != nil {
-		s.announce(prj, d)
-	}
+	s.announce(prj, d)
 	s.rewatch()
 	switch {
-	case !d.NeedsScan || l == nil:
+	case !d.NeedsScan:
+		if d.Snapshot.Scanned() {
+			doc.scanned = l
+		}
 	case !d.Snapshot.Scanned():
 		s.scan(sess, l, doc)
 	case doc.rescanned != d.Snapshot:
@@ -148,6 +146,21 @@ func (s *server) lint(doc *document, t *ticket) {
 		doc.rescanned = d.Snapshot
 		s.schedule(doc, 0, false)
 	}
+}
+
+// lintWith lints the file at path by its linter in sess, which is
+// returned too. The first scan of a lib takes seconds and is made beside
+// the lints, which say what they can without it (lint.Options.NoScan).
+// Once a document has been linted with the scan complete, by the linter
+// scanned, its lints keep it complete themselves, a file or two after
+// each change, rather than say less for a moment than was said before.
+func lintWith(ctx context.Context, sess *session.Session, path string, scanned *lint.Linter) (*lint.Document, *lint.Linter, error) {
+	l, err := sess.Linter(path)
+	if err != nil {
+		return nil, nil, err
+	}
+	d, err := l.Lint(ctx, path, lint.Options{NoScan: l != scanned})
+	return d, l, err
 }
 
 // publish tells the client the diagnostics of doc at the given version,
@@ -186,7 +199,7 @@ type scan struct {
 
 // progressDelay is how long a scan runs before the client is told of it;
 // in a checkout it is over long before.
-const progressDelay = 300 * time.Millisecond
+var progressDelay = 300 * time.Millisecond
 
 // scan runs the whole-lib scan of l beside everything else, unless it is
 // running already, and has doc linted again when it is done.
@@ -281,7 +294,7 @@ func (c *converter) diagnostic(d *diag.Diagnostic) Diagnostic {
 	out := Diagnostic{
 		Range:    c.m.Range(d.Start, d.End),
 		Severity: SeverityInformation,
-		Code:     d.Rule,
+		Code:     d.Code,
 		Source:   "dgdtools",
 		Message:  d.Message,
 	}

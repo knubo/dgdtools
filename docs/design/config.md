@@ -216,7 +216,11 @@ wrong.
 
 An editor's own settings carry only what a wizard with no file at all
 needs (a profile name, a lib path); they are the same fallback as the
-user-level config and never override a project.
+user-level config and never override a project. They are per workspace
+folder: `DiscoverOptions.Folders` names each folder they say something
+of, and the paths under it that no config file claims are a project of
+that folder's, anchored there (where the user-level config also applies,
+the folder's profile and lib path are the nearer word).
 
 ## 7. In the library
 
@@ -279,10 +283,13 @@ dgdtools version
   file can never be mistaken for a command or the reverse.
 - **`lint` and `format`**, the plain verbs; no aliases (`fmt`, `check`):
   one spelling in every script and every answer on a forum.
-- **Reserved:** `lsp` (the language server) and `rename` (semantic
-  rename), both planned in [lsp.md](lsp.md), are names the dispatcher
-  knows and answers with "not part of this version" and exit 2. They are not in the help: help lists what
-  works. Reserving them means an editor plugin configured for a newer
+- **`lsp`** is the language server ([lsp.md](lsp.md)): the protocol on
+  standard input and output, `--log FILE` and `--trace` for a log, exit
+  code 1 when the editor went away without the protocol's shutdown.
+- **Reserved:** `rename` (semantic rename), planned in
+  [lsp.md](lsp.md), is a name the dispatcher knows and answers with
+  "not part of this version" and exit 2. It is not in the help: help lists what
+  works. Reserving it means a script written for a newer
   version gets a precise message, and no later command has to work
   around a squatter.
 - **No token-comparison or token-dump command.** Comparing two files'

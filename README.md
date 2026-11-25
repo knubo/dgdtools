@@ -24,6 +24,7 @@ dgdtools rules                  list the lint rules
 dgdtools explain RULE           what a rule means and why it fires
 dgdtools config [path]          check the configuration of a path and show what it comes to
 dgdtools profile build | show   mudlib profiles
+dgdtools lsp                    the language server, for an editor to start
 dgdtools version
 ```
 
@@ -567,10 +568,18 @@ formatter), [config.md](docs/design/config.md) (configuration and the
 command line) and [lsp.md](docs/design/lsp.md) (the language server and
 the rename command planned on top).
 
-Syntax highlighting for VS Code and for Vim and Neovim is in
-[`editors/`](editors/README.md), under the language name `dgdlpc`. A
-`.c` file is LPC there only inside a lib: nothing claims the extension
-on a machine that has C sources too.
+## In an editor
+
+`dgdtools lsp` is a language server: an editor starts it and gets, for
+the files that are open, the findings of `dgdtools lint` as they are
+typed, the fixes and `dgdtools-ignore` comments for them, and `dgdtools
+format` for a file or a selection. It reads the same `dgdtools.yml` as
+the commands, so the editor and the command line cannot disagree.
+[`editors/`](editors/README.md) has what each editor needs: syntax
+highlighting for VS Code and for Vim and Neovim, under the language name
+`dgdlpc`, and how to start the server from Neovim and others. A `.c`
+file is LPC there only inside a lib: nothing claims the extension on a
+machine that has C sources too.
 
 ## License note
 
