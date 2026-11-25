@@ -344,7 +344,7 @@ func (b *builder) header(d *syntax.FuncDecl) {
 	}
 	if body != nil {
 		b.markKind(body.First, token.LBrace, breakBefore|breakAfter)
-		if body.Last > body.First {
+		if body.Last > body.First && !body.Unclosed {
 			b.markKind(body.Last, token.RBrace, breakBefore)
 		}
 	}
@@ -360,18 +360,15 @@ func (b *builder) block(s *syntax.BlockStmt, level int, inSwitch bool) {
 	if b.mine(s.First) && b.f.Tokens[s.First].Kind == token.LBrace {
 		b.info[s.First] = brace
 	}
+	if !s.Unclosed && b.mine(s.Last) && b.f.Tokens[s.Last].Kind == token.RBrace {
+		b.info[s.Last] = brace
+	}
 	for _, c := range s.Stmts {
 		if label, ok := c.(*syntax.CaseStmt); ok && inSwitch {
 			b.switchCase(label, level)
 		} else {
 			b.stmt(c, level+1)
 		}
-	}
-	// Last, so that the brace is the block's whatever is inside: a
-	// statement that is missing (`if (x) }`) is reported at the brace it
-	// was looked for at, and must not take the brace for itself.
-	if s.Last > s.First && b.mine(s.Last) && b.f.Tokens[s.Last].Kind == token.RBrace {
-		b.info[s.Last] = brace
 	}
 }
 
@@ -416,6 +413,11 @@ func (b *builder) stmt(s syntax.Stmt, level int) {
 		b.block(s, level, false)
 		return
 	case *syntax.BadStmt:
+		if s.Missing {
+			// Nothing to lay out: the token it stands at (the brace that
+			// closes the block, in `if (x) }`) is planned as what it is.
+			return
+		}
 		if s.Resumed != nil {
 			// The statement after one the parser gave up on: hidden from
 			// the tree, but its shape is known.

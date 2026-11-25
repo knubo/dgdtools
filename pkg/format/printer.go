@@ -399,19 +399,22 @@ func (p *printer) layout(gap []token.Token, next int, resumed, tail bool) {
 // comments are kept, trailing blank lines dropped, and the file ends with
 // exactly one newline.
 func (p *printer) finish(gap []token.Token) {
-	sawNewline := false
-	var lastSpace []byte
+	// The line break that ends a line here keeps its bytes, like every
+	// other the author wrote: the first of those that follow the line.
+	var newline, lastSpace []byte
 	for _, g := range gap {
 		switch g.Kind {
 		case token.Newline:
-			sawNewline = true
+			if newline == nil {
+				newline = p.f.Text(g)
+			}
 			lastSpace = nil
 		case token.Space:
 			lastSpace = p.f.Text(g)
 		case token.LineComment, token.BlockComment:
 			if p.buf.Len() > 0 {
-				if sawNewline {
-					p.writeNewline(nil)
+				if newline != nil {
+					p.writeNewline(newline)
 				} else if len(lastSpace) > 0 {
 					p.buf.Write(lastSpace)
 				} else {
@@ -419,12 +422,11 @@ func (p *printer) finish(gap []token.Token) {
 				}
 			}
 			p.emitComment(g)
-			sawNewline = false
-			lastSpace = nil
+			newline, lastSpace = nil, nil
 		}
 	}
 	if p.buf.Len() > 0 && !p.runsOn() {
-		p.writeNewline(nil)
+		p.writeNewline(newline)
 	}
 }
 
@@ -464,11 +466,12 @@ func (p *printer) shouldCuddle(next int) bool {
 }
 
 // newlineAfter reports whether a newline separates the token at idx from
-// the next significant token.
+// the next significant token. The end of the file is one: the formatter
+// ends the last line.
 func (p *printer) newlineAfter(idx int) bool {
 	for i := idx + 1; i < len(p.f.Tokens); i++ {
 		switch k := p.f.Tokens[i].Kind; {
-		case k == token.Newline:
+		case k == token.Newline, k == token.EOF:
 			return true
 		case !k.IsTrivia():
 			return false

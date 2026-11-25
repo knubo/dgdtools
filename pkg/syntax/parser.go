@@ -784,7 +784,7 @@ func (p *parser) parseBlock() *BlockStmt {
 				Tok: p.prevIdx(), AtPrevEnd: true, Related: b.First, RelatedMsg: "opened here",
 				RegionFirst: b.First, RegionLast: p.prevIdx(), Severe: true,
 			})
-			b.Last = p.prevIdx()
+			b.Last, b.Unclosed = p.prevIdx(), true
 			return b
 		}
 		start := p.i
@@ -796,7 +796,7 @@ func (p *parser) parseBlock() *BlockStmt {
 			b.Stmts = append(b.Stmts, s)
 		}
 	}
-	b.Last = p.prevIdx()
+	b.Last, b.Unclosed = p.prevIdx(), true
 	return b
 }
 
@@ -843,7 +843,7 @@ func (p *parser) parseStmt() (s Stmt) {
 				}
 			}
 		}
-		s = &BadStmt{span: span{p.tokAt(start), max(last, p.tokAt(start))}, Opaque: opaque}
+		s = &BadStmt{span: span{p.tokAt(start), max(last, p.tokAt(start))}, Opaque: opaque, Missing: p.i <= start}
 	}()
 	return p.stmt()
 }

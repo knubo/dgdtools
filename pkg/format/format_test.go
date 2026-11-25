@@ -449,9 +449,21 @@ func TestOddTokensStayWhatTheyAre(t *testing.T) {
 		"#define A /* b": "#define A /* b",
 		"#/*\n":          "#/*\n",
 		"#endif":         "#endif\n",
+		// The end of the file ends a line, before it is written to.
+		"A(){for(;;)\n{": "A()\n{\n    for (;;) {\n",
+		// A line break keeps its bytes, the last one too.
+		"\r\n\r\n0\n\n": "\r\n\r\n0\n",
 	} {
 		assert.Equal(t, want, fmtSrc(t, in, Options{}), "%q", in)
 	}
+}
+
+// A block that is never closed does not take the brace of the block
+// inside it for its own.
+func TestUnclosedBlock(t *testing.T) {
+	src := "void\nf()\n{\n    if (x) {\n        y();\n    }\n\n    retrieve()\n    {\n        move();\n        return 1;\n    }\n"
+	assert.Equal(t, src, fmtSrc(t, src, Options{}))
+	assert.Equal(t, "A()\n{\n    rlimits (0; 0)\n    { }\n", fmtSrc(t, "A() {rlimits(0;0)\n{}", Options{}))
 }
 
 // The gate holds the comments too: all of them, in order, with nothing

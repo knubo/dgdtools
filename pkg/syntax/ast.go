@@ -190,6 +190,9 @@ type (
 	BlockStmt struct {
 		span
 		Stmts []Stmt
+		// Unclosed says the brace that closes the block is missing: Last
+		// is the last token read, whatever it is.
+		Unclosed bool
 	}
 	ExprStmt struct {
 		span
@@ -276,6 +279,10 @@ type (
 	BadStmt struct {
 		span
 		Opaque bool
+		// Missing says no token was read: a statement was expected and
+		// there is none (`if (x) }`). The span is the token it was looked
+		// for at, which belongs to whatever comes next.
+		Missing bool
 		// Resumed is set for the first statement read after a skipped
 		// construct. It parsed, but where the skip ended is a guess, so it
 		// is evidence of nothing and not part of the tree: Inspect does

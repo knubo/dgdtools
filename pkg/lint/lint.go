@@ -9,12 +9,14 @@
 //
 // The package never prints, never exits, reads no environment or working
 // directory (paths are absolute), and keeps no package-level mutable
-// state. A Linter can live as long as the process (an editor server): it
+// state. A Linter can live as long as its project's configuration: it
 // is told about changed files with Invalidate, which starts a new
 // generation of its index, and every Run or Lint reads one generation
 // from start to end, so linting and editing never wait for each other.
-// Fixes are returned as text edits on diagnostics and are never applied
-// here.
+// An editor server holds its linters, one per project, through
+// session.Session, which also keeps the unsaved buffers and replaces a
+// linter when its project's configuration changes. Fixes are returned as
+// text edits on diagnostics and are never applied here.
 package lint
 
 import (

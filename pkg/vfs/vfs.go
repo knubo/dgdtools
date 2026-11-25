@@ -43,9 +43,10 @@ func (OS) IsDir(path string) bool {
 func (OS) WalkDir(root string, fn fs.WalkDirFunc) error { return filepath.WalkDir(root, fn) }
 
 // Overlay shadows a base FS with in-memory file contents. It is safe for
-// concurrent use. Set and Delete are how an editor integration feeds
-// unsaved buffers to the linter; the caller is responsible for telling the
-// linter which paths changed (lint.Linter.Invalidate).
+// concurrent use. Set and Delete are how unsaved buffers reach the tools.
+// Whoever changes one must also tell the linter that reads through it
+// (lint.Linter.Invalidate); a long-lived front end leaves both to
+// session.Session, which does them as one step.
 type Overlay struct {
 	base FS
 	mu   sync.RWMutex
