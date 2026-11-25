@@ -189,6 +189,11 @@ func TestExampleConfigsLoad(t *testing.T) {
 	assert.Equal(t, "create", c.Create)
 	assert.Equal(t, map[string]any{"deny": []any{"/std/", "/obj/"}}, c.Lint.Rules["raw-inherit-path"].Options)
 	assert.Contains(t, c.Exclude, "attic/**")
+	// The kfuns of the driver's extension module, beside the driver's.
+	kfuns, err := c.Kfuns()
+	require.NoError(t, err)
+	assert.Equal(t, "string argon2_hash(string password, int ops_limit, int mem_limit)", kfuns.Lookup("argon2_hash").Decl)
+	assert.NotNil(t, kfuns.Lookup("strlen"))
 }
 
 // What a call registry entry may say.

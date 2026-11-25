@@ -144,6 +144,8 @@ func TestScopeValidation(t *testing.T) {
 		"object paths":   {"relative_object_paths: cwd\n", `relative_object_paths: unknown value "cwd" (want root or file)`},
 		"macro class":    {"conventions:\n  macros: {FOREACH: statment}\n", `conventions.macros: FOREACH: unknown class "statment" (want expression, empty, specifier, type, string, statement, opaque)`},
 		"typechecking":   {"dialect: {typechecking: 3}\n", "dialect.typechecking: 3 is not a typechecking level"},
+		"kfun":           {"dialect:\n  kfuns: [\"int *rusage()\", \"rusage\"]\n", `dialect.kfuns: kfun prototype "rusage": want TYPE NAME(PARAMETERS)`},
+		"scope kfuns":    {"root: false\ndialect: {kfuns: [\"int f()\"]}\n", "dialect belongs"},
 		"registry index": {"conventions:\n  format_registry: {scan: -1}\n", "conventions.format_registry: scan: -1 is not an argument index"},
 		"owners":         {"profile_build: {share_min_owners: -2}\n", "profile_build.share_min_owners"},
 		"severity":       {"lint:\n  rules:\n    syntax: loud\n", `line 3: lint.rules: syntax: unknown severity "loud"`},

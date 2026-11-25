@@ -40,6 +40,13 @@ dialect:
   closures: false            # `function` keyword, &f(), (*f)() (CLOSURES flag)
   # typechecking: 2          # the driver's level; unknown = the rules that
   #                          # depend on it are silent
+  # The kfuns the driver has beyond stock DGD's: those of the extension
+  # modules it loads (`modules` in the driver's config file), each as a
+  # prototype. The names of the parameters are optional. An editor shows
+  # them like the driver's own.
+  # kfuns:
+  #   - "int *rusage()"
+  #   - "string sha256(string text, varargs int rounds)"
 
 # What the driver's config file says. Not needed with a profile or with
 # profile_build.driver_config, which supply them; what is set here wins.

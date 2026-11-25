@@ -19,6 +19,12 @@ exclude:
 dialect:
   slash_slash: true
   closures: false
+  # The driver loads an extension module (viking-dgd-extension), which
+  # adds these to the kfuns of stock DGD.
+  kfuns:
+    - "int *rusage()"
+    - "string argon2_hash(string password, int ops_limit, int mem_limit)"
+    - "int argon2_verify(string password, string hash)"
 
 # The driver's create function is __create, which the auto object
 # receives and passes on: what an object of this lib defines is create().

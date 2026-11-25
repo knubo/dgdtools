@@ -25,6 +25,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/mmcdole/dgdtools/pkg/diag"
+	"github.com/mmcdole/dgdtools/pkg/kfun"
 	"github.com/mmcdole/dgdtools/pkg/pp"
 	"github.com/mmcdole/dgdtools/pkg/profile"
 	"github.com/mmcdole/dgdtools/pkg/token"
@@ -160,6 +161,11 @@ type DialectCfg struct {
 	// Typechecking is the driver's typechecking level (0, 1, 2). Rules
 	// that only hold under typechecking stay silent when it is unknown.
 	Typechecking *int `yaml:"typechecking"`
+	// Kfuns are the kernel functions this driver has beyond stock DGD's,
+	// those of the extension modules it loads, each as a prototype
+	// ("int *rusage()"; kfun.Parse says how one is written). A kfun of
+	// the driver's own that is listed is taken as written here.
+	Kfuns []string `yaml:"kfuns"`
 }
 
 // Lint are the linter's settings.
@@ -392,6 +398,9 @@ func (c *Config) Validate() error {
 	if tc := c.Dialect.Typechecking; tc != nil && (*tc < 0 || *tc > 2) {
 		return fmt.Errorf("dialect.typechecking: %d is not a typechecking level (0, 1 or 2)", *tc)
 	}
+	if _, err := c.Kfuns(); err != nil {
+		return fmt.Errorf("dialect.kfuns: %w", err)
+	}
 	if n := c.ProfileBuild.ShareMinOwners; n < -1 {
 		return fmt.Errorf("profile_build.share_min_owners: %d: want a number of owners, or -1 for no inference", n)
 	}
@@ -464,7 +473,7 @@ func (c *Config) validateScope() error {
 		{"profile", c.Profile != ""},
 		{"lib_path", c.LibPath != ""},
 		{"exclude", len(c.Exclude) > 0},
-		{"dialect", c.Dialect != DialectCfg{}},
+		{"dialect", !reflect.DeepEqual(c.Dialect, DialectCfg{})},
 		{"include_dirs", len(c.IncludeDirs) > 0},
 		{"include_file", c.IncludeFile != ""},
 		{"auto_objects", len(c.AutoObjects) > 0},
@@ -543,6 +552,12 @@ func (c *Config) TokenDialect() token.Dialect {
 		d.SlashSlash = *c.Dialect.SlashSlash
 	}
 	return d
+}
+
+// Kfuns returns the kernel functions of the project's driver: those of
+// stock DGD and the ones dialect.kfuns declares.
+func (c *Config) Kfuns() (*kfun.Table, error) {
+	return kfun.DGD().With(c.Dialect.Kfuns)
 }
 
 // Predefined returns the names that are defined before the first line of

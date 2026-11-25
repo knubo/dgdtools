@@ -345,7 +345,7 @@ func TestStubLocations(t *testing.T) {
 // so in its configuration, and its profile tells the checkouts.
 func TestProfileCarriesTheCreateFunction(t *testing.T) {
 	m := vfs.Mem{
-		"/mud/dgdtools.yml":        "root: lib\ncreate: setup\nprofile_build:\n  name: m\n  driver_config: mud.dgd\n  share: [\"std/**\"]\n  checkouts: [\"usr/*\"]\n",
+		"/mud/dgdtools.yml":        "root: lib\ncreate: setup\ndialect:\n  kfuns: [\"int *rusage()\", \"int strlen(string s)\"]\nprofile_build:\n  name: m\n  driver_config: mud.dgd\n  share: [\"std/**\"]\n  checkouts: [\"usr/*\"]\n",
 		"/mud/mud.dgd":             "auto_object = \"/sys/auto\";\ncreate = \"_F_create\";\n",
 		"/mud/lib/sys/auto.c":      "void _F_create() { }\n",
 		"/mud/lib/std/thing.c":     "void setup() { }\n",
@@ -367,6 +367,22 @@ func TestProfileCarriesTheCreateFunction(t *testing.T) {
 	}
 	part, err := config.Discover(alone, []string{"/home/ann/usr/ann"}, config.DiscoverOptions{})
 	require.NoError(t, err)
+	// So it is with the kfuns of the driver's extension modules; what the
+	// checkout's own configuration says of one stands before the
+	// profile's word.
+	assert.Equal(t, []string{"int *rusage()", "int strlen(string s)"}, p.Dialect.Kfuns)
+	kfuns, err := part.Config.Kfuns()
+	require.NoError(t, err)
+	assert.Equal(t, "int *rusage()", kfuns.Lookup("rusage").Decl)
+	assert.Equal(t, "int strlen(string s)", kfuns.Lookup("strlen").Decl)
+	alone["/home/ann/usr/ann/dgdtools.yml"] += "dialect:\n  kfuns: [\"int *rusage(varargs int who)\"]\n"
+	own, err := config.Discover(alone, []string{"/home/ann/usr/ann"}, config.DiscoverOptions{})
+	require.NoError(t, err)
+	kfuns, err = own.Config.Kfuns()
+	require.NoError(t, err)
+	assert.Equal(t, "int *rusage(varargs int who)", kfuns.Lookup("rusage").Decl)
+	assert.Equal(t, "int strlen(string s)", kfuns.Lookup("strlen").Decl)
+
 	want := []string{"sword.c:2 lifecycle-chain setup() overrides inherited /std/thing::setup() but does not chain it; call ::setup()"}
 	assert.Equal(t, want, findings(t, full, m, "/mud/lib/usr/ann"))
 	assert.Equal(t, want, findings(t, part, alone))

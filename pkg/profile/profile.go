@@ -59,6 +59,9 @@ type Dialect struct {
 	Closures     bool     `json:"closures"`               // function-pointer syntax
 	Typechecking *int     `json:"typechecking,omitempty"` // driver typechecking level
 	Predefined   []string `json:"predefined,omitempty"`   // macros the driver defines
+	// Kfuns are the kernel functions the lib's driver has beyond the
+	// stock driver's (its extension modules'), as prototypes.
+	Kfuns []string `json:"kfuns,omitempty"`
 }
 
 // Conventions are the lib's own habits that the tools need to be told.

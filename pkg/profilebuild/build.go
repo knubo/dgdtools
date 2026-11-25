@@ -79,6 +79,7 @@ func Build(ctx context.Context, prj *config.Project, fsys vfs.FS) (*profile.Prof
 		Language: "lpc", Driver: "dgd", Version: "1.7",
 		SlashSlash: d.SlashSlash, Closures: d.Closures,
 		Typechecking: cfg.Dialect.Typechecking, Predefined: pp.Predefined,
+		Kfuns: cfg.Dialect.Kfuns,
 	}
 	p.IncludeDirs, p.IncludeFile, p.AutoObjects, p.Create = cfg.IncludeDirs, cfg.IncludeFile, cfg.AutoObjects, cfg.Create
 	p.RelativeObjectPaths = cfg.RelativeObjectPaths

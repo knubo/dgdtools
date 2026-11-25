@@ -571,6 +571,9 @@ func applyProfile(cfg *Config, p *profile.Profile) {
 		cfg.Dialect.SlashSlash = &v
 	}
 	cfg.Dialect.Closures = cfg.Dialect.Closures || p.Dialect.Closures
+	// The profile's kfuns, then the config's: of two with a name the
+	// later is the one (kfun.Table.With).
+	cfg.Dialect.Kfuns = append(slices.Clone(p.Dialect.Kfuns), cfg.Dialect.Kfuns...)
 	own, c := &cfg.Conventions, p.Conventions
 	if len(own.SpecifierMacros) == 0 {
 		own.SpecifierMacros = c.SpecifierMacros
