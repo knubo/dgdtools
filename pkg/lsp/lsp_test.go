@@ -578,7 +578,13 @@ func TestSettings(t *testing.T) {
 	// in no folder has no lib.
 	assert.Equal(t, ann, got(c))
 	assert.Len(t, c.Received("workspace/configuration"), 1)
-	assert.Contains(t, fmt.Sprint(c.Received("window/logMessage")), path("ann")+" is /players/ann")
+	// The messages' text, read as text: how fmt prints a json.RawMessage
+	// differs between Go releases.
+	var logged strings.Builder
+	for _, m := range c.Received("window/logMessage") {
+		logged.Write(m.Params)
+	}
+	assert.Contains(t, logged.String(), path("ann")+" is /players/ann")
 
 	// The settings change: the editor says so and is asked again.
 	settings[lsptest.URI(path("bob"))] = map[string]any{"libPath": "/players/bob"}
