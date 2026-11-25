@@ -590,7 +590,12 @@ finds the references of a name: every call of a function in the mudlib
 (direct, `::`, `->` and callbacks on objects it can tell), every use of
 a variable, a macro or a local, every `inherit` of an object and
 `#include` of a header, and highlights a name's places in the file, a
-variable read or written. It colours what a grammar cannot tell
+variable read or written. It renames what one file decides: a local or
+a parameter, a private function or variable, an inherit label, a macro
+the file defines for itself, everywhere it is meant and nowhere else,
+and says why not where the rename would change what a name means or
+reach other files (a public function, a header's macro: a later
+version). It colours what a grammar cannot tell
 (semantic tokens): which names are macros, and of which kind, which
 functions are the object's own, inherited, the auto object's or the
 driver's, which variables are global, local or parameters. Where

@@ -283,6 +283,20 @@ and what it formats is what `dgdtools format` writes. What it does:
 - **Highlights** of the name under the cursor in the file, a variable,
   a local or a parameter marked where it is read and where it is
   written (declared, assigned, incremented).
+- **Rename** of what one file decides: a local, a parameter (a `catch`
+  variable among them), a private function or global variable, an
+  inherit label, a macro the file defines for itself. Every place it is
+  meant is renamed and no other; the editor first asks the server
+  whether the name under the cursor can be renamed, and is told why
+  not: a function or variable other files may name (rename across
+  files is the next version's), what is inherited, a kfun, a header's
+  or the profile's declaration, a variable `save_object` writes, a
+  file another one includes, a name in code that is not compiled or
+  does not parse. A new name that would hide another, be hidden, or
+  take the place of a function or a macro is refused, naming it. DGD
+  calls no private function by name, so the string of
+  `call_out("fn")` for a private `fn` is no call of it: it is left,
+  and the server says so.
 - **Semantic tokens**: the colours of what only analysis knows, over
   the grammar's. A macro as a macro, one that stands for a type
   (`status`) as a type and one that stands for specifiers or for
@@ -326,8 +340,9 @@ a selection; `CTRL-]` goes to a definition, `K` shows the hover, and
 `CTRL-S` in insert mode the signature of the call being written, and
 `CTRL-X CTRL-O` completes (the server sets `omnifunc`); `gO`
 lists the outline, and `:lua vim.lsp.buf.workspace_symbol()` asks for a
-name to find in the mudlib; `grr` lists the references, and
-`:lua vim.lsp.buf.document_highlight()` highlights the name. The
+name to find in the mudlib; `grr` lists the references,
+`:lua vim.lsp.buf.document_highlight()` highlights the name, and `grn`
+renames it. The
 semantic tokens are shown by themselves (`:Inspect` on a name shows
 them); the standard types are linked to colours already
 (`@lsp.type.macro` to `@constant.macro`, `@lsp.type.parameter` to
@@ -383,9 +398,10 @@ server's fix, and has the file formatted. `TestNeovimDefinition` goes
 to definitions the same way, `TestNeovimHover` reads what `K` and
 `CTRL-S` show, `TestNeovimSymbols` lists the outline and searches
 the mudlib, `TestNeovimCompletion` completes with `CTRL-X CTRL-O`, and
-`TestNeovimReferences` lists references and highlights a local, and
+`TestNeovimReferences` lists references and highlights a local,
 `TestNeovimTokens` reads the semantic tokens Neovim shows, before and
-after an edit.
+after an edit, and `TestNeovimRename` renames a local and a private
+function and is told why a public one is not.
 
 ### Vim
 

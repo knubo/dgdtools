@@ -40,6 +40,12 @@ the linter and formatter for it:
   profile that the search covered your folder only.
 - **Highlights** of the name under the cursor, a variable marked where
   it is read and where it is written.
+- **Rename** (*Rename Symbol*, F2) of what one file decides: a local
+  or a parameter, a private function or variable, an inherit label, a
+  macro the file defines for itself. Where it cannot be renamed, or not
+  to the name typed (the name would hide another or be hidden, a saved
+  variable, a public function, which other files call), the editor
+  says why before anything changes.
 - **Semantic highlighting** over the grammar's: macros (one that stands
   for a type as a type), functions where declared and defined, and in a
   call the object's own, inherited, the auto object's or the driver's,
